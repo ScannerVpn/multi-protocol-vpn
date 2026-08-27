@@ -212,6 +212,22 @@ object SingBox {
     private fun q(s: String?) =
         "\"" + (s ?: "").replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
+    /**
+     * Normalizes a picker/list entry into the image name sing-box actually
+     * matches against: "Telegram", "CHROME.EXE" and
+     * "C:\\Program Files\\Google\\Chrome\\chrome.EXE" all become "telegram.exe"
+     * / "chrome.exe". Windows process names are case-insensitive but the
+     * JSON rule strings are not, so an un-normalized pick silently lands in NO
+     * rule at all (the "only my first app got through" failure).
+     */
+    internal fun normalizeAppName(raw: String): String? {
+        val base = raw.trim().trim('"')
+            .substringAfterLast('\\').substringAfterLast('/').trim()
+        if (base.isEmpty()) return null
+        val lower = base.lowercase()
+        return if (lower.endsWith(".exe")) lower else "$lower.exe"
+    }
+
     /** Process names that must never be routed into the tunnel (loop guard). */
     private val coreProcesses = listOf(
         "MultiVPN.exe", "java.exe", "javaw.exe", "xray.exe",
@@ -253,7 +269,7 @@ object SingBox {
      */
     private fun splitRoute(splitMode: String?, splitApps: List<String>?, tunnelTag: String): String? {
         if (splitMode == null || splitMode == SplitModes.OFF || splitApps.isNullOrEmpty()) return null
-        val wanted = splitApps.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        val wanted = splitApps.mapNotNull(::normalizeAppName).distinct()
         if (wanted.isEmpty()) return null
         val coreJson = "\"process_name\": [${coreProcesses.joinToString(", ") { q(it) }}]"
         return when (splitMode) {
@@ -284,6 +300,24 @@ object SingBox {
     }
 
     /**
+     * Startup-time validation: returns the first route "outbound"/"final"
+     * reference that has no matching outbound tag, or null when the route is
+     * fully resolved. This is exactly what sing-box refuses to boot over —
+     * checking it HERE turns a config bug into an immediate, greppable error
+     * instead of a silent failover that quietly drops the split contract.
+     */
+    internal fun unresolvedOutboundRef(json: String): String? {
+        val declared = Regex("\"tag\"\\s*:\\s*\"([^\"]+)\"")
+            .findAll(json.substringAfter("\"outbounds\"", json))
+            .map { it.groupValues[1] }.toSet()
+        val routeJson = json.substringAfter("\"route\"", "")
+        return Regex("\"(?:final|outbound)\"\\s*:\\s*\"([^\"]+)\"")
+            .findAll(routeJson)
+            .map { it.groupValues[1] }
+            .firstOrNull { it !in declared }
+    }
+
+    /**
      * Builds a sing-box config that routes the full-system TUN into an
      * existing local SOCKS proxy — used for xray (vless/trojan/ss) and for
      * wireproxy (WireGuard/AmneziaWG) in TUN mode. [coreProcess] is the proxy
@@ -311,7 +345,7 @@ object SingBox {
 """.trimIndent()
         val dns = if (dnsPinActive(dnsLeakProtection, splitMode))
             leakSafeDns().replace("__OUTBOUND__", "proxy-out") else ""
-        return """
+        val json = """
 {
   "log": {"level": "warn"},
 $dns  "inbounds": ${tunInbounds()},
@@ -320,6 +354,10 @@ $dns  "inbounds": ${tunInbounds()},
     {"type": "direct", "tag": "direct"}
   ],
 $route}""".trimIndent()
+        unresolvedOutboundRef(json)?.let {
+            throw IllegalStateException("sing-box route references missing outbound '$it'")
+        }
+        return json
     }
 
     /**
@@ -380,11 +418,26 @@ $route}""".trimIndent()
         }
         val dns = if (tun && dnsPinActive(dnsLeakProtection, splitMode))
             leakSafeDns().replace("__OUTBOUND__", "hy2-out") else ""
-        return """
-{
-  "log": {"level": "warn"},
-$dns  "inbounds": $inbounds,
-  "outbounds": [
+        // v3.6.11 regression fix: any TUN session NEEDS the explicit direct
+        // outbound — splitRoute's include/exclude rules AND the dns/private
+        // direct escapes all reference tag "direct". Without this declaration
+        // sing-box refuses to start entirely, the elevated launch silently
+        // died, and connect fell back to a whole-system proxy with NO split
+        // while reporting Connected (reported as Hysteria2 + split blackout).
+        val outbounds = if (tun) {
+            """[
+    {
+      "type": "hysteria2",
+      "tag": "hy2-out",
+      "server": ${q(link.address)},
+      "server_port": ${link.port},
+      "password": ${q(link.secret)}$obfs,
+      "tls": {"enabled": true, "insecure": $insecure, "alpn": ["h3"]$sniLine}
+    },
+    {"type": "direct", "tag": "direct"}
+  ]""".trimIndent()
+        } else {
+            """[
     {
       "type": "hysteria2",
       "tag": "hy2-out",
@@ -393,9 +446,19 @@ $dns  "inbounds": $inbounds,
       "password": ${q(link.secret)}$obfs,
       "tls": {"enabled": true, "insecure": $insecure, "alpn": ["h3"]$sniLine}
     }
-  ],
+  ]""".trimIndent()
+        }
+        val json = """
+{
+  "log": {"level": "warn"},
+$dns  "inbounds": $inbounds,
+  "outbounds": $outbounds,
 $route
 }""".trimIndent()
+        unresolvedOutboundRef(json)?.let {
+            throw IllegalStateException("sing-box route references missing outbound '$it'")
+        }
+        return json
     }
 
     // ------------------------------------------------------------------

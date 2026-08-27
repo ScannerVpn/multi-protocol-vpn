@@ -918,6 +918,19 @@ object VpnService {
                 }
                 return startPlain()
             }
+            // v3.6.11 DIRECT-LEG GATE: include/exclude promises that everyone
+            // OUTSIDE the selection keeps their normal internet. Verify that
+            // promise from this process (always on the splitRoute direct
+            // list); skipping it is how users saw "Telegram online, every
+            // other app offline" behind a green Connected.
+            if (!SingBox.verifyDirectTraffic()) {
+                AppLog.i(
+                    "SingBox",
+                    "${config.protocol}: split session up but the DIRECT leg carries nothing - plain proxy flow instead",
+                )
+                killTunCore()
+                return startPlain()
+            }
             // WinINET coherence: a stale proxy setting from an earlier session
             // must not point browsers into a port this engine does not own.
             Proxy.restoreState()
@@ -1039,6 +1052,21 @@ object VpnService {
                     true,
                     "Connected (system proxy on 127.0.0.1:${WireProxy.HTTP_PORT}) — " +
                         "the per-app component did not start, so routing is not restricted by app.",
+                )
+            }
+            // v3.6.11 DIRECT-LEG GATE (same contract as xray/sing-box).
+            if (!SingBox.verifyDirectTraffic()) {
+                AppLog.e(
+                    "WireProxy",
+                    "tunnel up but the DIRECT leg carries nothing - whole-proxy fallback",
+                )
+                SingBox.kill()
+                killTunCore()
+                Proxy.enable(WireProxy.HTTP_PORT)
+                return VpnResult(
+                    true,
+                    "Connected through system proxy on 127.0.0.1:${WireProxy.HTTP_PORT} for ALL apps — ⚠ " +
+                        "per-app routing was aborted: the non-VPN internet path failed verification.",
                 )
             }
             Proxy.restoreState()
@@ -1269,6 +1297,24 @@ object VpnService {
                     true,
                     "Connected (system proxy on 127.0.0.1:${Xray.HTTP_PORT}) — " +
                         "the per-app component did not start, so routing is not restricted by app.",
+                )
+            }
+            // v3.6.11 DIRECT-LEG GATE (same contract as the sing-box branch):
+            // without a working non-VPN path the include rules blacklist the
+            // whole system except the selected apps — degrade to a verified
+            // whole-proxy session instead of leaving users with half internet.
+            if (!SingBox.verifyDirectTraffic()) {
+                AppLog.e(
+                    "Xray",
+                    "${parsed.protocol}: tunnel up but the DIRECT leg carries nothing - whole-proxy fallback",
+                )
+                SingBox.kill()
+                killTunCore()
+                Proxy.enable(Xray.HTTP_PORT)
+                return VpnResult(
+                    true,
+                    "Connected through system proxy on 127.0.0.1:${Xray.HTTP_PORT} for ALL apps — ⚠ " +
+                        "per-app routing was aborted: the non-VPN internet path failed verification.",
                 )
             }
             Proxy.restoreState()

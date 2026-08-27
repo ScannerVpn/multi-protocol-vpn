@@ -21,6 +21,15 @@ import kotlin.test.assertTrue
  *     list must behave as if no VPN existed — including their DNS — instead
  *     of having their lookups forced into the tunnel (which blackholed them
  *     whenever the tunnel was down while their browsing stayed direct).
+ *
+ * v3.6.11 additions (follow-up report "only Telegram online, every other app
+ * offline" in system-proxy + split):
+ *  4. Every generated TUN config resolves all of its route references — the
+ *     hy2 TUN config used to reference the "direct" outbound WITHOUT ever
+ *     declaring it, so sing-box refused to boot and connect silently fell
+ *     back to a whole-system proxy with NO split.
+ *  5. App picks normalize to the lowercase image names sing-box matches,
+ *     so "Telegram"/"CHROME.EXE" can never land outside their own rule.
  */
 class SplitRoutingTest {
 
@@ -96,7 +105,63 @@ class SplitRoutingTest {
         assertTrue("\"hy2-out\"" in json)
     }
 
-    // ---- 3. DNS pin gating -------------------------------------------------
+    // ---- 4. route-reference resolution (v3.6.11) -------------------------
+
+    @Test
+    fun `every socks-tun config resolves all of its route references`() {
+        listOf<String?>(null, SplitModes.INCLUDE, SplitModes.EXCLUDE).forEach { mode ->
+            assertEquals(
+                null,
+                SingBox.unresolvedOutboundRef(socksTun(mode)),
+                "mode=$mode must not reference an undeclared outbound",
+            )
+        }
+    }
+
+    @Test
+    fun `hy2 tun config declares the direct outbound its split rules need`() {
+        val link = Links.parse("hy2://pw@192.0.2.9:443?insecure=1#t")!!
+        val json = SingBox.buildHysteria2Json(
+            link, tun = true,
+            splitMode = SplitModes.INCLUDE,
+            splitApps = listOf("steam.exe"),
+            dnsLeakProtection = false,
+        )
+        assertTrue(
+            "\"type\": \"direct\", \"tag\": \"direct\"" in json,
+            "rules referencing 'direct' are useless without declaring that outbound",
+        )
+        assertEquals(null, SingBox.unresolvedOutboundRef(json))
+        // ...while the plain proxy-mode hy2 config stays unchanged (no direct).
+        val plain = SingBox.buildHysteria2Json(link, tun = false)
+        assertFalse("\"type\": \"direct\"" in plain)
+    }
+
+    // ---- 5. app-name normalization (v3.6.11) -----------------------------
+
+    @Test
+    fun `app names normalize to lowercase exe image names`() {
+        assertEquals("telegram.exe", SingBox.normalizeAppName("Telegram"))
+        assertEquals("chrome.exe", SingBox.normalizeAppName("CHROME.EXE"))
+        assertEquals(
+            "chrome.exe",
+            SingBox.normalizeAppName("C:\\Program Files\\Google\\Chrome\\chrome.EXE"),
+        )
+        assertEquals("opera.exe", SingBox.normalizeAppName("C:/Apps/opera"))
+        assertEquals(null, SingBox.normalizeAppName("   "))
+    }
+
+    @Test
+    fun `mixed-case picks land in the rules as normalized exe names`() {
+        val json = socksTun(SplitModes.INCLUDE, apps = listOf("Telegram", "Chrome"))
+        assertTrue("\"telegram.exe\"" in json && "\"chrome.exe\"" in json)
+        assertFalse(
+            "\"Telegram\"" in json,
+            "sing-box rule strings are case-sensitive - raw picks would match nothing",
+        )
+    }
+
+    // ---- 6. previously-shipped contracts ----------------------------------
 
     @Test
     fun `dns leak pin applies when there is no include split`() {
