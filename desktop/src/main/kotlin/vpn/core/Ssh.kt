@@ -16,6 +16,12 @@ data class ProvisionResult(
     val p12Path: String,
     val caPath: String,
     val serverAddr: String,
+    /**
+     * The RANDOM per-install passphrase the setup script exported the .p12
+     * with. Never a constant: a publicly known export password protects
+     * nothing once the .p12 travels over SFTP / gets shared.
+     */
+    val p12Pass: String? = null,
 )
 
 data class WgProvisionResult(
@@ -33,8 +39,31 @@ data class OvpnProvisionResult(
 /** SSH operations via sshj: setup script execution with live output, SFTP downloads. */
 object SshService {
 
-    /** Must match CLIENT_P12_PASS in setup-ikev2.sh. */
+    /**
+     * Legacy fixed P12 export password — still accepted ONLY as the manual-run
+     * default of setup-ikev2.sh so servers provisioned by older app versions
+     * keep connecting. Fresh provisions now receive a random passphrase from
+     * [generateP12Password], passed to the server script as its 2nd argument.
+     */
     const val CLIENT_P12_PASSWORD = "ikev2"
+
+    /** Alphabet without look-alikes (0/O, 1/l/I) for the generated passphrase. */
+    private const val PASS_ALPHABET =
+        "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+
+    /**
+     * Cryptographically random per-install export passphrase (24 chars from a
+     * 56-char alphabet ~ 139 bits). Generated fresh for EVERY provisioning
+     * run, sent to the setup script as an argument, and returned in
+     * [ProvisionResult.p12Pass] so it is stored DPAPI-protected next to the
+     * config.
+     */
+    fun generateP12Password(length: Int = 24): String {
+        val rnd = java.security.SecureRandom()
+        return buildString(length) {
+            repeat(length) { append(PASS_ALPHABET[rnd.nextInt(PASS_ALPHABET.length)]) }
+        }
+    }
 
     private fun connect(server: ServerConfig, timeoutMs: Int = 10_000): SSHClient {
         val hasPassword = !server.password.isNullOrBlank()
@@ -158,14 +187,17 @@ object SshService {
         localDir: File,
         onLine: (String) -> Unit = {},
     ): ProvisionResult {
-        val script = SshService::class.java.classLoader
-            ?.getResourceAsStream("setup-ikev2.sh")
-            ?.readBytes()?.decodeToString()
-            ?: throw IllegalStateException("setup-ikev2.sh resource missing")
+        val script = loadScript("setup-ikev2.sh")
+
+        // A different random export password every time; the server uses it
+        // for `openssl pkcs12 -export` and we store the same value (DPAPI-
+        // protected) in the generated VpnConfig.
+        val p12Pass = generateP12Password()
 
         val prefix = if (server.username == "root") "" else "sudo "
         val ipQuoted = shQuote(server.ip)
-        val command = "${prefix}bash -s -- $ipQuoted <<'__VPN_SETUP_SCRIPT__'\n" +
+        val passQuoted = shQuote(p12Pass)
+        val command = "${prefix}bash -s -- $ipQuoted $passQuoted <<'__VPN_SETUP_SCRIPT__'\n" +
             script + "\n__VPN_SETUP_SCRIPT__"
 
         runCommandStreaming(server, command, timeoutSec = 600, onLine = onLine)
@@ -178,7 +210,7 @@ object SshService {
                     val ca = File(localDir, "ca.crt")
                     sftp.get("/root/ikev2-client/client.p12", FileSystemFile(p12))
                     sftp.get("/root/ikev2-client/ca.crt", FileSystemFile(ca))
-                    ProvisionResult(p12.absolutePath, ca.absolutePath, server.ip)
+                    ProvisionResult(p12.absolutePath, ca.absolutePath, server.ip, p12Pass)
                 } finally {
                     runCatching { sftp.close() }
                 }

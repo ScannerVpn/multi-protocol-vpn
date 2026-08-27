@@ -1,6 +1,9 @@
 #!/bin/bash
 # IKEv2 VPN Server Setup Script (Windows-client compatible)
-# Usage: sudo bash setup-ikev2.sh [your-domain-or-ip]
+# Usage: sudo bash setup-ikev2.sh [your-domain-or-ip] [p12-export-pass]
+#   p12-export-pass: random passphrase the MultiVPN app generates per install;
+#     manual runs without it fall back to the historical fixed "ikev2"
+#     (accepted so servers set up by older app versions keep working).
 # Supports: Ubuntu 20.04+, Debian 10+
 
 set -e
@@ -17,9 +20,11 @@ CLIENT_CN="vpnclient"
 IKE_PROPOSAL="aes256-sha256-ecp384,aes256-sha256-ecp256,aes128-sha256-ecp256,aes256-sha256-modp2048,aes128-sha256-modp2048,aes256-sha1-modp2048,aes128-sha1-modp2048,aes256-sha256-modp1024,3des-sha1-modp1024"
 ESP_PROPOSAL="aes256-sha256,aes128-sha256,aes256-sha1,aes128-sha1"
 
-# Windows requires an export password to import the PFX, so export with a
-# fixed password. Keep in sync with the client app's P12 password constant.
-CLIENT_P12_PASS="ikev2"
+# Windows requires an export password to import the PFX. The MultiVPN app
+# passes a RANDOM per-install passphrase as $2 (see SshService.generateP12Password);
+# it is only used for `openssl pkcs12 -export` on THIS box and stored DPAPI-
+# encrypted in the client app. Manual runs default to the legacy fixed value.
+CLIENT_P12_PASS="${2:-ikev2}"
 
 export DEBIAN_FRONTEND=noninteractive
 
