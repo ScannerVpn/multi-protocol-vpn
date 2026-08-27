@@ -106,7 +106,6 @@ object SplitModes {
 @Serializable
 data class AppSettings(
     var autoConnect: Boolean = false,
-    var killSwitch: Boolean = false,
     var dnsLeakProtection: Boolean = true,
     /** Legacy pre-3.2 toggle; kept for migration (see Storage.loadSettings). */
     var tunMode: Boolean = false,

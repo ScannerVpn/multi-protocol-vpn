@@ -3,9 +3,6 @@
 package vpn
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -13,28 +10,26 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
@@ -111,7 +106,6 @@ fun main() {
         Thread {
             runCatching { vpn.core.Proxy.restoreState() }
             runCatching { vpn.core.VpnService.killAllCores() }
-            runCatching { vpn.core.VpnService.disarmKillSwitchDetached() }
             runCatching { vpn.core.VpnService.killElevatedCoresDetached() }
             runCatching { vpn.core.SingleInstance.reapLauncherParent() }
         },
@@ -129,10 +123,10 @@ fun main() {
                 AppState.shutdown()
                 exitApplication()
             },
-            title = "MultiVPN",
-            state = rememberWindowState(width = 460.dp, height = 860.dp),
+            title = "MultiVPN — Multi-Protocol Client",
+            state = rememberWindowState(width = 1280.dp, height = 800.dp),
         ) {
-            window.minimumSize = Dimension(420, 640)
+            window.minimumSize = Dimension(980, 640)
             // When a second monitor is attached, open the window there (handy
             // while testing on a separate display).
             runCatching {
@@ -185,79 +179,130 @@ fun App() {
                     }
                 }
             }
-            BottomNav(tab) { tab = it }
         }
+        Sidebar(tab, onSelect = { tab = it })
     }
 }
 
 @Composable
-private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
+private fun Sidebar(selected: Int, onSelect: (Int) -> Unit) {
     val items = listOf(
-        NavItem("Connect", Icons.Filled.Bolt),
+        NavItem("Dashboard", Icons.Filled.Home),
         NavItem("Servers", Icons.Filled.Dns),
-        NavItem("Configs", Icons.Filled.Layers),
+        NavItem("Tunnels", Icons.Filled.Layers),
         NavItem("Settings", Icons.Filled.Tune),
     )
-    val indicator by animateFloatAsState(
-        targetValue = selected.toFloat(),
-        spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
-        label = "navIndicator",
-    )
-
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 18.dp, vertical = 10.dp),
+    Surface(
+        color = Color(0xFF0B1120),
+        border = BorderStroke(1.dp, C.Border),
+        modifier = Modifier.fillMaxHeight().width(212.dp),
     ) {
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = Color(0xF2101428),
-            border = BorderStroke(1.dp, C.Border),
-            shadowElevation = 12.dp,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            BoxWithConstraints(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
-                val itemW = maxWidth / items.size
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 20.dp).fillMaxHeight()) {
+            // Logo
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 8.dp)) {
                 Box(
-                    Modifier
-                        .offset(x = itemW * indicator)
-                        .width(itemW)
-                        .height(52.dp)
-                        .padding(6.dp)
-                        .clip(RoundedCornerShape(16.dp))
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(11.dp))
+                        .background(Brush.linearGradient(listOf(C.Accent, C.Accent2))),
+                ) {
+                    Text("M", color = C.OnAccent, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                }
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Multi", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = C.TextPrimary)
+                        Text("VPN", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = C.Accent)
+                    }
+                    Text(
+                        "SECURE TUNNEL",
+                        fontSize = 8.sp,
+                        letterSpacing = 1.6.sp,
+                        color = C.TextFaint,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+            Spacer(Modifier.height(26.dp))
+            Text(
+                "MENU",
+                fontSize = 9.sp,
+                letterSpacing = 1.8.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = C.TextFaint,
+                modifier = Modifier.padding(start = 12.dp, bottom = 10.dp),
+            )
+            items.forEachIndexed { i, item ->
+                val isSelected = i == selected
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
                         .background(
-                            Brush.linearGradient(
-                                listOf(C.Accent.copy(alpha = 0.25f), C.Accent2.copy(alpha = 0.22f)),
-                            ),
-                        ),
-                )
-                Row(Modifier.fillMaxWidth()) {
-                    items.forEachIndexed { i, item ->
-                        val isSelected = i == selected
-                        val tint by animateColorAsState(
-                            if (isSelected) C.Accent2 else C.TextFaint,
-                            tween(200),
-                            label = "navTint$i",
+                            when {
+                                isSelected -> Brush.linearGradient(
+                                    listOf(C.Accent.copy(alpha = 0.16f), C.Accent.copy(alpha = 0.04f)),
+                                )
+                                else -> Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+                            },
                         )
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(52.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .clickable { onSelect(i) },
-                        ) {
-                            Icon(item.icon, item.label, tint = tint, modifier = Modifier.size(21.dp))
-                            Spacer(Modifier.height(3.dp))
-                            Text(
-                                item.label,
-                                fontSize = 9.5.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) C.TextPrimary else C.TextFaint,
+                        .clickable { onSelect(i) }
+                        .padding(horizontal = 12.dp, vertical = 11.dp),
+                ) {
+                    Box(Modifier.width(3.dp)) {
+                        if (isSelected) {
+                            Box(
+                                Modifier
+                                    .width(3.dp)
+                                    .height(18.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(C.Accent),
                             )
                         }
                     }
+                    Spacer(Modifier.width(9.dp))
+                    Icon(
+                        item.icon,
+                        item.label,
+                        tint = if (isSelected) C.Accent else C.TextSecondary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        item.label,
+                        fontSize = 13.sp,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                        color = if (isSelected) C.TextPrimary else C.TextSecondary,
+                    )
+                }
+                Spacer(Modifier.height(3.dp))
+            }
+            Spacer(Modifier.weight(1f))
+            // Footer: app identity + live status dot
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = C.SurfaceLow,
+                border = BorderStroke(1.dp, C.Border),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val (dotColor, label) = when (AppState.vpnStatus) {
+                            vpn.core.VpnStatus.CONNECTED -> C.Success to "Protected"
+                            vpn.core.VpnStatus.CONNECTING -> C.Warning to "Connecting"
+                            vpn.core.VpnStatus.DISCONNECTING -> C.Warning to "Stopping"
+                            vpn.core.VpnStatus.ERROR -> C.Error to "Error"
+                            vpn.core.VpnStatus.DISCONNECTED -> C.TextFaint to "Offline"
+                        }
+                        Box(Modifier.size(7.dp).clip(CircleShape).background(dotColor))
+                        Spacer(Modifier.width(7.dp))
+                        Text(label, fontSize = 11.sp, color = C.TextSecondary, fontWeight = FontWeight.Medium)
+                    }
+                    Spacer(Modifier.height(7.dp))
+                    Text("Multi-Protocol Client", fontSize = 9.5.sp, color = C.TextFaint)
+                    Text("v3.6.5 · x86_64", fontSize = 9.5.sp, color = C.TextFaint)
                 }
             }
         }

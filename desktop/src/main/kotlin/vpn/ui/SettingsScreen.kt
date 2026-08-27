@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -54,7 +56,7 @@ fun SettingsScreen() {
     var cleanResult by remember { mutableStateOf<String?>(null) }
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
+        Modifier.fillMaxSize().widthIn(max = 880.dp).wrapContentWidth(Alignment.CenterHorizontally).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
     ) {
         Spacer(Modifier.height(20.dp))
         ScreenHeader("Settings", "App behaviour and maintenance")
@@ -68,20 +70,6 @@ fun SettingsScreen() {
                 AppState.settings.autoConnect,
             ) {
                 AppState.settings = AppState.settings.copy(autoConnect = it)
-                Storage.saveSettings(AppState.settings)
-            }
-            Spacer(Modifier.height(4.dp))
-            ToggleRow("Kill switch", "Firewall default-deny: block ALL traffic if the VPN drops (needs admin, applies on next connect; not for IKEv2)", AppState.settings.killSwitch) {
-                val newOn = it
-                if (!newOn && AppState.settings.killSwitch && vpn.core.KillSwitch.isActive()) {
-                    // Turning the switch OFF while armed must disarm NOW,
-                    // otherwise the machine stays default-deny until the
-                    // next disconnect.
-                    AppState.scope.launch {
-                        runCatching { vpn.core.KillSwitch.disarm() }
-                    }
-                }
-                AppState.settings = AppState.settings.copy(killSwitch = newOn)
                 Storage.saveSettings(AppState.settings)
             }
             Spacer(Modifier.height(4.dp))

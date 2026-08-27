@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -74,7 +76,9 @@ fun ConfigsScreen() {
     val isEmpty = AppState.configs.isEmpty() &&
         AppState.servers.isEmpty() && AppState.subscriptions.isEmpty()
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
+    Column(
+        Modifier.fillMaxSize().widthIn(max = 880.dp).wrapContentWidth(Alignment.CenterHorizontally).padding(horizontal = 20.dp),
+    ) {
         Spacer(Modifier.height(20.dp))
         ScreenHeader(
             title = "Configs",

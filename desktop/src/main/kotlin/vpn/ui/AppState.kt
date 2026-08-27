@@ -20,7 +20,7 @@ import vpn.core.AppLog
 import vpn.core.AppSettings
 import vpn.core.Awg
 import vpn.core.InstalledApp
-import vpn.core.KillSwitch
+import vpn.core.KillSwitchCleanup
 import vpn.core.Links
 import vpn.core.Proxy
 import vpn.core.ProxyPorts
@@ -68,6 +68,9 @@ object AppState {
     var activeConfigId by mutableStateOf<String?>(null)
     var vpnStatus by mutableStateOf(VpnStatus.DISCONNECTED)
     var lastError by mutableStateOf("")
+
+    /** Epoch ms when the current session reached CONNECTED (0 = never). */
+    var sessionStartedAt by mutableStateOf(0L)
 
     /** configId → latency ms (null while measuring, absent = never measured). */
     var latency by mutableStateOf<Map<String, Int>>(emptyMap())
@@ -142,10 +145,10 @@ object AppState {
         }
         AppLog.i("App", "Loaded ${servers.size} servers, ${configs.size} configs" +
             if (imported > 0) " (imported $imported from old Flutter app)" else "")
-        // Crash recovery BEFORE anything else: a previous run that died while
-        // the kill switch was armed left the firewall default-deny — the user
-        // currently has no internet. Fire a detached elevated disarm.
-        runCatching { KillSwitch.recoverIfNeeded() }
+        // ONE-TIME cleanup of the RETIRED kill switch (removed in 3.6.5):
+        // a machine that ran an older build may still be firewall
+        // default-deny with no internet. Fire a detached elevated cleanup.
+        runCatching { KillSwitchCleanup.cleanupIfNeeded() }
         startupHeal()
         refreshVpnStatus()
         // Auto-connect on launch: after status/heal so it sees clean state.
@@ -977,7 +980,6 @@ object AppState {
         connectJob?.cancel()
         pollJob?.cancel()
         runCatching { VpnService.killAllCores() }
-        runCatching { VpnService.disarmKillSwitchDetached() }
         runCatching { VpnService.killElevatedCoresDetached() }
     }
 
@@ -1021,6 +1023,7 @@ object AppState {
                 if (res.ok) {
                     AppLog.i("VPN", "Connected to ${cfg.serverIp}")
                     vpnStatus = VpnStatus.CONNECTED
+                    sessionStartedAt = System.currentTimeMillis()
                     startPolling()
                 } else {
                     AppLog.e("VPN", "Connect failed: ${res.message}")

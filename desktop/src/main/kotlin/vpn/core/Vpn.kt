@@ -631,20 +631,6 @@ object VpnService {
             }
         }
         connectionActive = result.ok
-
-        // Kill switch: arm only after a verified successful connect, so a
-        // failing attempt never locks the machine out of the internet.
-        if (result.ok && startSettings.killSwitch && KillSwitch.appliesTo(config.protocol)) {
-            val armed = KillSwitch.arm()
-            if (!armed.ok) {
-                AppLog.e("KillSwitch", "could not arm (${armed.message}) — connected WITHOUT kill switch")
-                return@withContext VpnResult(
-                    true,
-                    result.message + "\n⚠ Kill switch could not be armed (" +
-                        (if (armed.message.contains("declined", true)) "UAC declined" else "error") + ").",
-                )
-            }
-        }
         result
     }
 
@@ -665,11 +651,6 @@ object VpnService {
     }
 
     suspend fun disconnect(config: VpnConfig) = withContext(Dispatchers.IO) {
-        // Kill switch first: while cores are still up there is no window
-        // where traffic leaks in the clear between teardown steps.
-        if (Storage.loadSettings().killSwitch && KillSwitch.isActive() && KillSwitch.appliesTo(config.protocol)) {
-            runCatching { KillSwitch.disarm() }
-        }
         // Tear down what THIS connect launched, not what the settings say
         // now: the user may have toggled TUN/split mode mid-session.
         val tunMode = sessionTunMode ?: Storage.loadSettings().useTun()
@@ -730,7 +711,6 @@ object VpnService {
         runCatching { SingBox.kill() }
         runCatching { WireProxy.kill() }
         runCatching { Proxy.restoreState() }
-        if (KillSwitch.isActive()) runCatching { KillSwitch.disarm() }
         if (!isProxyMode(config)) {
             // IKEv2/OpenVPN: drop a half-open dial.
             runCatching {
@@ -774,15 +754,6 @@ object VpnService {
                 f.isFile && f.name.startsWith("multivpn_") && f.lastModified() < cutoff
             }?.forEach { runCatching { it.delete() } }
         }
-    }
-
-    /**
-     * Fire-and-forget disarm of the kill switch for exit paths that cannot
-     * wait on a UAC prompt (window close, shutdown hook). Without this a
-     * closed app would leave the machine default-deny with no way back in.
-     */
-    fun disarmKillSwitchDetached() {
-        if (KillSwitch.isActive()) KillSwitch.disarmDetached()
     }
 
     /**

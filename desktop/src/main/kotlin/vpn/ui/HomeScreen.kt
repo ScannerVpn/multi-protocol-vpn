@@ -26,6 +26,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -35,6 +39,7 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Power
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Tune
@@ -63,12 +68,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import vpn.core.InstalledApp
 import vpn.core.Links
@@ -92,43 +99,13 @@ fun HomeScreen() {
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = 28.dp, vertical = 24.dp),
     ) {
-        Spacer(Modifier.height(18.dp))
-        HomeHeader()
-        Spacer(Modifier.height(18.dp))
-
-        StaggerIn(0) { ConfigSelectorCard(config = state.activeConfig, onClick = { showPicker = true }) }
-        Spacer(Modifier.height(22.dp))
-
-        ConnectOrb(
-            status = state.vpnStatus,
-            onToggle = {
-                when (state.vpnStatus) {
-                    VpnStatus.CONNECTED -> state.disconnectActive()
-                    VpnStatus.DISCONNECTED, VpnStatus.ERROR -> state.connectActive()
-                    // A stuck handshake must be escapable: tapping the orb
-                    // while connecting aborts the attempt.
-                    VpnStatus.CONNECTING -> state.cancelConnect()
-                    VpnStatus.DISCONNECTING -> {}
-                }
-            },
-            modifier = Modifier.align(Alignment.CenterHorizontally),
+        DashboardHeader(
+            onOpenPicker = { showPicker = true },
+            onOpenMode = { showModeSheet = true },
+            onOpenApps = { showSplitPicker = true },
         )
-        Spacer(Modifier.height(14.dp))
-        StatusLabel(state.vpnStatus, modifier = Modifier.align(Alignment.CenterHorizontally))
-
-        if (state.vpnStatus == VpnStatus.CONNECTING) {
-            Spacer(Modifier.height(14.dp))
-            AppButton(
-                "Cancel connecting",
-                { state.cancelConnect() },
-                icon = Icons.Filled.Close,
-                danger = true,
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-                compact = true,
-            )
-        }
 
         if (state.lastError.isNotEmpty()) {
             Spacer(Modifier.height(16.dp))
@@ -139,11 +116,95 @@ fun HomeScreen() {
                 onDismiss = { state.lastError = "" },
             )
         }
-        Spacer(Modifier.height(16.dp))
-        StaggerIn(1) { ModeSummaryCard(onOpen = { showModeSheet = true }) }
-        Spacer(Modifier.height(14.dp))
-        StaggerIn(2) { DetailsCard(state) }
-        Spacer(Modifier.height(24.dp))
+
+        Spacer(Modifier.height(20.dp))
+
+        // Hero row: connection panel + stats/details column.
+        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+            ConnectionCard(
+                status = state.vpnStatus,
+                config = state.activeConfig,
+                onToggle = {
+                    when (state.vpnStatus) {
+                        VpnStatus.CONNECTED -> state.disconnectActive()
+                        VpnStatus.DISCONNECTED, VpnStatus.ERROR -> state.connectActive()
+                        // A stuck handshake must be escapable: tapping the orb
+                        // while connecting aborts the attempt.
+                        VpnStatus.CONNECTING -> state.cancelConnect()
+                        VpnStatus.DISCONNECTING -> {}
+                    }
+                },
+                onPickConfig = { showPicker = true },
+                modifier = Modifier.width(392.dp).fillMaxHeight(),
+            )
+            Spacer(Modifier.width(18.dp))
+            Column(Modifier.weight(1f).fillMaxHeight()) {
+                val cfg = state.activeConfig
+                val latency = cfg?.let { state.latency[it.id] }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    StatCard(
+                        "Server",
+                        cfg?.serverIp ?: "—",
+                        fillFraction = 0.7f,
+                        fillBrush = Brush.linearGradient(listOf(C.AccentDim, C.Accent)),
+                        modifier = Modifier.weight(1f),
+                    )
+                    StatCard(
+                        "Protocol",
+                        cfg?.let { Links.label(it.protocol, it.awgVersion) } ?: "—",
+                        fillFraction = 0.5f,
+                        fillBrush = Brush.linearGradient(listOf(C.Accent2.copy(alpha = 0.5f), C.Accent2)),
+                        modifier = Modifier.weight(1f),
+                    )
+                    StatCard(
+                        "Latency",
+                        latency?.let { "$it ms" } ?: "—",
+                        fillFraction = when {
+                            latency == null -> 0.08f
+                            latency < 80 -> 0.85f
+                            latency < 200 -> 0.55f
+                            else -> 0.3f
+                        },
+                        fillBrush = Brush.linearGradient(
+                            listOf(
+                                (when {
+                                    latency == null -> C.TextFaint
+                                    latency < 80 -> C.Success
+                                    latency < 200 -> C.Warning
+                                    else -> C.Error
+                                }).copy(alpha = 0.5f),
+                                when {
+                                    latency == null -> C.TextFaint
+                                    latency < 80 -> C.Success
+                                    latency < 200 -> C.Warning
+                                    else -> C.Error
+                                },
+                            ),
+                        ),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+                DetailsCard(state)
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+        Text(
+            "CONFIGS",
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 1.8.sp,
+            color = C.TextFaint,
+        )
+        Spacer(Modifier.height(10.dp))
+        ConfigStrip()
+
+        Spacer(Modifier.height(20.dp))
+        ModeSummaryCard(onOpen = { showModeSheet = true })
+
+        Spacer(Modifier.height(20.dp))
+        DashboardFooter()
     }
 
     if (showPicker) ConfigPickerDialog(onDismiss = { showPicker = false })
@@ -161,110 +222,135 @@ fun HomeScreen() {
 }
 
 @Composable
-private fun HomeHeader() {
+private fun DashboardHeader(
+    onOpenPicker: () -> Unit,
+    onOpenMode: () -> Unit,
+    onOpenApps: () -> Unit,
+) {
     val status = AppState.vpnStatus
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(13.dp))
-                    .background(Brush.linearGradient(listOf(C.Accent, C.Accent2))),
-            ) {
-                Icon(Icons.Filled.Shield, null, tint = C.OnAccent, modifier = Modifier.size(20.dp))
-            }
-            Spacer(Modifier.width(11.dp))
-            Text("MultiVPN", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = C.TextPrimary)
-        }
-        val (color, bg, label) = when (status) {
-            VpnStatus.CONNECTED -> Triple(C.Success, C.SuccessDim, "Connected")
-            VpnStatus.CONNECTING -> Triple(C.Warning, C.WarningDim, "Connecting")
-            VpnStatus.DISCONNECTING -> Triple(C.Warning, C.WarningDim, "Stopping")
-            VpnStatus.ERROR -> Triple(C.Error, C.ErrorDim, "Error")
-            VpnStatus.DISCONNECTED -> Triple(C.TextSecondary, C.Glass, "Offline")
-        }
-        StatusDot(label, color, bg)
-    }
-}
-
-/** Status pill with a live dot — pulses while a connection is being set up. */
-@Composable
-private fun StatusDot(label: String, color: Color, bg: Color) {
-    val transition = rememberInfiniteTransition(label = "dot")
-    val blink by transition.animateFloat(
-        initialValue = 0.35f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Reverse),
-        label = "blink",
-    )
-    Surface(shape = RoundedCornerShape(50), color = bg) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-        ) {
-            Box(
-                Modifier
-                    .size(7.dp)
-                    .clip(CircleShape)
-                    .background(color.copy(alpha = blink)),
+    val cfg = AppState.activeConfig
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.weight(1f)) {
+            Text("Dashboard", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = C.TextPrimary)
+            Spacer(Modifier.height(3.dp))
+            Text(
+                when (status) {
+                    VpnStatus.CONNECTED ->
+                        "Connected via ${cfg?.let { Links.label(it.protocol, it.awgVersion) } ?: "—"}" +
+                            " · ${cfg?.serverIp ?: "—"} · your traffic is protected"
+                    VpnStatus.CONNECTING -> "Establishing secure tunnel…"
+                    VpnStatus.DISCONNECTING -> "Closing connection…"
+                    VpnStatus.ERROR -> "Connection failed — details below"
+                    VpnStatus.DISCONNECTED ->
+                        "Not connected — pick a config, then press the power button"
+                },
+                fontSize = 12.sp,
+                color = C.TextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.width(6.dp))
-            Text(label, color = color, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
         }
+        Spacer(Modifier.width(12.dp))
+        HeaderChip(
+            icon = Icons.Filled.Public,
+            text = cfg?.name ?: "Choose config",
+            highlight = cfg != null,
+            onClick = onOpenPicker,
+        )
+        Spacer(Modifier.width(10.dp))
+        HeaderChip(icon = Icons.Filled.Tune, text = "Mode", onClick = onOpenMode)
+        Spacer(Modifier.width(10.dp))
+        HeaderChip(
+            icon = Icons.Filled.Apps,
+            text = "Apps (${AppState.settings.splitApps.size})",
+            highlight = AppState.settings.splitMode != SplitModes.OFF,
+            onClick = onOpenApps,
+        )
     }
 }
 
 @Composable
-private fun ConfigSelectorCard(config: VpnConfig?, onClick: () -> Unit) {
-    GlassCard(onClick = onClick) {
+private fun HeaderChip(
+    icon: ImageVector,
+    text: String,
+    highlight: Boolean = false,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(10.dp),
+        color = if (highlight) C.Accent.copy(alpha = 0.12f) else C.Surface,
+        border = BorderStroke(1.dp, if (highlight) C.Accent.copy(alpha = 0.55f) else C.Border),
+    ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                IconTile(
-                    config?.let { protocolIcon(it.protocol) } ?: Icons.Filled.Public,
-                    size = 40,
-                    gradient = config != null,
-                )
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        config?.name ?: "No config selected",
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.5.sp,
-                        color = C.TextPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        config?.let { "${it.serverIp}  ·  ${Links.label(it.protocol, it.awgVersion)}" }
-                            ?: "Add a server, then run Setup",
-                        fontSize = 11.5.sp,
-                        color = C.TextSecondary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            config?.let { LatencyPill(AppState.latency[it.id], false, it.id in AppState.pinging) }
-            Spacer(Modifier.width(4.dp))
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = C.TextFaint)
+            Icon(icon, null, tint = if (highlight) C.Accent else C.TextSecondary, modifier = Modifier.size(15.dp))
+            Spacer(Modifier.width(7.dp))
+            Text(
+                text,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = if (highlight) C.TextPrimary else C.TextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 190.dp),
+            )
         }
     }
 }
 
 @Composable
-private fun ConnectOrb(status: VpnStatus, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+private fun ConnectionCard(
+    status: VpnStatus,
+    config: VpnConfig?,
+    onToggle: () -> Unit,
+    onPickConfig: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    GlassCard(modifier = modifier) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.fillMaxSize().padding(horizontal = 22.dp, vertical = 22.dp),
+        ) {
+            ConnectionRing(status = status, onToggle = onToggle)
+            Spacer(Modifier.height(14.dp))
+            val (word, wordColor) = when (status) {
+                VpnStatus.CONNECTED -> "SECURED" to C.Success
+                VpnStatus.CONNECTING -> "CONNECTING…" to C.Warning
+                VpnStatus.DISCONNECTING -> "CLOSING…" to C.Warning
+                VpnStatus.ERROR -> "CONNECTION FAILED" to C.Error
+                VpnStatus.DISCONNECTED -> "OFFLINE" to C.TextSecondary
+            }
+            Text(word, color = wordColor, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
+            Spacer(Modifier.height(5.dp))
+            if (status == VpnStatus.CONNECTED && AppState.sessionStartedAt > 0L) {
+                SessionTimer(startedAt = AppState.sessionStartedAt)
+            } else {
+                Text(
+                    when (status) {
+                        VpnStatus.CONNECTING -> "tap to cancel"
+                        VpnStatus.DISCONNECTING -> "tearing down the tunnel"
+                        VpnStatus.ERROR -> "see the error card for details"
+                        else -> "tap the power button to connect"
+                    },
+                    fontSize = 11.sp,
+                    color = C.TextFaint,
+                )
+            }
+            Spacer(Modifier.height(16.dp))
+            LocationRow(config = config, onPick = onPickConfig, modifier = Modifier.weight(1f, fill = false))
+        }
+    }
+}
+
+/** Big power ring: idle hairline, breathing halo when secured, arc while busy. */
+@Composable
+private fun ConnectionRing(status: VpnStatus, onToggle: () -> Unit) {
     val connected = status == VpnStatus.CONNECTED
     val busy = status == VpnStatus.CONNECTING || status == VpnStatus.DISCONNECTING
-    val transition = rememberInfiniteTransition(label = "orb")
+    val transition = rememberInfiniteTransition(label = "ring")
     val pulse by transition.animateFloat(
         initialValue = 0.5f,
         targetValue = 1f,
@@ -278,9 +364,7 @@ private fun ConnectOrb(status: VpnStatus, onToggle: () -> Unit, modifier: Modifi
         label = "sweep",
     )
 
-    Box(contentAlignment = Alignment.Center, modifier = modifier.size(228.dp)) {
-        // Outer ring: idle = hairline, connected = breathing halo,
-        // busy = rotating gradient arc on a dim track.
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(186.dp)) {
         when {
             busy -> {
                 Box(Modifier.fillMaxSize().border(3.dp, C.Border, CircleShape))
@@ -290,7 +374,7 @@ private fun ConnectOrb(status: VpnStatus, onToggle: () -> Unit, modifier: Modifi
                         startAngle = -90f,
                         sweepAngle = 110f,
                         useCenter = false,
-                        style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round),
+                        style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round),
                     )
                 }
             }
@@ -302,7 +386,7 @@ private fun ConnectOrb(status: VpnStatus, onToggle: () -> Unit, modifier: Modifi
                         .background(
                             Brush.radialGradient(
                                 listOf(
-                                    C.Accent2.copy(alpha = 0.05f + 0.10f * pulse),
+                                    C.Accent.copy(alpha = 0.05f + 0.12f * pulse),
                                     Color.Transparent,
                                 ),
                             ),
@@ -311,16 +395,16 @@ private fun ConnectOrb(status: VpnStatus, onToggle: () -> Unit, modifier: Modifi
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .border(2.dp, C.Accent2.copy(alpha = 0.25f + 0.45f * pulse), CircleShape),
+                        .border(2.5.dp, C.Accent.copy(alpha = 0.25f + 0.5f * pulse), CircleShape),
                 )
             }
-            else -> Box(Modifier.fillMaxSize().border(1.dp, C.Border, CircleShape))
+            else -> Box(Modifier.fillMaxSize().border(1.dp, C.BorderStrong, CircleShape))
         }
 
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(168.dp)
+                .size(140.dp)
                 .clip(CircleShape)
                 .background(
                     if (connected || busy) {
@@ -331,56 +415,247 @@ private fun ConnectOrb(status: VpnStatus, onToggle: () -> Unit, modifier: Modifi
                 )
                 .border(
                     width = if (connected || busy) 0.dp else 1.dp,
-                    color = if (connected || busy) Color.Transparent else C.BorderStrong,
+                    color = if (connected || busy) Color.Transparent else C.Border,
                     shape = CircleShape,
                 )
                 .clickable { onToggle() },
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                if (status == VpnStatus.CONNECTING) Icons.Filled.Close else Icons.Filled.Power,
+                null,
+                tint = if (connected || busy) C.OnAccent else C.Accent,
+                modifier = Modifier.size(42.dp),
+            )
+        }
+    }
+}
+
+/** Live session clock (monospace), ticking once per second. */
+@Composable
+private fun SessionTimer(startedAt: Long) {
+    var now by remember(startedAt) { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(startedAt) {
+        while (true) {
+            delay(1000)
+            now = System.currentTimeMillis()
+        }
+    }
+    val total = ((now - startedAt) / 1000L).coerceAtLeast(0L)
+    Text(
+        "%02d:%02d:%02d".format(total / 3600, total / 60 % 60, total % 60),
+        fontFamily = FontFamily.Monospace,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = C.TextPrimary,
+    )
+}
+
+@Composable
+private fun LocationRow(config: VpnConfig?, onPick: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        onClick = onPick,
+        shape = RoundedCornerShape(12.dp),
+        color = C.SurfaceLow,
+        border = BorderStroke(1.dp, C.Border),
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 12.dp),
+        ) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(
+                        if (config != null) {
+                            Brush.linearGradient(listOf(C.AccentDim, C.Accent))
+                        } else {
+                            Brush.linearGradient(listOf(C.SurfaceHigh, C.SurfaceHigh))
+                        },
+                    ),
+            ) {
                 Icon(
-                    when {
-                        status == VpnStatus.CONNECTING -> Icons.Filled.Close
-                        connected -> Icons.Filled.Shield
-                        else -> Icons.Filled.Bolt
-                    },
+                    config?.let { protocolIcon(it.protocol) } ?: Icons.Filled.Public,
                     null,
-                    tint = if (connected || busy) C.OnAccent else C.Accent2,
-                    modifier = Modifier.size(36.dp),
+                    tint = if (config != null) C.OnAccent else C.TextFaint,
+                    modifier = Modifier.size(18.dp),
                 )
-                Spacer(Modifier.height(5.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
                 Text(
-                    when {
-                        status == VpnStatus.CONNECTING -> "Cancel"
-                        status == VpnStatus.DISCONNECTING -> "Stopping…"
-                        connected -> "Disconnect"
-                        else -> "Connect"
-                    },
-                    color = if (connected || busy) C.OnAccent else C.TextPrimary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
+                    config?.name ?: "No config selected",
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = C.TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                if (status == VpnStatus.CONNECTING) {
-                    Text(
-                        "connecting…",
-                        color = C.OnAccent.copy(alpha = 0.75f),
-                        fontSize = 10.5.sp,
-                    )
-                }
+                Text(
+                    config?.let { "${it.serverIp} · ${Links.label(it.protocol, it.awgVersion)}" }
+                        ?: "tap to choose a config",
+                    fontSize = 11.sp,
+                    color = C.TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            config?.let { LatencyPill(AppState.latency[it.id], it.id in AppState.latencyFailed, it.id in AppState.pinging) }
+        }
+    }
+}
+
+@Composable
+private fun StatCard(
+    label: String,
+    value: String,
+    fillFraction: Float,
+    fillBrush: Brush,
+    modifier: Modifier = Modifier,
+) {
+    GlassCard(modifier = modifier) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 15.dp)) {
+            Text(
+                label.uppercase(),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 1.4.sp,
+                color = C.TextFaint,
+            )
+            Spacer(Modifier.height(9.dp))
+            Text(
+                value,
+                fontSize = 15.5.sp,
+                fontWeight = FontWeight.Bold,
+                color = C.TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(12.dp))
+            Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(4.dp)).background(C.SurfaceHigh)) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(fillFraction.coerceIn(0.04f, 1f))
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(fillBrush),
+                )
+            }
+        }
+    }
+}
+
+/** Horizontal strip of quick-switch config tiles (the design's proto strip). */
+@Composable
+private fun ConfigStrip() {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+    ) {
+        if (AppState.configs.isEmpty()) {
+            Text(
+                "No configs yet — add a server in Servers and run Setup, or paste a share link in Tunnels.",
+                fontSize = 12.sp,
+                color = C.TextFaint,
+                modifier = Modifier.padding(vertical = 14.dp),
+            )
+        } else {
+            AppState.configs.take(16).forEach { cfg ->
+                ConfigTile(
+                    cfg = cfg,
+                    selected = cfg.id == AppState.activeConfigId,
+                    onClick = { AppState.selectConfig(cfg.id) },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun StatusLabel(status: VpnStatus, modifier: Modifier = Modifier) {
-    val (text, color) = when (status) {
-        VpnStatus.CONNECTED -> "Your traffic is protected" to C.Success
-        VpnStatus.CONNECTING -> "Establishing secure tunnel…" to C.Warning
-        VpnStatus.DISCONNECTING -> "Closing connection…" to C.Warning
-        VpnStatus.ERROR -> "Connection failed" to C.Error
-        VpnStatus.DISCONNECTED -> "Not protected" to C.TextSecondary
+private fun ConfigTile(cfg: VpnConfig, selected: Boolean, onClick: () -> Unit) {
+    val connected = selected && AppState.vpnStatus == VpnStatus.CONNECTED
+    val ping = AppState.latency[cfg.id]
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        color = if (selected) C.Accent.copy(alpha = 0.10f) else C.Surface,
+        border = BorderStroke(1.dp, if (selected) C.Accent.copy(alpha = 0.6f) else C.Border),
+    ) {
+        Column(Modifier.width(150.dp).padding(horizontal = 13.dp, vertical = 12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    Modifier
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(
+                            when {
+                                connected -> C.Success
+                                selected -> C.Accent
+                                else -> C.TextFaint.copy(alpha = 0.4f)
+                            },
+                        ),
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    ping?.let { "$it ms" } ?: "—",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 10.sp,
+                    color = if (ping != null) C.Accent2 else C.TextFaint,
+                )
+            }
+            Spacer(Modifier.height(9.dp))
+            Text(
+                Links.label(cfg.protocol, cfg.awgVersion),
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = C.TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                cfg.serverIp,
+                fontSize = 9.5.sp,
+                color = C.TextFaint,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
-    Text(text, color = color, fontSize = 12.5.sp, modifier = modifier)
+}
+
+@Composable
+private fun DashboardFooter() {
+    val settings = AppState.settings
+    val modeLabel = when (settings.mode) {
+        VpnModes.TUN -> "TUN"
+        VpnModes.PROXY_ONLY -> "PROXY-ONLY"
+        else -> "SYSTEM-PROXY"
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(22.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        FooterText("MODE $modeLabel")
+        FooterText("PROXY 127.0.0.1:${settings.proxyPort}")
+        FooterText("SPLIT ${if (settings.splitMode == SplitModes.OFF) "OFF" else settings.splitMode.uppercase()}")
+        Spacer(Modifier.weight(1f))
+        FooterText("MULTIVPN v3.6.5")
+    }
+}
+
+@Composable
+private fun FooterText(text: String) {
+    Text(
+        text,
+        fontSize = 9.5.sp,
+        fontFamily = FontFamily.Monospace,
+        letterSpacing = 0.8.sp,
+        color = C.TextFaint,
+    )
 }
 
 @Composable

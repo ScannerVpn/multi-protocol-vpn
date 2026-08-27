@@ -22,7 +22,7 @@ Built with **Compose Multiplatform (Kotlin)**, packaged as a self-contained app
 - **Real-traffic ping**: latency comes from an actual request pushed through the
   tunnel, never from ICMP or an open port. A config that cannot carry traffic
   shows no latency instead of a misleading green number.
-- Cancel a stuck connection attempt, firewall kill switch, share/edit configs,
+- Cancel a stuck connection attempt, share/edit configs,
   modern dark UI, local app log, one-click server log viewer.
 
 ---
@@ -196,7 +196,7 @@ All 74 tests run offline. Three suites are live probes against a real VPS and
 skip themselves unless opted in via an env var: `LIVE_AWG_TEST`,
 `GRAB_SCAN_TEST`, `PROBE_SERVER`.
 
-Notable guards: `KillSwitchScriptTest` checks the generated PowerShell is
+Notable guards: `KillSwitchCleanupScriptTest` checks the generated PowerShell is
 syntactically valid, `HiddenRunCancelTest` proves process waits are actually
 cancellable, `SourceEncodingTest` fails the build on a UTF-8 BOM or mojibake,
 `WireProxyConfigTest` asserts AmneziaWG obfuscation parameters survive verbatim.

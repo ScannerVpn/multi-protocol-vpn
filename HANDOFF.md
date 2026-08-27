@@ -723,6 +723,24 @@ SSH چک کن که سرور همان لحظه در دسترس است.
     - تست‌های جدید: `LinksParseTest` (+۳: SS بزرگ، `+` لفظی در hy2، fragment %2B)؛
       `AppListReproTest` روی غیرویندوز skip شرطی شد. جمعاً **۹۲ تست سبز**.
 
+18. **v3.6.5 (2026-08-27) — حذف کامل Kill Switch + بازطراحی GUI طبق طرح «Nova Dashboard»**: به درخواست
+    کاربر (کیل‌سوییچ کل اینترنت سیستم را حتی در حالت قطع می‌بست) و انتخاب طرح ۱ از ۴ ماکاپ:
+    - **حذف Kill Switch**: `KillSwitch.kt` و `KillSwitchScriptTest.kt` پاک شدند؛ تمام نقاط اتصال
+      برداشته شدند (`Vpn.kt`: arm در connect، disarm در disconnect/abort، `disarmKillSwitchDetached`؛
+      `AppState.shutdown`؛ shutdown-hook در `Main.kt`؛ ToggleRow در `SettingsScreen`؛ فیلد
+      `AppSettings.killSwitch` — Json روی `ignoreUnknownKeys=true` است پس settings.json قدیمی سالم لود می‌شود).
+    - **پاک‌ساز یک‌باره (`KillSwitchCleanup.kt`)**: ماشین‌هایی که نسخهٔ قدیمی داشتند ممکن است هنوز
+      قوانین `MultiVPN KillSwitch *` و `DefaultOutboundAction=Block` داشته باشند؛ در اولین اجرا،
+      probe بدون-ادمین (exit-code 42) بررسی می‌کند و در صورت وجود، همان اسکریپت self-elevating قبلی
+      قوانین را حذف و Allow را برمی‌گرداند و تومب‌استون `killswitch.cleaned` می‌نویسد (UAC رد شده →
+      اجرای بعدی دوباره). تست‌های جدید: `KillSwitchCleanupScriptTest` (۶ گارد، آینهٔ گاردهای قدیمی).
+    - **GUI جدید**: پنجرهٔ 1280×800 (min 980×640)، سایدبار (Dashboard/Servers/Tunnels/Settings + فوتر
+      وضعیت)، تم Nova (سرمه‌ای #0B1120/#0C1526 + سیان #22D3EE + سبز #34D399)، داشبورد با کارت اتصال
+      (رینگ پاور، SECURED، تایمر سشن مونو via `AppState.sessionStartedAt`)، سه StatCard
+      (Server/Protocol/Latency)، ردیف ConfigStrip برای سوییچ سریع کانفیگ، فوتر mono. سه اسکرین دیگر
+      روی `widthIn(max=880dp)` وسط‌چین شدند. نام توکن‌های `C.*` دست‌نخورده ماند (سایر اسکرین‌ها سالم).
+    - نسخهٔ اپ → 3.6.5. تست‌ها: 92/92 سبز (۶ تست KS حذف، ۶ تست cleanup اضافه).
+
 ---
 
 ## ۹. روادمک پیشنهادی (به ترتیب)
@@ -737,7 +755,8 @@ SSH چک کن که سرور همان لحظه در دسترس است.
 - [ ] نمایش IP عمومی/محل جغرافیایی بعد از اتصال + مصرف پهنای‌باند
 - [ ] تشخیص کانتینرهای amnezia-openvpn
 - [ ] فارسی‌سازی UI (RTL)
-- [x] kill switch واقعی (فایروال ویندوز) — v3.6.1، سینتکس رفع‌شده در v3.6.3
+- [x] ~~kill switch واقعی (فایروال ویندوز)~~ — در v3.6.5 **به درخواست کاربر حذف شد**
+      (اینترنت کل سیستم را حتی وقتی اپ باز و قطع بود می‌بست؛ `KillSwitchCleanup` باقیمانده‌ها را یک‌باره پاک می‌کند)
 
 ### سه بدهی که عمداً باز مانده‌اند (کاندیدهای خوب برای ایجنت بعدی)
 
