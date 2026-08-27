@@ -68,7 +68,11 @@ object AppList {
             val exePath = parts[1].trim().ifEmpty { null }
             val iconPath = parts[2].trim().ifEmpty { null }
             if (name.isEmpty() && exePath == null) return@forEach
-            val exeName = exePath?.let { File(it).name }
+            // java.io.File.name only honours the HOST filesystem's separator:
+            // parsing "C:\...\firefox.exe" on a non-Windows dev/CI machine
+            // returned the whole path as the "exe name". Split on BOTH
+            // separators explicitly instead.
+            val exeName = exePath?.substringAfterLast('\\')?.substringAfterLast('/')
             apps.add(
                 InstalledApp(
                     key = exePath ?: "name:${name.lowercase()}",
