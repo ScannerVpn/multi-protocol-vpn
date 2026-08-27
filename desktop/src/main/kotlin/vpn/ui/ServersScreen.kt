@@ -64,7 +64,7 @@ fun ServersScreen() {
     var showAdd by remember { mutableStateOf(false) }
 
     Column(
-        Modifier.fillMaxSize().widthIn(max = 880.dp).wrapContentWidth(Alignment.CenterHorizontally).padding(horizontal = 20.dp),
+        Modifier.fillMaxSize().wrapContentWidth(Alignment.CenterHorizontally).widthIn(max = 880.dp).padding(horizontal = 20.dp),
     ) {
         Spacer(Modifier.height(20.dp))
         ScreenHeader(

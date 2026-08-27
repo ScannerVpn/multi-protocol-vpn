@@ -56,7 +56,7 @@ fun SettingsScreen() {
     var cleanResult by remember { mutableStateOf<String?>(null) }
 
     Column(
-        Modifier.fillMaxSize().widthIn(max = 880.dp).wrapContentWidth(Alignment.CenterHorizontally).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
+        Modifier.fillMaxSize().wrapContentWidth(Alignment.CenterHorizontally).verticalScroll(rememberScrollState()).widthIn(max = 880.dp).padding(horizontal = 20.dp),
     ) {
         Spacer(Modifier.height(20.dp))
         ScreenHeader("Settings", "App behaviour and maintenance")

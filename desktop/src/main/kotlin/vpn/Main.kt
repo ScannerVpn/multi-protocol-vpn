@@ -156,8 +156,13 @@ fun App() {
     Box(Modifier.fillMaxSize()) {
         AuroraBackground(Modifier.fillMaxSize())
 
-        Column(Modifier.fillMaxSize()) {
-            Box(Modifier.weight(1f)) {
+        // Row + weight(1f) is load-bearing: screens used to be direct children
+        // of a window-wide Box while the sidebar (a later child) drew OVER them,
+        // hiding the left part of every page underneath. Now the sidebar owns
+        // its 212dp column and each screen only receives what remains.
+        Row(Modifier.fillMaxSize()) {
+            Sidebar(tab, onSelect = { tab = it })
+            Box(Modifier.weight(1f).fillMaxHeight()) {
                 AnimatedContent(
                     targetState = tab,
                     transitionSpec = {
@@ -180,7 +185,6 @@ fun App() {
                 }
             }
         }
-        Sidebar(tab, onSelect = { tab = it })
     }
 }
 
@@ -189,7 +193,7 @@ private fun Sidebar(selected: Int, onSelect: (Int) -> Unit) {
     val items = listOf(
         NavItem("Dashboard", Icons.Filled.Home),
         NavItem("Servers", Icons.Filled.Dns),
-        NavItem("Tunnels", Icons.Filled.Layers),
+        NavItem("Configs", Icons.Filled.Layers),
         NavItem("Settings", Icons.Filled.Tune),
     )
     Surface(
@@ -302,7 +306,7 @@ private fun Sidebar(selected: Int, onSelect: (Int) -> Unit) {
                     }
                     Spacer(Modifier.height(7.dp))
                     Text("Multi-Protocol Client", fontSize = 9.5.sp, color = C.TextFaint)
-                    Text("v3.6.5 · x86_64", fontSize = 9.5.sp, color = C.TextFaint)
+                    Text("v3.6.7 · x86_64", fontSize = 9.5.sp, color = C.TextFaint)
                 }
             }
         }

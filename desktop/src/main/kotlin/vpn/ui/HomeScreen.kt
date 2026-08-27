@@ -556,7 +556,7 @@ private fun ConfigStrip() {
     ) {
         if (AppState.configs.isEmpty()) {
             Text(
-                "No configs yet — add a server in Servers and run Setup, or paste a share link in Tunnels.",
+                "No configs yet — add a server in Servers and run Setup, or paste a share link in Configs.",
                 fontSize = 12.sp,
                 color = C.TextFaint,
                 modifier = Modifier.padding(vertical = 14.dp),
@@ -643,7 +643,7 @@ private fun DashboardFooter() {
         FooterText("PROXY 127.0.0.1:${settings.proxyPort}")
         FooterText("SPLIT ${if (settings.splitMode == SplitModes.OFF) "OFF" else settings.splitMode.uppercase()}")
         Spacer(Modifier.weight(1f))
-        FooterText("MULTIVPN v3.6.5")
+        FooterText("MULTIVPN v3.6.7")
     }
 }
 

@@ -193,7 +193,7 @@ powershell -ExecutionPolicy Bypass -File fetch-cores.ps1   # فقط بار او�
 | خروجی | مسیر واقعی | پیش‌نیاز |
 |-------|------------|----------|
 | اپ پورتیبل (همین را اجرا کن) | `build\compose\binaries\main\app\MultiVPN\MultiVPN.exe` | هیچ |
-| نصب‌کننده MSI/EXE | `...\binaries\main\{msi,exe}\MultiVPN-3.6.6.{msi,exe}` | **WiX 3.x** + `packageMsi packageExe` صریح |
+| نصب‌کننده MSI/EXE | `...\binaries\main\{msi,exe}\MultiVPN-3.6.7.{msi,exe}` | **WiX 3.x** + `packageMsi packageExe` صریح |
 
 ⚠️ `gradlew build` هیچ‌وقت این تسک‌ها را صدا نمی‌زند — باید صریح اجرا شوند (درس §5.28).
 برای اجرای مستقیم در حین توسعه: `gradlew.bat run`. این خط لوله به شکل خودکار روی GitHub هم هست:
@@ -402,6 +402,14 @@ MSYS_NO_PATHCONV=1 plink -batch -hostkey "<SSH-HOSTKEY-FINGERPRINT>" \
     `createDistributable`). یادآوری: نصب‌کننده‌های msi/exe ی jpackage همیشه **WiX 3.x** لازم
     دارند ولی اپ پورتیبلِ `createDistributable` بدونش کار می‌کند. CI معادل:
     `.github/workflows/windows-build.yml`.
+29. **محتوای fullscreen زیر عنصر ثابتِ کناری پنهان می‌شود + ترتیبِ وسط‌چین با cap**: در
+    بازطراحی v3.6.5 اسکرین‌ها فرزندِ مستقیم یک Boxی تمام‌پنجره بودند و Sidebar به‌عنوان آخرین
+    فرزند رویشان کشیده می‌شد — نیمی از صفحه «زیر» سایدبار گم می‌شد. قانون: اسکرین‌ها باید داخل
+    `Box(Modifier.weight(1f))` کنار سایدبار در یک `Row` باشند، نه همپوشان با آن. تلهٔ همراه:
+    برای ستون وسط‌چینِ capped ترتیب `fillMaxSize().wrapContentWidth(CenterHorizontally)
+    .widthIn(max=W)` درست است؛ برعکسش (`widthIn` قبل از `wrapContentWidth`) چون بعد از
+    `fillMaxSize` قیدها fixed‌اند، widthIn هر دو مرز را به W coerce می‌کند و wrap دیگر جایی
+    برای وسط‌چین نمی‌گذارد → محتوا چسبیده به لبهٔ چپ می‌ماند.
 
 ---
 
@@ -787,6 +795,20 @@ SSH چک کن که سرور همان لحظه در دسترس است.
       `createDistributable + packageMsi + packageExe` — artifact «MultiVPN-Windows-x64» = zip
       پورتیبل + هر دو نصب‌کننده. کاربر بدون JDK/WiX لوکال هم exe کامل آمادهٔ اتصال می‌گیرد.
     - نسخهٔ اپ → 3.6.6. بدون تغییر Kotlin؛ همان ۹۲ تست.
+
+20. **v3.6.7 (2026-08-27) — فیکس رگرسیون UI: «نصف صفحه زیر سایدبار» + نام اشتباه منو**: گزارش کاربر
+    بعد از v3.6.5؛ دو ریشه، هر دو از همان بازطراحی:
+    - **همپوشانی سایدبار**: اسکرین‌ها فرزندِ مستقیم یک Boxی تمام‌پنجره بودند و Sidebar به‌عنوان
+      آخرین فرزند رویشان draw می‌شد؛ مرکزِ widthIn(880) هم نسبت به کل پنجره حساب می‌شد نه ناحیهٔ
+      محتوا → نیمی از هر صفحه زیر سایدبار گم می‌شد. اصلاح در `Main.kt`: `Row { Sidebar;
+      Box(weight(1f).fillMaxHeight()) { AnimatedContent(اسکرین‌ها) } }` — سایدبار ستون خودش را
+      دارد و اسکرین‌ها فقط فضای باقی‌مانده را می‌بینند.
+    - **ترتیب غلط modifierهای وسط‌چین** سه اسکرین Servers/Configs/Settings (درس §5.29):
+      `wrapContentWidth(CenterHorizontally)` باید قبل از `widthIn(max=880)` بیاید تا وسطِ
+      ناحیهٔ باقی‌مانده واقعاً وسط باشد.
+    - آیتم منوی صفحهٔ کانفیگ‌ها که اشتباهاً «Tunnels» نامیده شده بود به **«Configs»** برگشت (+ متن
+      راهنمای حالت خالی Home). نسخهٔ چاپی فوتر Sidebar/Home همگام ← 3.6.7. بدون تغییر منطق؛
+      همان ۹۲ تست سبز.
 
 ---
 
