@@ -214,15 +214,22 @@ if (-not $Force -and (Complete-Set $ovDir $ovFiles)) {
     # the protocol: the file list no longer matches and extraction is partial.
     # If you upgrade the series, update the list in Vpn.kt in the same commit.
     $listing = (Invoke-WebRequest -Uri 'https://build.openvpn.net/downloads/releases/' -UseBasicParsing).Content
-    $msi = [regex]::Matches($listing, 'href="(OpenVPN-2\.5\.[\w.\-]*amd64\.msi)"') |
+    $candidates = [regex]::Matches($listing, 'href="(OpenVPN-2\.5\.[\w.\-]*amd64\.msi)"') |
         ForEach-Object { $_.Groups[1].Value } |
         Where-Object { $_ -notmatch 'rc|alpha|beta' } |
-        Sort-Object -Unique | Select-Object -Last 1
-    if (-not $msi) { throw 'could not find an OpenVPN 2.5.x amd64 MSI in the release listing' }
+        Sort-Object -Unique
+    if (-not $candidates) { throw 'could not find an OpenVPN 2.5.x amd64 MSI in the release listing' }
+    # Lexicographic order picks 2.5.9 over 2.5.10 ("9" > "1"); compare the
+    # numeric patch digit instead — same class of bug Vpn.kt's versionKeyLong
+    # fixed for MSI registry keys.
+    $msi = $candidates | Sort-Object { if ($_ -match 'OpenVPN-2\.5\.(\d+)') { [int]$Matches[1] } else { 0 } } | Select-Object -Last 1
     Info "installer $msi"
     $msiPath = Join-Path $temp $msi
     Invoke-WebRequest -Uri "https://build.openvpn.net/downloads/releases/$msi" -OutFile $msiPath
-    Assert-PinnedSha256 $msiPath "$msi"
+    # Pin under a CONSTANT key: keying by the dynamic file name would treat
+    # every future upstream rename as "unpinned" and silently skip
+    # verification for the binary we later run as SYSTEM.
+    Assert-PinnedSha256 $msiPath 'openvpn-amd64-msi'
     # Administrative install: unpacks the payload without installing anything.
     $extract = Join-Path $temp 'ovpn'
     New-Item -ItemType Directory -Force -Path $extract | Out-Null
