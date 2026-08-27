@@ -1085,7 +1085,8 @@ object VpnService {
                 server = config.serverIp,
                 caPath = config.caPath,
                 p12Path = config.p12Path,
-                p12Pass = config.p12Pass ?: "",
+                p12Pass = config.p12Pass?.takeIf { it.isNotBlank() }
+                    ?: SshService.CLIENT_P12_PASSWORD,
             )
         }
         if (result.ok) AppLog.i("VPN", "IKEv2 connected via elevated flow")
@@ -1291,6 +1292,23 @@ object VpnService {
                 }
                 delay(1000)
                 tries++
+            }
+        } else if (ovpnLogFile.exists()) {
+            // Belt-and-braces for imported third-party configs: if the log
+            // proves initialization even though the elevated script's subnet
+            // probe gave up (foreign address pool), keep the tunnel alive.
+            // The log is deleted before every connect, so this cannot be a
+            // stale hit; a declined UAC never starts OpenVPN and leaves no
+            // log, skipping this branch entirely.
+            var rescueTries = 0
+            while (rescueTries < 6) {
+                if (tunnelConnected() || openvpnInitialized()) {
+                    AppLog.i("VPN", "OpenVPN tunnel is up (log signal, foreign subnet)")
+                    openvpnSessionActive = true
+                    return VpnResult(true, "Connected")
+                }
+                delay(1000)
+                rescueTries++
             }
         }
         // The task ran but no tunnel: OpenVPN's own log says why (bad cert,
@@ -1735,11 +1753,17 @@ try {
     Register-ScheduledTask -TaskName $OVPN_TASK -Action §action -Principal §principal -Settings §settings -Force | Out-Null
     Start-ScheduledTask -TaskName $OVPN_TASK
 
-    # Poll for the tunnel address instead of sleeping a fixed time.
+    # Poll for the tunnel address instead of sleeping a fixed time. The
+    # hardcoded prefixes only cover OUR provisions — an imported third-party
+    # .ovpn whose pool is 10.7.x / 192.168.50.x etc. would always report
+    # FAIL and get torn down while perfectly healthy, so OpenVPN's own
+    # English log line (locale-independent, appears only after TUN routes
+    # were actually installed) is accepted as an equally strong signal.
     §up = §false
     for (§i = 0; §i -lt 20; §i++) {
         Start-Sleep -Milliseconds 900
         if ((ipconfig | Out-String) -match "10\.8\.0\.") { §up = §true; break }
+        if ((Test-Path §log) -and ((Get-Content -Raw §log -ErrorAction SilentlyContinue) -match "Initialization Sequence Completed")) { §up = §true; break }
     }
     if (§up) {
         Write-Result "OK" "OpenVPN tunnel is up."
