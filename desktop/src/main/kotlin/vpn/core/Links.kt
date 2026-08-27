@@ -44,7 +44,9 @@ object Links {
         val port = uri.port.takeIf { it > 0 && it <= 65535 } ?: return null
         ProxyLink(
             protocol = proto,
-            address = uri.host ?: return null,
+            // java.net.URI keeps IPv6 literals bracketed — normalize here so
+            // downstream consumers (xray/sing-box JSON, safeHost) never see "[..]".
+            address = uri.host?.trim('[', ']') ?: return null,
             port = port,
             secret = uri.userInfo?.let { dec(it) } ?: return null,
             params = params,
@@ -83,32 +85,65 @@ object Links {
         val method = creds.substring(0, colonIdx)
         val secret = creds.substring(colonIdx + 1)
 
+        // Bare substringBeforeLast(':') mangled IPv6 endpoints
+        // ("[2001:db8::1]:8388" became the address "[2001:db8") — route every
+        // host:port pair through splitHostPort, which understands brackets.
+        val (address, port) = splitHostPort(hostPort) ?: return null
+
         ProxyLink(
             protocol = "shadowsocks",
-            address = hostPort.substringBeforeLast(':'),
-            port = hostPort.substringAfterLast(':').toIntOrNull() ?: return null,
+            address = address,
+            port = port,
             secret = secret,
             method = method,
             name = name,
         )
     }.getOrNull()
 
+    /**
+     * Splits a wire-format host:port pair into its parts:
+     *  - bracketed IPv6 "[2001:db8::1]:443" → ("2001:db8::1", 443)
+     *  - hostname / IPv4 "example.com:80"   → ("example.com", 80)
+     * Returns null when the port is missing or not numeric.
+     */
+    private fun splitHostPort(hp: String): Pair<String, Int>? {
+        val s = hp.trim()
+        if (s.startsWith("[")) {
+            val close = s.indexOf(']')
+            if (close <= 1) return null
+            val host = s.substring(1, close)
+            if (host.isBlank()) return null
+            val port = s.substring(close + 1).removePrefix(":").toIntOrNull() ?: return null
+            if (port !in 1..65535) return null
+            return host to port
+        }
+        val idx = s.lastIndexOf(':')
+        if (idx <= 0 || idx == s.length - 1) return null
+        val port = s.substring(idx + 1).toIntOrNull() ?: return null
+        if (port !in 1..65535) return null
+        return s.substring(0, idx) to port
+    }
+
     /** Renders a config back into a share link (for copy / QR / file export). */
     fun build(link: ProxyLink): String {
         val frag = if (link.name.isBlank()) "" else "#" + enc(link.name)
+        // An IPv6 literal MUST be bracketed on the wire; a previous build()
+        // emitted it bare, producing links like vless://u@2001:db8::1:443
+        // that no client (including this app) could re-parse.
+        val host = hostToken(link.address)
         return when (link.protocol) {
             "shadowsocks" -> {
                 val creds = Base64.getEncoder()
                     .encodeToString("${link.method}:${link.secret}".toByteArray())
-                "ss://$creds@${link.address}:${link.port}$frag"
+                "ss://$creds@$host:${link.port}$frag"
             }
             "hysteria2" -> {
                 val q = query(link.params)
-                "hy2://${enc(link.secret)}@${link.address}:${link.port}$q$frag"
+                "hy2://${enc(link.secret)}@$host:${link.port}$q$frag"
             }
             else -> {
                 val q = query(link.params)
-                "${link.protocol}://${enc(link.secret)}@${link.address}:${link.port}$q$frag"
+                "${link.protocol}://${enc(link.secret)}@$host:${link.port}$q$frag"
             }
         }
     }
@@ -167,6 +202,10 @@ object Links {
 
     private fun dec(s: String) = runCatching { URLDecoder.decode(s, Charsets.UTF_8) }.getOrDefault(s)
     private fun enc(s: String) = URLEncoder.encode(s, Charsets.UTF_8).replace("+", "%20")
+
+    /** Bracketed form for IPv6 literals, unchanged text otherwise. */
+    private fun hostToken(host: String): String =
+        if (host.contains(':') && !host.startsWith("[")) "[$host]" else host
 
     private fun b64(s: String): String? = runCatching {
         var t = s.trim().replace('-', '+').replace('_', '/')
