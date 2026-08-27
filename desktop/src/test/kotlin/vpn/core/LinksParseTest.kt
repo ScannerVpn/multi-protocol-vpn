@@ -71,6 +71,45 @@ class LinksParseTest {
         assertNull(Links.parse("ss://$creds@203.0.113.5:http"))
     }
 
+    @Test
+    fun `uppercase SS prefix does not produce a broken config`() {
+        // extractSubLinks accepts (?i) schemes, so subscriptions really do
+        // feed "SS://…". removePrefix("ss://") used to leave "//" behind and
+        // the parser returned a saved-but-unusable ProxyLink instead of null.
+        val creds = java.util.Base64.getEncoder()
+            .encodeToString("aes-128-gcm:pass".toByteArray())
+        val link = Links.parse("SS://$creds@203.0.113.7:8388#up")
+
+        assertNotNull(link)
+        assertEquals("shadowsocks", link.protocol)
+        assertEquals("203.0.113.7", link.address)
+        assertEquals("pass", link.secret)
+    }
+
+    // ---- percent-decoding (literal '+' must survive) ---------------------
+
+    @Test
+    fun `hy2 auth with a literal plus survives parsing`() {
+        // Emitted as %2B on the wire; URI.userInfo is already decoded, so a
+        // second URLDecoder pass turned '+' into a space and broke the
+        // password silently.
+        val link = Links.parse(
+            "hy2://pw%2Bplus@203.0.113.10:443?insecure=1#node",
+        )
+        assertNotNull(link)
+        assertEquals("hysteria2", link.protocol)
+        assertEquals("pw+plus", link.secret)
+    }
+
+    @Test
+    fun `fragment with an encoded plus keeps its name`() {
+        val link = Links.parse(
+            "trojan://secret123@203.0.113.11:443?security=tls#US%2B2",
+        )
+        assertNotNull(link)
+        assertEquals("US+2", link.name)
+    }
+
     // ---- other protocols keep their URI-based parsing --------------------
 
     @Test

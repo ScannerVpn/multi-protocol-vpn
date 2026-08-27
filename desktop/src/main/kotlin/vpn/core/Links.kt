@@ -48,16 +48,25 @@ object Links {
             // downstream consumers (xray/sing-box JSON, safeHost) never see "[..]".
             address = uri.host?.trim('[', ']') ?: return null,
             port = port,
-            secret = uri.userInfo?.let { dec(it) } ?: return null,
+            // java.net.URI getUserInfo()/getFragment() hand back ALREADY-
+            // decoded text; pushing it through URLDecoder again turned every
+            // literal '+' into a space (%2B on the wire -> ' ' here), so
+            // passwords/auth strings carrying '+' silently broke. Decode the
+            // RAW components with a percent-only decoder instead.
+            secret = uri.rawUserInfo?.let { pct(it) } ?: return null,
             params = params,
-            name = dec(uri.fragment ?: ""),
+            name = pct(uri.rawFragment ?: ""),
         )
     }.getOrNull()
 
     /** ss://base64(method:pass)@host:port#name  or ss://base64(everything)#name */
     private fun parseShadowsocks(link: String): ProxyLink? = runCatching {
-        val body = link.removePrefix("ss://")
-        val name = dec(body.substringAfter('#', ""))
+        // Scheme matching above is case-insensitive (subscriptions feed us
+        // "SS://…" links whose prefix survives verbatim), so strip it the
+        // same way — removePrefix("ss://") used to leave the "//" behind and
+        // produce a saved-but-broken config instead of a clean null.
+        val body = link.replaceFirst(Regex("(?i)^ss://"), "")
+        val name = pct(body.substringAfter('#', ""))
         val core = body.substringBefore('#').substringBefore('?')
 
         // Standard format (ss://base64(method:pass)@host:port): the first '@'
@@ -201,6 +210,14 @@ object Links {
             .joinToString("&") { "${enc(it.key)}=${enc(it.value)}" }
 
     private fun dec(s: String) = runCatching { URLDecoder.decode(s, Charsets.UTF_8) }.getOrDefault(s)
+
+    /**
+     * Strict RFC 3986 percent-decoder: unlike [URLDecoder] it leaves '+' as
+     * a literal plus (path/userinfo/fragment are NOT form-encoded data).
+     */
+    private fun pct(s: String): String = runCatching {
+        URLDecoder.decode(s.replace("+", "%2B"), Charsets.UTF_8)
+    }.getOrDefault(s)
     private fun enc(s: String) = URLEncoder.encode(s, Charsets.UTF_8).replace("+", "%20")
 
     /** Bracketed form for IPv6 literals, unchanged text otherwise. */
