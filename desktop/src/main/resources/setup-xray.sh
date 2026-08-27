@@ -17,6 +17,13 @@
 set -e
 
 SERVER_ADDR="${1:?usage: setup-xray.sh <ip> [vless|trojan|shadowsocks] [scan]}"
+# Bare IPv6 literals produce unparseable links (vless://u@2001:db8::1:443);
+# bracket them once and reuse everywhere links are printed.
+LINK_ADDR="$SERVER_ADDR"
+case "$LINK_ADDR" in
+    \[*\]) ;;
+    *\:*) LINK_ADDR="[$LINK_ADDR]" ;;
+esac
 VARIANT="${2:-vless}"
 # SCAN=1: read-only inventory mode for "grab all configs" — emit links when
 # an install exists, print MV-XRAY-ABSENT otherwise, NEVER install anything.
@@ -39,7 +46,7 @@ if [ -z "$XRAY_CONF" ] && command -v docker > /dev/null 2>&1; then
     DOCKER_XRAY="$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -iE 'amnezia.*xray|^xray' | head -1 || true)"
     if [ -n "$DOCKER_XRAY" ]; then
         for p in /etc/amnezia/xray/config.json /etc/xray/config.json /config.json; do
-            if docker exec "$DOCKER_XRAY" test -f "$p" 2>/dev/null; then
+            if docker exec "$DOCKER_XRAY" test -f "$p" < /dev/null 2>/dev/null; then
                 XRAY_CONF="docker:$DOCKER_XRAY:$p"
                 break
             fi
@@ -49,7 +56,7 @@ fi
 
 read_xray_conf() {
     if [ -n "$DOCKER_XRAY" ] && [ -n "$XRAY_CONF" ]; then
-        docker exec "$DOCKER_XRAY" cat "${XRAY_CONF##*:}"
+        docker exec "$DOCKER_XRAY" cat "${XRAY_CONF##*:}" < /dev/null
     elif [ -n "$XRAY_CONF" ]; then
         cat "$XRAY_CONF"
     fi
@@ -59,7 +66,9 @@ read_xray_conf() {
 emit_links_py='
 import json, sys, base64, urllib.parse
 conf = json.load(sys.stdin)
-host = sys.argv[1]
+host = sys.argv[1].strip("[]")
+if ":" in host:
+    host = "[%s]" % host  # bare IPv6 breaks every URI — always bracket
 
 def b64u_decode(s):
     s = s.strip().replace("-", "+").replace("_", "/")
@@ -138,13 +147,17 @@ for inb in conf.get("inbounds", []):
                 qq.setdefault("flow", c.get("flow", "xtls-rprx-vision"))
             name = c.get("email") or "vless-%d" % port
             print("MULTIVPN-LINK: vless://%s@%s:%d?%s#%s" % (
-                c.get("id", ""), host, port, urllib.parse.urlencode(qq), name))
+                urllib.parse.quote(c.get("id", ""), safe=""), host, port,
+                urllib.parse.urlencode(qq), urllib.parse.quote(name, safe="")))
             found += 1
     elif proto == "trojan":
         for c in (ss.get("clients") or []):
             name = c.get("email") or "trojan-%d" % port
+            # A password carrying @ : / %% inside userinfo breaks every parser
+            # downstream (including the app itself) — percent-encode it.
             print("MULTIVPN-LINK: trojan://%s@%s:%d?%s#%s" % (
-                c.get("password", ""), host, port, urllib.parse.urlencode(q), name))
+                urllib.parse.quote(c.get("password", ""), safe=""), host, port,
+                urllib.parse.urlencode(q), urllib.parse.quote(name, safe="")))
             found += 1
     elif proto == "shadowsocks":
         method = ss.get("method", "")
@@ -157,7 +170,7 @@ for inb in conf.get("inbounds", []):
                 pw = "%s:%s" % (server_pw, c.get("password", ""))
                 b64 = base64.b64encode(("%s:%s" % (method, pw)).encode()).decode()
                 name = c.get("email") or "ss-%d" % port
-                print("MULTIVPN-LINK: ss://%s@%s:%d#%s" % (b64, host, port, name))
+                print("MULTIVPN-LINK: ss://%s@%s:%d#%s" % (b64, host, port, urllib.parse.quote(name, safe="")))
                 found += 1
         else:
             pw = server_pw or (clients[0].get("password", "") if clients else "")
@@ -187,7 +200,7 @@ for inb in conf.get("inbounds", []):
             name = c.get("email") or "hy2-%d" % port
             print("MULTIVPN-LINK: hy2://%s@%s:%d?%s#%s" % (
                 urllib.parse.quote(auth, safe=""), host, port,
-                urllib.parse.urlencode(q2), name))
+                urllib.parse.urlencode(q2), urllib.parse.quote(name, safe="")))
             found += 1
 sys.stderr.write("clients found: %d\n" % found)
 '
@@ -269,7 +282,7 @@ XEOF
     if command -v ufw > /dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
         ufw allow "$PORT/tcp" > /dev/null 2>&1 || true
     fi
-    echo "MULTIVPN-LINK: vless://$UUID@$SERVER_ADDR:$PORT?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$SNI&fp=chrome&pbk=$PBK&type=tcp&sid=#MultiVPN-VLESS"
+    echo "MULTIVPN-LINK: vless://$UUID@$LINK_ADDR:$PORT?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$SNI&fp=chrome&pbk=$PBK&type=tcp&sid=#MultiVPN-VLESS"
     info "VLESS+Reality ready on port $PORT (flow xtls-rprx-vision)."
 elif [ "$VARIANT" = "shadowsocks" ]; then
     cat > /usr/local/etc/xray/config.json << XEOF
@@ -296,7 +309,7 @@ XEOF
         ufw allow "$PORT" > /dev/null 2>&1 || true
     fi
     B64="$(printf '%s:%s' "chacha20-ietf-poly1305" "$PASS" | base64 -w0)"
-    echo "MULTIVPN-LINK: ss://$B64@$SERVER_ADDR:$PORT#MultiVPN-SS"
+    echo "MULTIVPN-LINK: ss://$B64@$LINK_ADDR:$PORT#MultiVPN-SS"
     info "Shadowsocks ready on port $PORT."
 else
     error "Unknown variant: $VARIANT (use vless|trojan|shadowsocks)"

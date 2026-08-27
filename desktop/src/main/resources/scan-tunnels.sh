@@ -43,8 +43,8 @@ if [ -z "$WG_DONE" ] && command -v docker > /dev/null 2>&1; then
     for name in $(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -iE 'amnezia|wireguard|^a?wg' || true); do
         for p in /opt/amnezia/awg/awg0.conf /opt/amnezia/wireguard/wg0.conf \
                  /etc/amnezia/amnezia-wg/wg0.conf /etc/amnezia/wg0.conf /etc/wireguard/wg0.conf; do
-            docker exec "$name" test -f "$p" 2>/dev/null || continue
-            TXT="$(docker exec "$name" cat "$p" 2>/dev/null || true)"
+            docker exec "$name" test -f "$p" < /dev/null 2>/dev/null || continue
+            TXT="$(docker exec "$name" cat "$p" < /dev/null 2>/dev/null || true)"
             if grep -qE '^Jc[[:space:]]*=' <<< "$TXT"; then
                 echo "MV-TUNNEL: amnezia-$(awg_version_of "$TXT") docker:$name"
             else

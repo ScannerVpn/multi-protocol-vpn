@@ -76,7 +76,10 @@ error() { echo -e "${RED}[-]${NC} $1"; exit 1; }
 [[ $EUID -ne 0 ]] && error "Run as root: sudo bash $0"
 mkdir -p "$CLIENT_OUT"; chmod 700 "$CLIENT_OUT"
 
-ipt_ensure() { iptables -C "$@" 2>/dev/null || iptables -I INPUT 1 "$@"; }
+# The -C check MUST name the chain exactly like the -I insert; a bare
+# "iptables -C -p udp ..." always errors, so every provision run used to
+# append another duplicate INPUT rule.
+ipt_ensure() { iptables -C INPUT "$@" 2>/dev/null || iptables -I INPUT 1 "$@"; }
 
 # ---------------------------------------------------------------- detection
 # Requested flavor decides the search order: amnezia mode prefers an
@@ -91,10 +94,10 @@ find_docker_wg() { # find_docker_wg <want-awg: yes|no>
     for name in $(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -iE 'amnezia|wireguard|^a?wg' || true); do
         for path in /opt/amnezia/awg/awg0.conf /opt/amnezia/wireguard/wg0.conf \
                     /etc/amnezia/amnezia-wg/wg0.conf /etc/amnezia/wg0.conf /etc/wireguard/wg0.conf; do
-            docker exec "$name" test -f "$path" 2>/dev/null || continue
+            docker exec "$name" test -f "$path" < /dev/null 2>/dev/null || continue
             local is_awg=no
             case "$path" in *awg*) is_awg=yes ;; esac
-            if docker exec "$name" grep -qE '^Jc[[:space:]]*=' "$path" 2>/dev/null; then is_awg=yes; fi
+            if docker exec "$name" grep -qE '^Jc[[:space:]]*=' "$path" < /dev/null 2>/dev/null; then is_awg=yes; fi
             if [ "$want" = "$is_awg" ]; then
                 DOCKER_AWG="$name"; CONF_IN="$path"; return 0
             fi
@@ -138,7 +141,7 @@ QUICK=""       # wg-quick | awg-quick
 if [ -n "$DOCKER_AWG" ]; then
     IFACE="$(basename "$CONF_IN" .conf)"
     TOOL=wg
-    docker exec "$DOCKER_AWG" sh -c 'command -v awg' > /dev/null 2>&1 && TOOL=awg
+    docker exec "$DOCKER_AWG" sh -c 'command -v awg' < /dev/null > /dev/null 2>&1 && TOOL=awg
     run_tool()   { docker exec "$DOCKER_AWG" "$TOOL" "$@" < /dev/null; }
     read_conf()  { docker exec "$DOCKER_AWG" cat "$CONF_IN" < /dev/null; }
     append_peer() { # append_peer <text>
