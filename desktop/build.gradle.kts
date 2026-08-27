@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "com.multivpn"
-version = "3.6.5"
+version = "3.6.6"
 
 kotlin {
     jvmToolchain(17)
@@ -39,11 +39,18 @@ compose.desktop {
     application {
         mainClass = "vpn.MainKt"
         nativeDistributions {
-            // Windows app: MSI for installs, EXE for the portable build.
-            // (AppImage is the Linux format and produced a useless artifact here.)
-            targetFormats(TargetFormat.Msi, TargetFormat.Exe)
+            // Default distributable = PORTABLE app image (plain jpackage, NO WiX
+            // needed on the build machine):
+            //   gradlew createDistributable
+            //   -> build/compose/binaries/main/app/MultiVPN/MultiVPN.exe
+            // MSI/EXE installers stay available ON DEMAND; they REQUIRE WiX 3.x:
+            //   gradlew packageMsi packageExe
+            //   -> build/compose/binaries/main/{msi,exe}/MultiVPN-<ver>.{msi,exe}
+            // WARNING: Gradle's plain `build` lifecycle never runs any packaging
+            // task - call them explicitly (desktop\build.bat does this correctly).
+            targetFormats(TargetFormat.AppImage)
             packageName = "MultiVPN"
-            packageVersion = "3.6.3"
+            packageVersion = "3.6.6"
             description = "MultiVPN - multi-protocol VPN client"
             vendor = "MultiVPN"
             // java.net.http: MSI downloads; jdk.crypto.ec: SSH host keys (sshj)
