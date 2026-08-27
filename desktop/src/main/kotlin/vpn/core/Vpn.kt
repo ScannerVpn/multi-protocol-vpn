@@ -128,12 +128,27 @@ object VpnService {
     /** Ground-truth connected check for any supported protocol. */
     suspend fun isVpnUp(): Boolean = withContext(Dispatchers.IO) {
         tunnelConnected() ||
+            // Imported .ovpn configs can hand out subnets outside the four
+            // hardcoded prefixes tunnelConnected() knows — while THIS session
+            // connected such a tunnel, the session flag is the truth source.
+            openvpnSessionActive ||
             // RAS/IKEv2 adapters are often invisible to Java AND their ipconfig
             // section can be missed by locale-specific parsing — rasdial output
             // is the authoritative answer for dial-up profiles.
             connectedIkev2Profile() != null ||
             Xray.isRunning() || SingBox.isRunning() || WireProxy.isRunning()
     }
+
+    /**
+     * True while an OpenVPN connect that verified as up is still considered
+     * active in this app run. tunnelConnected() only recognizes the four
+     * built-in pool prefixes (10.10.10.x / 10.2.x / 10.8.x / 172.19.x); a
+     * third-party .ovpn that hands out e.g. 10.7.0.x or 192.168.50.x was
+     * reported Connected during connect and then "disconnected" by every
+     * later status poll — this flag keeps the two consistent.
+     */
+    @Volatile
+    private var openvpnSessionActive: Boolean = false
 
     /**
      * True while a connect session owns the cores — every real-ping helper
@@ -402,6 +417,29 @@ object VpnService {
             null
         }
 
+    /**
+     * Locale-tolerant decimal parser for values captured from Windows tooling
+     * (PowerShell's Measure-Object prints "12,5" on comma-decimal locales,
+     * which toDoubleOrNull rejects outright). Accepts digit/dot/comma input
+     * only; anything else returns null so callers keep their no-data answer.
+     */
+    internal fun localeAwareDouble(text: String): Double? {
+        val cleaned = text.trim().filter { it.isDigit() || it == '.' || it == ',' }
+        if (cleaned.isEmpty()) return null
+        // With BOTH separators present, the LAST one is the decimal mark and
+        // the other was grouping ("1,234.5" en-US / "1.234,5" de-DE).
+        val lastDot = cleaned.lastIndexOf('.')
+        val lastComma = cleaned.lastIndexOf(',')
+        val normalized = when {
+            lastDot >= 0 && lastComma >= 0 ->
+                if (lastComma > lastDot) cleaned.replace(".", "").replace(',', '.')
+                else cleaned.replace(",", "")
+            lastComma >= 0 -> cleaned.replace(',', '.')
+            else -> cleaned
+        }
+        return normalized.toDoubleOrNull()
+    }
+
     private fun tcpLatency(host: String, port: Int): Int? = try {
         val start = System.nanoTime()
         Socket().use { s ->
@@ -531,7 +569,7 @@ object VpnService {
             )
             pingFile.takeIf { it.exists() }?.readText()?.trim()
                 ?.takeIf { it.isNotEmpty() && it[0].isDigit() }
-                ?.toDoubleOrNull()?.let { Math.round(it).toInt() }
+                ?.let { localeAwareDouble(it) }?.let { Math.round(it).toInt() }
         } catch (_: Exception) {
             null
         }
@@ -616,7 +654,7 @@ object VpnService {
         isWireGuard(config) -> WireProxy.isRunning() && WireProxy.verifyTraffic(6000)
         isSingBox(config) -> SingBox.isRunning() &&
             (SingBox.verifyTraffic(6000) || SingBox.verifyDirectTraffic(6000))
-        config.protocol == "openvpn" -> tunnelConnected()
+        config.protocol == "openvpn" -> tunnelConnected() || openvpnInitialized()
         else -> tunnelConnected() || connectedIkev2Profile() != null
     }
 
@@ -653,7 +691,10 @@ object VpnService {
                 SingBox.kill()
                 Proxy.restoreState()
             }
-            config.protocol == "openvpn" -> stopOpenvpn()
+            config.protocol == "openvpn" -> {
+                stopOpenvpn()
+                openvpnSessionActive = false
+            }
             else -> {
                 HiddenRun.runAndWait(
                     listOf("rasdial", profileName(config.name), "/disconnect"),
@@ -700,6 +741,7 @@ object VpnService {
             }
         }
         connectionActive = false
+        openvpnSessionActive = false
         sessionTunMode = null
         Unit
     }
@@ -712,6 +754,7 @@ object VpnService {
      */
     fun killAllCores() {
         connectionActive = false
+        openvpnSessionActive = false
         sessionTunMode = null
         runCatching { Xray.kill() }
         runCatching { SingBox.kill() }
@@ -1236,8 +1279,14 @@ object VpnService {
         if (result.ok) {
             var tries = 0
             while (tries < 12) {
-                if (tunnelConnected()) {
+                // The subnet check alone fails for imported third-party
+                // configs whose pool is outside the hardcoded prefixes, so
+                // OpenVPN's own log line (always English, independent of the
+                // Windows locale) is accepted as an equally strong signal:
+                // it appears ONLY after TUN routes were actually installed.
+                if (tunnelConnected() || openvpnInitialized()) {
                     AppLog.i("VPN", "OpenVPN tunnel is up")
+                    openvpnSessionActive = true
                     return VpnResult(true, "Connected")
                 }
                 delay(1000)
@@ -1257,6 +1306,20 @@ object VpnService {
             },
         )
     }
+
+    /**
+     * True when the managed OpenVPN process logged its initialization line.
+     * OpenVPN writes logs in English regardless of the OS locale, and this
+     * marker only appears after the tun adapter, routes and TLS handshake all
+     * succeeded — a stronger per-config signal than matching one of the four
+     * known address pools. The log file is deleted before every connect, so a
+     * hit always belongs to the current attempt.
+     */
+    internal fun openvpnInitialized(): Boolean = runCatching {
+        ovpnLogFile.exists() &&
+            ovpnLogFile.readText()
+                .contains("Initialization Sequence Completed", ignoreCase = true)
+    }.getOrDefault(false)
 
     /** Interesting tail of the OpenVPN log for the error card. */
     private fun ovpnLastError(): String = runCatching {
