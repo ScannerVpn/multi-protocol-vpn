@@ -1,0 +1,21 @@
+# Shell scripts must keep LF endings: they run on Linux servers over SSH
+*.sh text eol=lf
+
+# Source and text files are UTF-8 WITHOUT a BOM. PowerShell's Set-Content and
+# Out-File add a BOM by default, which corrupted ConfigsScreen.kt once
+# (U+2026 became "\u00E2\u20AC\u00A6" mojibake in the UI strings).
+# Use [System.IO.File]::WriteAllText with UTF8Encoding($false) instead.
+*.kt text working-tree-encoding=UTF-8
+*.kts text working-tree-encoding=UTF-8
+*.md text working-tree-encoding=UTF-8
+*.json text working-tree-encoding=UTF-8
+
+# Bundled core binaries and archives must never be line-ending converted.
+*.exe binary
+*.dll binary
+*.dat binary
+*.jar binary
+*.p12 binary
+*.png binary
+*.ico binary
+*.icns binary
