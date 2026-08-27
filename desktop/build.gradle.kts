@@ -48,7 +48,13 @@ compose.desktop {
             //   -> build/compose/binaries/main/{msi,exe}/MultiVPN-<ver>.{msi,exe}
             // WARNING: Gradle's plain `build` lifecycle never runs any packaging
             // task - call them explicitly (desktop\build.bat does this correctly).
-            targetFormats(TargetFormat.AppImage)
+            // CI (GitHub Actions windows-latest ships WiX 3.x) additionally gets
+            // the MSI/EXE installers; local machines stay WiX-free by default.
+            targetFormats(
+                *(listOf(TargetFormat.AppImage) + if (System.getenv("CI") == "true") {
+                    listOf(TargetFormat.Msi, TargetFormat.Exe)
+                } else emptyList()).toTypedArray(),
+            )
             packageName = "MultiVPN"
             packageVersion = "3.6.11"
             description = "MultiVPN - multi-protocol VPN client"
