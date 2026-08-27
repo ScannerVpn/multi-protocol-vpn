@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "com.multivpn"
-version = "3.6.11"
+version = "3.6.12"
 
 kotlin {
     jvmToolchain(17)
@@ -56,7 +56,7 @@ compose.desktop {
                 } else emptyList()).toTypedArray(),
             )
             packageName = "MultiVPN"
-            packageVersion = "3.6.11"
+            packageVersion = "3.6.12"
             description = "MultiVPN - multi-protocol VPN client"
             vendor = "MultiVPN"
             // java.net.http: MSI downloads; jdk.crypto.ec: SSH host keys (sshj)

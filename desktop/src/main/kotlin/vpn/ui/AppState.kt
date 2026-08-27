@@ -154,6 +154,11 @@ object AppState {
         if (loaded) return
         loaded = true
         val imported = Storage.importLegacyFlutterData()
+        // v3.6.12: one-time import of defaults bundled with this build.
+        // Runs BEFORE the loaders below so the seeded entries are read back
+        // together with anything else on this first launch.
+        runCatching { seedBundledDefaults() }
+            .onFailure { AppLog.e("App", "bundled defaults seeding failed: ${it.message}") }
         servers = Storage.loadServers()
         configs = Storage.loadConfigs()
         subscriptions = Storage.loadSubscriptions()
@@ -177,6 +182,39 @@ object AppState {
             AppLog.i("App", "Auto-connecting to ${activeConfig?.name} on launch")
             connectActive()
         }
+    }
+
+    /**
+     * One-time seeding of the default configs bundled with the build
+     * (classpath resource /seed/links.txt — one vless/trojan/ss/hy2 share
+     * link per line; blank lines ignored, '#' comment lines allowed as long
+     * as they never START a real link line).
+     *
+     * Rules:
+     *  - Only a FRESH data directory is seeded. Anything already holding
+     *    servers/configs belongs to a real user and stays untouched.
+     *  - A marker file (.bundled-defaults) records that the check ran,
+     *    so a user who deletes every config never gets them resurrected.
+     *  - No bundle resource in this build → nothing happens (and no marker:
+     *    a later build that does ship defaults can still seed an install
+     *    which has stayed empty so far).
+     */
+    private fun seedBundledDefaults() {
+        val dir = Storage.dataDir
+        val links = Storage.classpathText("/seed/links.txt") ?: return
+        val marker = File(dir, ".bundled-defaults")
+        if (!Storage.isFreshDataDir(dir)) {
+            marker.writeText("skipped: existing user data\n")
+            AppLog.i("App", "Bundled defaults present but data dir is not fresh — skipped")
+            return
+        }
+        if (links.isBlank()) {
+            marker.writeText("bundle was empty\n")
+            return
+        }
+        val added = importLinks(links)
+        marker.writeText("imported=$added\n")
+        AppLog.i("App", "Seeded $added default config(s) from the bundle")
     }
 
     /**

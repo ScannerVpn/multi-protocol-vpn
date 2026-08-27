@@ -10,7 +10,7 @@
 > lessons (start there before changing anything) and section ۸ lists known limitations.
 
 > این سند خودکفاست: هر ایجنت جدید فقط با خواندن همین فایل باید بتواند پروژه را ادامه دهد،
-> بیلد بگیرد، دیباگ کند و چیزی را نشکند. آخرین بروزرسانی: **2026-08-27 — نسخه 3.6.4**.
+> بیلد بگیرد، دیباگ کند و چیزی را نشکند. آخرین بروزرسانی: **2026-08-27 — نسخه 3.6.12**.
 
 ---
 
@@ -33,7 +33,7 @@ cd desktop
 # 1) یک‌بار در هر checkout تازه: هسته‌ها در git نیستند (~۱۳۰MB)
 powershell -ExecutionPolicy Bypass -File .\fetch-cores.ps1
 
-# 2) تست‌ها — ۱۲۳ تست، همه آفلاین، ~۳۰ ثانیه
+# 2) تست‌ها — ۱۲۹ تست، همه آفلاین، ~۳۰ ثانیه
 .\gradlew.bat test
 
 # 3) بیلد دستی (معادل کاری که build.bat می‌کند)
@@ -431,6 +431,10 @@ MSYS_NO_PATHCONV=1 plink -batch -hostkey "<SSH-HOSTKEY-FINGERPRINT>" \
     - هر builder خروجی خودش را با `SingBox.unresolvedOutboundRef` چک می‌کند (throw زودهنگام به‌جای مرگ خاموش هسته) و تست رگرسیون دارد؛
     - قبل از هر «Connected — include/exclude» فقط پا بودن آداپتور کافی نیست — **مسیر DIRECT هم با `verifyDirectTraffic` تأیید می‌شود** ( پروسهٔ خودِ اپ روی لیست direct اسپلیت است)؛ اگر آن پا چیزی حمل نکرد = همان «تلگرام آنلاین، مابقی سیستم آفلاین» → fallback صادقانه به session کل‌پراکسی با پیام روشن؛
     - نام اپ‌های انتخابی قبل از ورود به قواعد `normalizeAppName` می‌شوند (lowercase + تضمین `.exe`) چون رشتهٔ `process_name` در sing-box case-sensitive است و انتخابِ `Telegram`/`CHROME.EXE` بدون نرمالایز در هیچ rule ای نمی‌نشست.
+33. **پیش‌فرضِ «نصب تازه = خالی» را با مکانیزم seed بشکن، نه با دستکاری‌های after-install**: کانفیگ‌ها/سرورها فقط در `%APPDATA%\MultiVPN\` زندگی می‌کنند و هرگز با exe/MSI سفر نمی‌کنند؛ پس هر نصب تازه بخش سرور و کانفیگ خالی دارد. راهکار v3.6.12 — `AppState.seedBundledDefaults`:
+    - تنها منبع داده = resource ی کلاس‌پت `/seed/links.txt` (هر خط یک لینک share)؛ build در CI می‌تواند آن را از secret ی `VPN_SEED_LINKS_B64` تزریق کند تا اعتبارنامه‌های واقعی **هرگز وارد تاریخچهٔ گیت نشوند**؛
+    - فقط data-dir ی **fresh** (بدون servers.json و configs.json) مقداردهی می‌شود؛ مارکر `.bundled-defaults` تضمین می‌کند پاک‌کردنِ همهٔ کانفیگ‌ها توسط کاربر دائمی بماند (resurrection ممنوع)؛
+    - نبودِ links.txt در بیلد = کاملاً خنثی (و بدون نوشتن مارکر) — بیلدی که بعداً seed داشته باشد هنوز می‌تواند چنین نصبی را مقداردهی کند.
 
 ---
 
@@ -886,6 +890,13 @@ SSH چک کن که سرور همان لحظه در دسترس است.
     - **مُهر «Connected — include/exclude» بدون تأیید پاى direct**: وعدهٔ دو‌سمت اسپلیت (انتخابی ها داخل تونل، بقیه با اینترنت عادی) فقط نیمهٔ اول verify می‌شد؛ اگر مسیر مستقیم به هر دلیل سیاه باشد همان علامت گزارش کاربر ظاهر می‌شود. حالا **DIRECT-LEG GATE** در هر سه شاخه (xray / hy2 / wireproxy): پس از tunnelConnected، یک درخواست plain از پروسهٔ اپ (که همیشه در لیست direct قواعد است)؛ شکست ⇒ teardown موتور TUN و fallback به session کل‌پراکسیِ تأییدشده + پیام صریح «per-app routing aborted».
     - بهینه‌سازی‌های همراه: `SingBox.normalizeAppName` (همهٔ انتخاب‌ها به lowercase image-name + `.exe`؛ رشته‌های process_name حساس به بزرگی‌حرف اند)، `unresolvedOutboundRef` به‌عنوان sanity-check پایان builderها (throw زودهنگام).
     - تست‌های جدید: `SplitRoutingTest` (+۴): resolve شدن همهٔ ارجاع‌های route، تعریف direct در hy2-TUN (+ سالم ماندن شاخهٔ plain)، نرمالایز نام اپ‌ها، فرود انتخاب‌های mixed-case در قواعد. جمعاً **۱۲۳ تست سبز**. نسخهٔ اپ ← 3.6.11.
+
+25. **v3.6.12 (2026-08-27) — «نصب تازه، بخش سرور و کانفیگ خالی است؛ کانفیگ‌های من داخل اپ نیست»**: پاسخ درست = مکانیزم پیش‌فرض‌های همراه‌بیلد:
+    - **ریشه**: دادهٔ کاربر (%APPDATA%) هرگز با پکیج توزیع نمی‌شود؛ سازوکار رسمی‌ای برای seed شدن کانفیگ‌های فروشنده وجود نداشت. حالا `AppState.seedBundledDefaults` + دو helper ی `Storage.classpathText` / `Storage.isFreshDataDir`:
+      resource ی `/seed/links.txt` (یک لینک vless/trojan/ss/hy2 در هر خط) یک‌بار روی **نصب تازه** ایمپورت می‌شود (همان مسیر آزمودهٔ `importLinks`)، مارکر `.bundled-defaults` جلوی زنده‌شدن دوبارهٔ موارد حذف‌شده را می‌گیرد و data-dir غیر-fresh کاملاً دست‌نخورده می‌ماند.
+    - **CI**: مرحلهٔ «Inject bundled default configs» محتوای secret ی `VPN_SEED_LINKS_B64` را قبل از بیلد به `resources/seed/links.txt` می‌ریزد → اعتبارنامه‌ها به git آلوده نمی‌شوند ولی هر artifact منتشرشده آن‌ها را حمل می‌کند؛ secret نباشد، بیلد بدون پیش‌فرض منتشر می‌شود.
+    - `.gitignore`: خود فایل `links.txt` نیز مستقلاً ignore شده تا تزریق محلی تصادفی ممکن نیست commit شود. README ی همین قرارداد در `desktop/src/main/resources/seed/`.
+    - تست‌های جدید: `SeedDefaultsTest` (+۶): classpathText (موجود/غایب/مسیر نسبی)، isFreshDataDir (خالی/servers.json/configs.json). جمعاً **۱۲۹ تست سبز**. نسخهٔ اپ ← 3.6.12.
 
 ---
 

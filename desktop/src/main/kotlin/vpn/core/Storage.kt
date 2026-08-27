@@ -28,6 +28,26 @@ object Storage {
 
     val generatedDir: File get() = File(dataDir, "generated")
 
+    /**
+     * Text of a file bundled on the classpath (e.g. "/seed/links.txt"),
+     * or null when the resource does not exist / cannot be read.
+     */
+    fun classpathText(path: String): String? = runCatching {
+        Storage::class.java.getResourceAsStream(path)?.use { stream ->
+            stream.readBytes().toString(Charsets.UTF_8)
+        }
+    }.getOrNull()
+
+    /**
+     * A data directory is "fresh" when it has never held any user data.
+     * Only fresh installs receive the bundled default configs — an existing
+     * servers.json/configs.json means real user data that must never be
+     * augmented behind their back, and neither should a deletion be undone
+     * by re-seeding.
+     */
+    fun isFreshDataDir(dir: File): Boolean =
+        !File(dir, "servers.json").exists() && !File(dir, "configs.json").exists()
+
     fun generatedConfigDir(serverId: String): File =
         File(generatedDir, serverId).apply { mkdirs() }
 
