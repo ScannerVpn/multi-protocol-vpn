@@ -650,7 +650,7 @@ private fun DashboardFooter() {
         )
         FooterText("SPLIT ${if (settings.splitMode == SplitModes.OFF) "OFF" else settings.splitMode.uppercase()}")
         Spacer(Modifier.weight(1f))
-        FooterText("MULTIVPN v3.6.8")
+        FooterText("MULTIVPN v3.6.9")
     }
 }
 

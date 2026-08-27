@@ -20,8 +20,8 @@ enum class VpnStatus { DISCONNECTED, CONNECTING, CONNECTED, DISCONNECTING, ERROR
 
 data class VpnResult(val ok: Boolean, val message: String)
 
-/** Outcome of a real-traffic (through-the-core) ping attempt. */
-internal sealed class RealPingResult {
+/** Tri-state outcome of a pre-connect latency measurement. */
+sealed class RealPingResult {
     /** Traffic passed; [ms] is the measured round trip of the HTTP probe. */
     data class Ok(val ms: Int) : RealPingResult()
 
@@ -168,63 +168,77 @@ object VpnService {
     @Volatile
     private var sessionTunMode: Boolean? = null
 
+    /** Which latency strategy applies to a config (pure decision). */
+    internal enum class LatencyEngine {
+        /** Start a temp xray core and push a real HTTP request through it. */
+        XRAY,
+        /** Start a temp sing-box core (hysteria2) with a real traffic test. */
+        SINGBOX,
+        /** Start a temp wireproxy (wg/amnezia) with a real traffic test. */
+        WIREPROXY,
+        /** No userspace core exists to verify BEFORE connecting; the honest
+         * answer is "unverifiable", never a synthesized number. */
+        UNVERIFIABLE,
+    }
+
     /**
-     * Measures latency for a config's endpoint.
-     *
-     * Every proxy protocol (vless/trojan/ss/hysteria2/WireGuard/Amnezia) is
-     * verified with a REAL traffic test: the core is started for that one
-     * config and an HTTP request must pass through the tunnel.
-     *
-     * There is deliberately NO ICMP/TCP fallback for these protocols. A bare
-     * TCP handshake proves nothing, and ICMP proves even less: on a filtered
-     * network `ping` to the server often succeeds while the protocol's port is
-     * blocked, so the fallback painted unreachable servers green with a
-     * plausible-looking latency. If the real test cannot run or does not
-     * pass, the config has NO latency — that is the honest answer.
-     *
-     * Only the OS-managed tunnel protocols (ikev2/openvpn), which have no
-     * userspace core to probe with, still report a host-reachability estimate.
+     * Pure routing decision for [configLatencyResult], kept deterministic so
+     * tests can pin exactly which family falls into which engine.
      */
-    suspend fun configLatencyMs(config: VpnConfig, sshPort: Int? = null): Int? =
+    internal fun classifyLatencyEngine(config: VpnConfig): LatencyEngine {
+        val parsedOk = config.xrayLink?.let { Links.parse(it) } != null
+        return when {
+            parsedOk && config.protocol != "hysteria2" -> LatencyEngine.XRAY
+            config.protocol == "hysteria2" -> LatencyEngine.SINGBOX
+            isWireGuard(config) -> LatencyEngine.WIREPROXY
+            else -> LatencyEngine.UNVERIFIABLE
+        }
+    }
+
+    /**
+     * Measures latency for a config's endpoint — three-state:
+     *
+     *  - [RealPingResult.Ok]      : REAL end-to-end traffic passed through
+     *    this exact config's tunnel (temp core + HTTP request). The only
+     *    outcome allowed to display a millisecond value.
+     *  - [RealPingResult.Failed]  : tested for real and it does NOT carry
+     *    traffic → UI shows "timeout".
+     *  - [RealPingResult.Skipped] : cannot be meaningfully tested before a
+     *    connect (ikev2/openvpn have no userspace core; wg rows missing their
+     *    .conf; cores busy with a live session). UI stays silent instead of
+     *    inventing a fake indicator.
+     *
+     * WHY there is deliberately NO TCP/ICMP fallback anymore: on Iranian-style
+     * filtered networks a bare SYN/ACK almost always completes on open ports
+     * (SSH/443) even while the service itself is fully blocked — usually the
+     * actual kill arrives after TLS ClientHello or at the UDP (500/4500)
+     * layer. A host-reachability estimate therefore painted DEAD configs
+     * green with a plausible-looking number while nothing could connect.
+     */
+    suspend fun configLatencyResult(config: VpnConfig, sshPort: Int? = null): RealPingResult =
         withContext(Dispatchers.IO) {
             val link = config.xrayLink?.let { Links.parse(it) }
             val host = link?.address ?: config.serverIp
-            if (host.isBlank()) return@withContext null
+            if (host.isBlank()) return@withContext RealPingResult.Skipped
 
-            // 1. TCP-proxy protocols (vless/trojan/ss): real traffic test.
-            if (link != null && config.protocol != "hysteria2") {
-                return@withContext when (val rp = quickXrayPing(link)) {
-                    is RealPingResult.Ok -> rp.ms
-                    // Tested for real and it does not carry traffic, or could
-                    // not be tested at all — either way we must NOT invent a
-                    // latency from ICMP/an open unrelated port.
-                    RealPingResult.Failed, RealPingResult.Skipped -> null
-                }
+            // Route purely by classification; [sshPort] no longer feeds any
+            // estimate (kept in the signature for API stability only).
+            when (classifyLatencyEngine(config)) {
+                LatencyEngine.XRAY -> quickXrayPing(link!!)
+                LatencyEngine.SINGBOX -> quickHysteriaPing(config)
+                LatencyEngine.WIREPROXY -> quickWireguardPing(config)
+                // vless/trojan/ss rows whose stored link no longer parses,
+                // ikev2/openvpn and anything without a pre-connect verifier:
+                // NO number, NO port fishing, ever again.
+                LatencyEngine.UNVERIFIABLE -> RealPingResult.Skipped
             }
+        }
 
-            // 2. UDP proxy protocols: quick tunnel connect + real HTTP test.
-            if (isSingBox(config)) {
-                return@withContext when (val rp = quickHysteriaPing(config)) {
-                    is RealPingResult.Ok -> rp.ms
-                    RealPingResult.Failed, RealPingResult.Skipped -> null
-                }
-            }
-            if (isWireGuard(config)) {
-                return@withContext when (val rp = quickWireguardPing(config)) {
-                    is RealPingResult.Ok -> rp.ms
-                    RealPingResult.Failed, RealPingResult.Skipped -> null
-                }
-            }
-
-            // 3. ikev2 / openvpn only: no userspace core exists to push real
-            // traffic through before connecting, so a reachability estimate is
-            // the best available signal. TCP first (a filtered network usually
-            // still answers ICMP, which is exactly the false-green trap), and
-            // only against a port that belongs to this server.
-            listOfNotNull(sshPort, 22, 443, 1194, 500, 4500).distinct().forEach { p ->
-                tcpLatency(host, p)?.let { return@withContext it }
-            }
-            null
+    /** Legacy integer view of [configLatencyResult] (null unless Ok). */
+    suspend fun configLatencyMs(config: VpnConfig, sshPort: Int? = null): Int? =
+        when (val rp = configLatencyResult(config, sshPort)) {
+            is RealPingResult.Ok -> rp.ms
+            else -> null
         }
 
     /**
@@ -402,7 +416,8 @@ object VpnService {
 
     /**
      * Scans a list of ports on [host] and returns the first one that accepts TCP.
-     * Returns null when none are reachable. Useful for pre-connect port probing.
+     * Returns null when none are reachable. Retained ONLY for diagnostics that
+     * explicitly need raw reachability — never used to produce a latency pill.
      */
     suspend fun scanPorts(host: String, ports: List<Int>, timeoutMs: Int = 3000): Int? =
         withContext(Dispatchers.IO) {

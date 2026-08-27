@@ -306,7 +306,7 @@ private fun Sidebar(selected: Int, onSelect: (Int) -> Unit) {
                     }
                     Spacer(Modifier.height(7.dp))
                     Text("Multi-Protocol Client", fontSize = 9.5.sp, color = C.TextFaint)
-                    Text("v3.6.8 · x86_64", fontSize = 9.5.sp, color = C.TextFaint)
+                    Text("v3.6.9 · x86_64", fontSize = 9.5.sp, color = C.TextFaint)
                 }
             }
         }

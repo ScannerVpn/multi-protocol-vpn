@@ -24,6 +24,7 @@ import vpn.core.KillSwitchCleanup
 import vpn.core.Links
 import vpn.core.Proxy
 import vpn.core.ProxyPorts
+import vpn.core.RealPingResult
 import vpn.core.ScanTunnels
 import vpn.core.ServerConfig
 import vpn.core.SingBox
@@ -91,9 +92,17 @@ object AppState {
 
     /**
      * Measures latency for one config with a REAL traffic test (see
-     * VpnService.configLatencyMs). Never runs while a connection is live or
-     * being established: the cores are killed process-family-wide, so a ping
-     * would tear down the user's tunnel.
+     * VpnService.configLatencyResult). Outcome → UI mapping:
+     *
+     *  - Ok(ms)      → green/amber/red "N ms" pill (end-to-end proven).
+     *  - Failed      → red "timeout" pill (tested for real, carries nothing).
+     *  - Skipped     → NO pill at all and any stale value is cleared: the
+     *    config family cannot be verified before connecting (ikev2/openvpn,
+     *    wg without .conf, cores busy). Showing a synthesized number here is
+     *    exactly the "fake ping on filtered configs" bug — banned since 3.6.9.
+     *
+     * Never runs while a connection is live or being established: the cores
+     * are killed process-family-wide, so a ping would tear down the tunnel.
      */
     fun pingConfig(config: VpnConfig) {
         if (config.id in pinging) return
@@ -103,12 +112,22 @@ object AppState {
         scope.launch {
             try {
                 val sshPort = servers.firstOrNull { it.ip == config.serverIp }?.sshPort
-                val ms = runCatching { VpnService.configLatencyMs(config, sshPort) }.getOrNull()
-                if (ms != null) {
-                    latency = latency + (config.id to ms)
-                } else {
-                    latency = latency - config.id
-                    latencyFailed = latencyFailed + config.id
+                when (val rp = runCatching {
+                    VpnService.configLatencyResult(config, sshPort)
+                }.getOrElse { RealPingResult.Failed }) {
+                    is RealPingResult.Ok -> {
+                        latency = latency + (config.id to rp.ms)
+                        latencyFailed = latencyFailed - config.id
+                    }
+                    RealPingResult.Failed -> {
+                        latency = latency - config.id
+                        latencyFailed = latencyFailed + config.id
+                    }
+                    RealPingResult.Skipped -> {
+                        // Untestable is not dead: stay silent (and forget old numbers).
+                        latency = latency - config.id
+                        latencyFailed = latencyFailed - config.id
+                    }
                 }
             } finally {
                 pinging = pinging - config.id
