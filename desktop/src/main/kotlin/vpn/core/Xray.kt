@@ -234,11 +234,15 @@ $outbound,
             )
             lastPid = 0
         }
-        repeat(2) {
-            HiddenRun.runAndWait(
-                listOf("$sys\\System32\\taskkill.exe", "/IM", "xray.exe", "/F"),
-                timeoutMs = 10_000,
-            )
+        if (lastPid == 0) {
+            // No PID known at entry — image-wide fallback instead of killing
+            // every xray.exe on the machine after we already handled ours.
+            repeat(2) {
+                HiddenRun.runAndWait(
+                    listOf("$sys\\System32\\taskkill.exe", "/IM", "xray.exe", "/F"),
+                    timeoutMs = 10_000,
+                )
+            }
         }
     }
 

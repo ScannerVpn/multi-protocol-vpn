@@ -158,10 +158,15 @@ object WireProxy {
             )
             lastPid = 0
         }
-        HiddenRun.runAndWait(
-            listOf("$sys\\System32\\taskkill.exe", "/IM", "wireproxy.exe", "/F"),
-            timeoutMs = 10_000,
-        )
+        if (lastPid == 0) {
+            // No PID known at entry (pre-tracking leftovers, startup heal) —
+            // fall back to the image name, accepting collateral damage,
+            // rather than orphaning a core that holds the proxy port.
+            HiddenRun.runAndWait(
+                listOf("$sys\\System32\\taskkill.exe", "/IM", "wireproxy.exe", "/F"),
+                timeoutMs = 10_000,
+            )
+        }
     }
 
     /** PID of the core we started most recently (0 = unknown). */

@@ -414,11 +414,15 @@ $route
             )
             lastPid = 0
         }
-        listOf("HiddifyCli.exe", "sing-box.exe").forEach { image ->
-            HiddenRun.runAndWait(
-                listOf("$sys\\System32\\taskkill.exe", "/IM", image, "/F"),
-                timeoutMs = 10_000,
-            )
+        if (lastPid == 0) {
+            // No PID known at entry — image-wide fallback instead of killing
+            // the user's unrelated HiddifyCli/sing-box instances as well.
+            listOf("HiddifyCli.exe", "sing-box.exe").forEach { image ->
+                HiddenRun.runAndWait(
+                    listOf("$sys\\System32\\taskkill.exe", "/IM", image, "/F"),
+                    timeoutMs = 10_000,
+                )
+            }
         }
     }
 
