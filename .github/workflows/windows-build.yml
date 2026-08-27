@@ -53,25 +53,6 @@ jobs:
         shell: pwsh
         run: ./fetch-cores.ps1 -SaveHashes
 
-      # v3.6.12: bundled default configs are injected from a repository
-      # secret (VPN_SEED_LINKS_B64 = base64 of the links file) so real
-      # credentials never live in the git tree, yet every released binary
-      # still carries them. Absent secret = build ships without defaults.
-      - name: Inject bundled default configs (from secret)
-        shell: pwsh
-        env:
-          SEED_LINKS_B64: ${{ secrets.VPN_SEED_LINKS_B64 }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $out = Join-Path (Join-Path 'desktop' 'src/main/resources/seed') 'links.txt'
-          New-Item -ItemType Directory -Force -Path (Split-Path $out) | Out-Null
-          if ($env:SEED_LINKS_B64) {
-            [IO.File]::WriteAllBytes($out, [Convert]::FromBase64String($env:SEED_LINKS_B64))
-            Write-Host "links.txt injected ($((Get-Item $out).Length) bytes)"
-          } else {
-            Write-Host 'VPN_SEED_LINKS_B64 not set — shipping without bundled defaults'
-          }
-
       - name: Run tests (must stay green)
         working-directory: desktop
         run: ./gradlew.bat --no-daemon test

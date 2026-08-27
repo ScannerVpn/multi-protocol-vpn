@@ -52,9 +52,6 @@ desktop/.kotlin/
 # --- Bundled VPN binaries (copied locally before build, not committed) ---
 desktop/src/main/resources/bin/
 
-# --- Bundled default configs (injected from a CI secret, NEVER committed) ---
-desktop/src/main/resources/seed/links.txt
-
 # --- Local tooling / session data ---
 .tools/
 .zcode/
