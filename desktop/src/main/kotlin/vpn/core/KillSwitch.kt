@@ -44,14 +44,28 @@ object KillSwitch {
      * Deterministic core executable paths — added as allow rules whether or
      * not they exist right now (a rule pointing at a not-yet-extracted exe is
      * harmless, and arming happens BEFORE ensureCore extracts the binaries).
+     *
+     * A system-wide OpenVPN install (Program Files) is also allowed: Vpn.kt's
+     * findOpenvpnExe() happily falls back to it for imported third-party
+     * .ovpn configs, and without an allow rule arming the switch would cut
+     * that very process's traffic off mid-session.
      */
-    private fun allowedPrograms(): List<String> = listOf(
-        File(Storage.dataDir, "bin/xray/xray.exe"),
-        File(Storage.dataDir, "bin/singbox/HiddifyCli.exe"),
-        File(Storage.dataDir, "bin/singbox/sing-box.exe"),
-        File(Storage.dataDir, "bin/wireproxy/wireproxy.exe"),
-        File(Storage.dataDir, "bin/openvpn/openvpn.exe"),
-    ).map { it.absolutePath }.distinct()
+    private fun allowedPrograms(): List<String> {
+        val programs = mutableListOf(
+            File(Storage.dataDir, "bin/xray/xray.exe"),
+            File(Storage.dataDir, "bin/singbox/HiddifyCli.exe"),
+            File(Storage.dataDir, "bin/singbox/sing-box.exe"),
+            File(Storage.dataDir, "bin/wireproxy/wireproxy.exe"),
+            File(Storage.dataDir, "bin/openvpn/openvpn.exe"),
+        )
+        runCatching {
+            System.getenv("ProgramFiles")?.let { pf ->
+                val systemOvpn = File(pf, "OpenVPN/bin/openvpn.exe")
+                if (systemOvpn.exists()) programs.add(systemOvpn)
+            }
+        }
+        return programs.map { it.absolutePath }.distinct()
+    }
 
     /** Arms the switch (one UAC prompt). Returns false when declined/failed. */
     suspend fun arm(): VpnResult = withContext(Dispatchers.IO) {
