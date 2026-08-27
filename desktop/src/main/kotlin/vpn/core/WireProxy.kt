@@ -98,9 +98,20 @@ object WireProxy {
         sb.appendLine("PublicKey = $peerKey")
         if (!psk.isNullOrBlank()) sb.appendLine("PresharedKey = $psk")
         sb.appendLine("Endpoint = $endpoint")
-        // wireproxy routes everything it is asked to proxy through the tunnel;
-        // ::/0 is dropped because the netstack device is IPv4-only here.
-        sb.appendLine("AllowedIPs = 0.0.0.0/0")
+        // Preserve the source config's AllowedIPs when it declares them: an
+        // imported third-party conf may deliberately be a split tunnel
+        // ("10.0.0.0/8" only), and silently rewriting it to a full
+        // 0.0.0.0/0 tunnel also dragged LAN/banking traffic through the VPN.
+        // IPv6 entries are still dropped — the netstack device is IPv4-only
+        // here, so ::/0 would make wireproxy route traffic it cannot carry.
+        val allowed = field("AllowedIPs")
+            ?.split(',')
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() && !it.contains(':') }
+            ?.joinToString(", ")
+            ?.takeIf { it.isNotEmpty() }
+            ?: "0.0.0.0/0"
+        sb.appendLine("AllowedIPs = $allowed")
         sb.appendLine("PersistentKeepalive = $keepalive")
         sb.appendLine()
         sb.appendLine("[Socks5]")

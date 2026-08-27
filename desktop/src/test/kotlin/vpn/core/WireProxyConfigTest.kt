@@ -207,6 +207,20 @@ class WireProxyConfigTest {
     }
 
     @Test
+    fun `imported split-tunnel allowed ips are preserved`() {
+        // A third-party conf that deliberately routes only corporate ranges —
+        // rewriting it to 0.0.0.0/0 silently dragged LAN/banking traffic
+        // through the VPN (regression for the hardcoded full-tunnel rewrite).
+        val out = WireProxy.buildConfig(
+            conf(plainConf.replace("AllowedIPs = 0.0.0.0/0", "AllowedIPs = 10.0.0.0/8, fd00::/8, 192.168.0.0/16")),
+            amnezia = false,
+        )!!
+
+        assertContains(out, "AllowedIPs = 10.0.0.0/8, 192.168.0.0/16")
+        assertFalse(out.contains("fd00"), "IPv6 entries must still be dropped")
+    }
+
+    @Test
     fun `mtu defaults differ between amnezia and plain wireguard`() {
         val amnezia = WireProxy.buildConfig(conf(amneziaConf.replace("\n        Jmin = 10", "")), amnezia = true)!!
         val plain = WireProxy.buildConfig(conf(plainConf), amnezia = false)!!
