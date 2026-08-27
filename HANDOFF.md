@@ -24,20 +24,27 @@ $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.19.10-hotspot"
 
 cd desktop
 
-# 2) یک‌بار در هر checkout تازه: هسته‌ها در git نیستند (~۱۳۰MB)
+# 0) کوتاه‌ترین راه برای داشتن EXE (داخل desktop\):
+.\build.bat          # JDK detect + دانلود خودکار هسته‌های نایب + createDistributable
+                     # + چاپ مسیر واقعی EXE؛ اگر قفل/خراب شد: .\build.bat clean
+                     # معادل PS: .\build.ps1 (و -Clean). بدون لوکال هم EXE می‌خواهی؟ CI:
+                     # .github/workflows/windows-build.yml → artifact «MultiVPN-Windows-x64»
+
+# 1) یک‌بار در هر checkout تازه: هسته‌ها در git نیستند (~۱۳۰MB)
 powershell -ExecutionPolicy Bypass -File .\fetch-cores.ps1
 
-# 3) تست‌ها — ۹۲ تست، همه آفلاین، ~۲۵ ثانیه
+# 2) تست‌ها — ۹۲ تست، همه آفلاین، ~۲۵ ثانیه
 .\gradlew.bat test
 
-# 4) بیلد
-.\gradlew.bat createDistributable    # پوشه قابل‌اجرا
-.\gradlew.bat packageExe             # نصب‌کننده تک‌فایل (~۱۵۵MB)
+# 3) بیلد دستی (معادل کاری که build.bat می‌کند)
+.\gradlew.bat createDistributable     # اپ پورتیبل — بدون نیاز به WiX Toolset
+.\gradlew.bat packageMsi packageExe   # نصب‌کننده‌ها — فقط با WiX 3.x نصب‌شده
 ```
 
 **چهار تله‌ای که وقت ایجنت را تلف می‌کنند:**
 
-1. **مرحله ۲ را رد نکن.** بیلد بدون هسته‌ها **موفق** می‌شود ولی اپ با هیچ پروتکلی وصل
+1. **مرحلهٔ ۱ را رد نکن** (یا ساده‌تر: اصلاً `build.bat` را بزن که خودش هسته‌ها را می‌آورد).
+   بیلد بدون هسته‌ها **موفق** می‌شود ولی اپ با هیچ پروتکلی وصل
    نمی‌شود و هیچ خطای واضحی هم نمی‌دهد. جدول خلاصه اسکریپت را چک کن که همه `OK` باشند.
 2. **قبل از بیلد MultiVPN.exe در حال اجرا را ببند** وگرنه
    `Unable to delete directory` می‌گیری (بی‌خطر، فقط ببند و دوباره بزن).
@@ -168,18 +175,29 @@ TUN/اسپلیت هر اتصال یک UAC می‌خواهند (ذات ویندو
 
 ## ۳. راهنمای بیلد و اجرا (دقیق)
 
-```bash
-# پیش‌نیاز: JDK 17 (روی این سیستم):
-export JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-17.0.19.10-hotspot"
-# (java پیش‌فرض سیستم 8 است — بدون JAVA_HOME بیلد fail می‌شود!)
-
+```bat
+rem ساده‌ترین مسیر — همهٔ پیش‌نیازها را خودش هندل می‌کند:
 cd desktop
-# با wrapper (توصیه‌شده — گریدل جدا لازم نیست، wrapper در git است):
-.\gradlew.bat createDistributable
-
-# خروجی: build\compose\binaries\main\app\MultiVPN\MultiVPN.exe
-# برای اجرای مستقیم در حین توسعه: gradle.bat run
+build.bat            rem یا: build.bat clean   /   powershell .\build.ps1 -Clean
 ```
+
+مسیر دستی معادل:
+```bash
+export JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-17.0.19.10-hotspot"
+# (java پیش‌فرض سیستم 8 است — بدون JAVA_HOME بیلد fail می‌شود! build.bat خودش پیدا می‌کند.)
+
+powershell -ExecutionPolicy Bypass -File fetch-cores.ps1   # فقط بار اول (~۱۳۰MB)
+.\gradlew.bat createDistributable    # wrapper داخل git است؛ گریدل جدا لازم نیست
+```
+
+| خروجی | مسیر واقعی | پیش‌نیاز |
+|-------|------------|----------|
+| اپ پورتیبل (همین را اجرا کن) | `build\compose\binaries\main\app\MultiVPN\MultiVPN.exe` | هیچ |
+| نصب‌کننده MSI/EXE | `...\binaries\main\{msi,exe}\MultiVPN-3.6.6.{msi,exe}` | **WiX 3.x** + `packageMsi packageExe` صریح |
+
+⚠️ `gradlew build` هیچ‌وقت این تسک‌ها را صدا نمی‌زند — باید صریح اجرا شوند (درس §5.28).
+برای اجرای مستقیم در حین توسعه: `gradlew.bat run`. این خط لوله به شکل خودکار روی GitHub هم هست:
+Actions → windows-build → artifact «MultiVPN-Windows-x64» (پورتیبل zip + هر دو نصب‌کننده).
 
 - **بعد از هر تغییر در `server/*.sh` حتماً** فایل را به `desktop/src/main/resources/` کپی و
   `createDistributable` مجدد بزنید (اسکریپت داخل jar باندل است).
@@ -375,6 +393,15 @@ MSYS_NO_PATHCONV=1 plink -batch -hostkey "<SSH-HOSTKEY-FINGERPRINT>" \
     `fragment` هر `+` را فضا می‌کند (%2B روی سیم ← ' ' در اپ) و پسورد/نام را بی‌صدا خراب
     می‌کند؛ برای کامپوننت‌های خام از یک درصد-دیکودر سخت‌گیر (`Links.pct`) استفاده کنید نه
     `dec()` (که قرارداد form-encoded است و فقط برای rawQuery درست است).
+28. **تسک‌های پکیجینگ Compose به lifecycle `build` وصل نیستند**: `gradlew build` فقط
+    کامپایل/jar می‌دهد و **هرگز** exe/msi نمی‌سازد (`build.bat` قدیمی دقیقاً همین اشتباه را
+    می‌کرد). دو تلهٔ همراهش: مسیر خروجی چاپیِ قدیمی (`binaries\app\...\windows-exe`) از جعلی
+    بود — مسیر واقعی `binaries\main\app\MultiVPN\` است — و `build.ps1` با
+    `Split-Path $PSScriptRoot -Parent` یک سطح بالاتر از پروژهٔ گریدل می‌رفت و gradlew را پیدا
+    نمی‌کرد. الان هردو بازنویسی شده‌اند (JDK auto-detect + دانلود خودکار هسته‌ها +
+    `createDistributable`). یادآوری: نصب‌کننده‌های msi/exe ی jpackage همیشه **WiX 3.x** لازم
+    دارند ولی اپ پورتیبلِ `createDistributable` بدونش کار می‌کند. CI معادل:
+    `.github/workflows/windows-build.yml`.
 
 ---
 
@@ -740,6 +767,26 @@ SSH چک کن که سرور همان لحظه در دسترس است.
       (Server/Protocol/Latency)، ردیف ConfigStrip برای سوییچ سریع کانفیگ، فوتر mono. سه اسکرین دیگر
       روی `widthIn(max=880dp)` وسط‌چین شدند. نام توکن‌های `C.*` دست‌نخورده ماند (سایر اسکرین‌ها سالم).
     - نسخهٔ اپ → 3.6.5. تست‌ها: 92/92 سبز (۶ تست KS حذف، ۶ تست cleanup اضافه).
+
+19. **v3.6.6 (2026-08-27) — «build.bat هیچ اکسه نمی‌داد» + خط لوله CI ویندوز**: گزارش کاربر
+    بعد از run کردن `desktop\build.bat` فایل exe تولید نمی‌شد. سه ریشهٔ مستقل همزمان بود:
+    - `build.bat` فقط `gradlew clean build -x test` می‌زد — تسک‌های پکیجینگ Compose جزو
+      lifecycle `build` نیستند (درس §5.28)؛ مسیر چاپی خروجی هم جعلی بود
+      (`...\app\MultiVPN\windows-exe\...` ؛ واقعی: `...\main\app\MultiVPN\MultiVPN.exe`).
+    - `build.ps1`: cd غلط یک‌سطح-بالا (می‌رفت ریشهٔ ریپو، جایی که settings.gradle.kts نیست)
+      + همان مسیر جعلی خروجی.
+    - حتی اگر کاربر دستی تلاش می‌کرد: فرمت‌های `Msi/Exe` بدون **WiX 3.x** شکست می‌خوردند.
+    تغییرات: `targetFormats(AppImage)` پیش‌فرض شد (اپ پورتیبل با jpackage محلی، بدون WiX)،
+    `Msi/Exe` حسب تقاضا با `packageMsi packageExe`؛ `packageVersion` از 3.6.3 قدیمی همگام →
+    3.6.6؛ هردو اسکریپت بازنویسی شدند: JDK auto-detect (JAVA_HOME/Adoptium/PATH)، پرکردن
+    خودکار هسته‌های نایب با `fetch-cores.ps1 -SkipWireproxy`، verify و چاپ مسیر واقعی خروجی
+    + بازکردن اکسپلورر روی آن؛ `-Clean` opt-in برای قفل‌شدن گریدل.
+    - **CI جدید `.github/workflows/windows-build.yml`** (windows-latest، روی push ذات desktop/**
+      یا dispatch): wireproxy.exe با پچ AWG از stdin (Invariant §5.24) ساخته می‌شود، بقیهٔ
+      هسته‌ها با `-SaveHashes` (پین SHA256) می‌آیند، سپس 92 تست سبز و سه‌گانه‌بسته‌بندی
+      `createDistributable + packageMsi + packageExe` — artifact «MultiVPN-Windows-x64» = zip
+      پورتیبل + هر دو نصب‌کننده. کاربر بدون JDK/WiX لوکال هم exe کامل آمادهٔ اتصال می‌گیرد.
+    - نسخهٔ اپ → 3.6.6. بدون تغییر Kotlin؛ همان ۹۲ تست.
 
 ---
 
