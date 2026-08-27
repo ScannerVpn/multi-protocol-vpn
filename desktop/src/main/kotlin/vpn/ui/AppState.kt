@@ -35,6 +35,7 @@ import vpn.core.VpnResult
 import vpn.core.VpnService
 import vpn.core.VpnStatus
 import vpn.core.VpnModes
+import vpn.core.Preflight
 import vpn.core.WireProxy
 import vpn.core.Xray
 import java.io.File
@@ -1002,6 +1003,23 @@ object AppState {
 
     fun connectActive() {
         val cfg = activeConfig ?: return
+        // Pre-flight gate: a TUN/split attempt from a NON-elevated launch can
+        // never succeed — previously it went straight into UAC prompts, retry
+        // loops and minutes of spinner with zero explanation. Refuse here,
+        // show the reason in the error card, and let the user choose.
+        Preflight.tunBlockReason(
+            cfg,
+            settings.mode,
+            settings.splitMode,
+            settings.splitApps,
+            windows = Preflight.isWindows(),
+            elevated = Preflight.isElevated(Preflight.isWindows()),
+        )?.let { reason ->
+            AppLog.e("VPN", "Pre-flight refused TUN attempt: ${reason.lineSequence().first()}")
+            lastError = reason
+            vpnStatus = VpnStatus.ERROR
+            return
+        }
         pollJob?.cancel()
         connectJob?.cancel()
         // Assign CONNECTING synchronously before launching — avoids a race

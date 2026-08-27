@@ -869,11 +869,12 @@ object VpnService {
             return VpnResult(false, tunnelFailureHint(config))
         }
         if (settings.mode == VpnModes.PROXY_ONLY) {
-            AppLog.i("SingBox", "${config.protocol} connected (proxy only, system proxy untouched)")
+            val eps = Preflight.endpointSummary(config.protocol)
+            AppLog.i("SingBox", "${config.protocol} connected (proxy only): $eps")
             return VpnResult(
                 true,
-                "Connected — proxy on 127.0.0.1:${SingBox.MIXED_PORT} " +
-                    "(set apps to use it manually)",
+                "Connected — LOCAL PROXY ONLY: $eps. Windows settings are untouched; " +
+                    "point your browser/app at this address manually.",
             )
         }
         Proxy.enable(SingBox.MIXED_PORT)
@@ -982,11 +983,12 @@ object VpnService {
             )
         }
         if (settings.mode == VpnModes.PROXY_ONLY) {
-            AppLog.i("WireProxy", "connected (proxy only, system proxy untouched)")
+            val eps = Preflight.endpointSummary(config.protocol)
+            AppLog.i("WireProxy", "connected (proxy only): $eps")
             return VpnResult(
                 true,
-                "Connected — proxy on 127.0.0.1:${WireProxy.HTTP_PORT} (HTTP) / " +
-                    "${WireProxy.SOCKS_PORT} (SOCKS)",
+                "Connected — LOCAL PROXY ONLY: $eps. Windows settings are untouched; " +
+                    "point your browser/app at one of these addresses manually.",
             )
         }
         Proxy.enable(WireProxy.HTTP_PORT)
@@ -1183,10 +1185,12 @@ object VpnService {
         }
 
         if (settings.mode == VpnModes.PROXY_ONLY) {
-            AppLog.i("Xray", "Connected via ${parsed.protocol} (proxy only, system proxy untouched)")
+            val eps = Preflight.endpointSummary(parsed.protocol)
+            AppLog.i("Xray", "Connected via ${parsed.protocol} (proxy only): $eps")
             return VpnResult(
                 true,
-                "Connected — proxy on 127.0.0.1:${Xray.HTTP_PORT} (set apps to use it manually)",
+                "Connected — LOCAL PROXY ONLY: $eps. Windows settings are untouched; " +
+                    "a plain HTTP-proxy client must use the HTTP address (not the SOCKS one).",
             )
         }
         Proxy.enable(Xray.HTTP_PORT)

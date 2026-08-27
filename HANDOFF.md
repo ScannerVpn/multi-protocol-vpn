@@ -33,7 +33,7 @@ cd desktop
 # 1) یک‌بار در هر checkout تازه: هسته‌ها در git نیستند (~۱۳۰MB)
 powershell -ExecutionPolicy Bypass -File .\fetch-cores.ps1
 
-# 2) تست‌ها — ۹۲ تست، همه آفلاین، ~۲۵ ثانیه
+# 2) تست‌ها — ۱۰۳ تست، همه آفلاین، ~۳۰ ثانیه
 .\gradlew.bat test
 
 # 3) بیلد دستی (معادل کاری که build.bat می‌کند)
@@ -810,6 +810,24 @@ SSH چک کن که سرور همان لحظه در دسترس است.
       راهنمای حالت خالی Home). نسخهٔ چاپی فوتر Sidebar/Home همگام ← 3.6.7. بدون تغییر منطق؛
       همان ۹۲ تست سبز.
 
+21. **v3.6.8 (2026-08-27) — دو گزارش کاربر: «TUN بی‌هشدار الکی می‌چرخد» + «پورت‌های Proxy-only چیزی نمی‌آورند»**:
+    - **گیتِ pre-flight برای TUN (`core/Preflight.kt` جدید + `PreflightTest`)**: انتخاب TUN/اسپلیت با
+      پروسهٔ غیر-elevated قبلاً مستقیم به UAC، kill های elevated و حلقهٔ retry می‌رفت → دقیقه‌ها اسپینر
+      بدون هیچ توضیحی. حالا `connectActive()` قبل از هر کاری با `Advapi32Util.isCurrentProcessElevated()`
+      (JNA، TOKEN_ELEVATION) چک می‌کند و با پیام دوعباری (Run as administrator یا سوییچ به System
+      proxy/Proxy only) در کارت خطا مسدود می‌کند. فقط خانوادهٔ proxy گیت می‌شود؛ IKEv2/OpenVPN که جریان
+      UAC مستقل خودشان را دارند دست‌نخورده‌اند. یک راهنمای کهربایی «Administrator rights required» هم زیر
+      توضیح حالت TUN در داشبورد نشسته است.
+      (ریشهٔ اسپینر لزوماً hang نبود: UAC تکراری در ۳ attempt + انتظار هسته + elevated-kill دوم —
+      گیت کل این ترکیب را حذف می‌کند.)
+    - **PROXY_ONLY پورت‌ها واقعاً زنده بودند — مشکل هویت پورت بود**: xray و wireproxy روی
+      SOCKS=base / HTTP=base+1 گوش می‌دهند ولی فوتر فقط «127.0.0.1:10808» چاپ می‌کرد؛ کلاینتی که
+      HTTP-proxy خودش را روی base تنظیم می‌کرد (وقتی موتور xray بود) به گوشیندهٔ SOCKS مکث می‌زد ←
+      «چیزی نمی‌آورد». فیکس: تابع واحد `endpointSummary` (hy2 = تک‌پورت mixed؛ بقیه = جفت
+      SOCKS/HTTP)، استفاده در هر سه پیام موفقیت PROXY_ONLY («LOCAL PROXY ONLY: … Windows settings
+      are untouched») + فوتر داشبورد بر اساس پروتکل `activeConfig`.
+    - نسخهٔ اپ ← 3.6.8. +۱۱ تست (`PreflightTest`). جمعاً **۱۰۳ تست سبز**.
+
 ---
 
 ## ۹. روادمک پیشنهادی (به ترتیب)
@@ -918,7 +936,7 @@ SSH چک کن که سرور همان لحظه در دسترس است.
 2. `git log --oneline` برای تاریخچه.
 3. `desktop\fetch-cores.ps1` را اجرا کن و جدول خلاصه‌اش را چک کن — اگر `resources/bin/`
    خالی باشد اپ بیلد می‌شود ولی با هیچ پروتکلی وصل نمی‌شود و خطای واضحی هم نمی‌دهد.
-4. `.\gradlew.bat test` — باید ۹۲ تست سبز باشد. بعد `createDistributable`.
+4. `.\gradlew.bat test` — باید ۱۰۳ تست سبز باشد. بعد `createDistributable`.
 5. `MultiVPN.exe` را اجرا کن؛ Setup → **Hysteria2** باید کانفیگ‌های موجود x-ui را detect
    کند و اتصالش کار کند (بهترین سناریوی smoke-test).
 6. قبل از هر تغییر: `app.log` را ببین (Settings → View app log) — همه‌چیز لاگ می‌شود.

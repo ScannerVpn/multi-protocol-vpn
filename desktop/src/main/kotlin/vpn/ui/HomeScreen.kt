@@ -86,6 +86,7 @@ import vpn.core.VpnModes
 import vpn.core.VpnService
 import vpn.core.VpnStatus
 import vpn.theme.C
+import vpn.core.Preflight
 
 @Composable
 fun HomeScreen() {
@@ -640,10 +641,16 @@ private fun DashboardFooter() {
         modifier = Modifier.fillMaxWidth(),
     ) {
         FooterText("MODE $modeLabel")
-        FooterText("PROXY 127.0.0.1:${settings.proxyPort}")
+        // Show the endpoints the ACTIVE config really serves, not just the raw
+        // base port: xray/wireproxy keep SOCKS and HTTP on separate ports, so a
+        // single "127.0.0.1:base" label sent users to the wrong listener.
+        FooterText(
+            "PROXY " + (AppState.activeConfig?.let { Preflight.endpointSummary(it.protocol) }
+                ?: "127.0.0.1:${settings.proxyPort}"),
+        )
         FooterText("SPLIT ${if (settings.splitMode == SplitModes.OFF) "OFF" else settings.splitMode.uppercase()}")
         Spacer(Modifier.weight(1f))
-        FooterText("MULTIVPN v3.6.7")
+        FooterText("MULTIVPN v3.6.8")
     }
 }
 
@@ -965,6 +972,16 @@ private fun ModeAndSplitControls(onManageApps: () -> Unit) {
             fontSize = 10.5.sp,
             lineHeight = 13.sp,
         )
+        if (settings.mode == VpnModes.TUN && !Preflight.isElevated(Preflight.isWindows())) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "\u26a0 Administrator rights required \u2014 start MultiVPN with 'Run as administrator' " +
+                    "or pick System proxy / Proxy only.",
+                color = C.Warning,
+                fontSize = 10.5.sp,
+                lineHeight = 13.sp,
+            )
+        }
         if (busy) {
             Spacer(Modifier.height(6.dp))
             Text("Disconnect first to change the mode.", color = C.Warning, fontSize = 11.sp)
