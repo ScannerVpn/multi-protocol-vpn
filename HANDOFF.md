@@ -33,7 +33,7 @@ cd desktop
 # 1) یک‌بار در هر checkout تازه: هسته‌ها در git نیستند (~۱۳۰MB)
 powershell -ExecutionPolicy Bypass -File .\fetch-cores.ps1
 
-# 2) تست‌ها — ۱۱۱ تست، همه آفلاین، ~۳۰ ثانیه
+# 2) تست‌ها — ۱۱۹ تست، همه آفلاین، ~۳۰ ثانیه
 .\gradlew.bat test
 
 # 3) بیلد دستی (معادل کاری که build.bat می‌کند)
@@ -418,6 +418,15 @@ MSYS_NO_PATHCONV=1 plink -batch -hostkey "<SSH-HOSTKEY-FINGERPRINT>" \
     end-to-end (temp core + HTTP)؛ Failed=timeout نمایشی؛ خانوادهٔ بدون verifier پیش از اتصال
     (ikev2/openvpn، wg بدون conf، لینک خرابِ legacy) = Skipped یعنی هیچ pill ای، حتی عدد قدیمی هم
     پاک می‌شود. نیمه‌فرنگ: ICMP به IP سرور (صفحهٔ Servers) فقط reachable بودن ماشین را می‌سنجد.
+31. **اسپلیت-تانلِ per-process روی ویندوز فقط با موتور TUN معنا دارد؛ در Proxy-only غیرممکن است**:
+    matching با `process_name` sing-box فقط برای ترافیک ورودی از اینترفیس مسیریابی‌شده (TUN)
+    کار می‌کند؛ کانکشن‌های loopback به پورت‌محلیِ PROXY_ONLY قابل انتساب به پروسهٔ مبدأ نیستند —
+    پس فعال ماندن فلگ split آنجا فقط یک «برچسب دروغ» است و هیچ کاری نمی‌کند (v3.6.10:
+    `SplitModes.allowedInMode` + park خودکار هنگام سوییچ به Proxy-only + سوییچ UI disabled).
+    همراهش: session ی include/exclude هرگز بدون وجود آداپتور TUN «Connected» گزارش نشود —
+    قبلاً بدون هیچ verify ای سبز می‌شد و کاربر «وصل ولی هیچی نمی‌آورد» می‌دید (دِبت اصلی
+    گزارش، مشکل DNS نبود؛ مشکل verify-نکردن فاز دوم بود). برای INCLUDE، پین DNS هم باید خاموش
+    بماند وگرنه وعدهٔ «بقیه مثل قبل direct» نقض می‌شود.
 
 ---
 
@@ -850,6 +859,24 @@ SSH چک کن که سرور همان لحظه در دسترس است.
       خراب که قبلاً سبز می‌شد، Skipped بودن ikev2/openvpn بدون هیچ سوکت. جمعاً **۱۱۱ تست سبز**.
     - نسخهٔ اپ ← 3.6.9.
 
+23. **v3.6.10 (2026-08-27) — «System proxy + Split tunnel: وصل شد ولی چیزی نمی‌آورد»**: سه ریشه
+    مستقل که با هم دقیقاً همین تجربه را می‌ساختند:
+    - **جلسهٔ split بدون هیچ اثباتی Connected می‌شد**: شاخهٔ split در هر سه connectXray /
+      connectWireProxy / connectSingBox بعد از start پالیتی + پورت، بدون چکِ آداپتور TUN پیام
+      «Connected — include tunnel active» برمی‌گرداند؛ اگر آداپتور (wintun) بالا نمی‌آمد قواعد
+      process_name عملاً هیچ‌چیز را route نمی‌کردند → سیاهی کامل با چراغ سبز. حالا `tunnelConnected()`
+      اجباری است: explicit-TUN ← خطای روشن؛ incidental-split (mode=System proxy) ← fallback به
+      همان فلوی plain-proxy تأییدشده + پیام صادقانه. موفقیت TUN/split هم `Proxy.restoreState()`
+      می‌زند تا WinINET قدیمی به پورت بی‌صاحب اشاره نکند.
+    - **split در Proxy-only باید فعال نشود (درخواست صریح کاربر)**: `SplitModes.allowedInMode()`
+      فقط TUN/SYSTEM_PROXY؛ سوییچ UI در Proxy-only disabled است، `setMode(PROXY_ONLY)` وضعیت
+      فعال split را park می‌کند و `setSplitMode` گارد دفاعی دارد.
+    - **تناقض DNS در INCLUDE**: leak-safe pin قبلاً DNS همهٔ سیستم را داخل تونل قفل می‌کرد حتی
+      وقتی وعده «بقیهٔ برنامه‌ها direct» بود → مرگ lookup ها با افت تونل. حالا
+      `SingBox.dnsPinActive`: INCLUDE بدون pin، EXCLUDE/no-split با pin (`SplitRoutingTest`).
+    - تست‌های جدید: `SplitRoutingTest` (+۸): سیاست مجوز، semantics دو حالت، gating DNS خروجی JSON.
+      جمعاً **۱۱۹ تست سبز**. نسخهٔ اپ ← 3.6.10.
+
 ---
 
 ## ۹. روادمک پیشنهادی (به ترتیب)
@@ -954,11 +981,11 @@ SSH چک کن که سرور همان لحظه در دسترس است.
 
 > برای دستورات دقیق بیلد، بخش **۰** ابتدای سند را ببین.
 
-1. این فایل را کامل بخوان (مخصوصاً بخش ۵ — درس‌های دیباگ؛ بندهای ۲۹/۳۰ تازه‌ترین‌اند).
+1. این فایل را کامل بخوان (مخصوصاً بخش ۵ — درس‌های دیباگ؛ بندهای ۳۰/۳۱ تازه‌ترین‌اند).
 2. `git log --oneline` برای تاریخچه.
 3. `desktop\fetch-cores.ps1` را اجرا کن و جدول خلاصه‌اش را چک کن — اگر `resources/bin/`
    خالی باشد اپ بیلد می‌شود ولی با هیچ پروتکلی وصل نمی‌شود و خطای واضحی هم نمی‌دهد.
-4. `.\gradlew.bat test` — باید ۱۱۱ تست سبز باشد. بعد `createDistributable`.
+4. `.\gradlew.bat test` — باید ۱۱۹ تست سبز باشد. بعد `createDistributable`.
 5. `MultiVPN.exe` را اجرا کن؛ Setup → **Hysteria2** باید کانفیگ‌های موجود x-ui را detect
    کند و اتصالش کار کند (بهترین سناریوی smoke-test).
 6. قبل از هر تغییر: `app.log` را ببین (Settings → View app log) — همه‌چیز لاگ می‌شود.

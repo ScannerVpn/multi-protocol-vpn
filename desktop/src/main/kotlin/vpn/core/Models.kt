@@ -101,6 +101,18 @@ object SplitModes {
     const val EXCLUDE = "exclude"
 
     val ALL = listOf(OFF, INCLUDE, EXCLUDE)
+
+    /**
+     * Per-process split tunneling is technically possible ONLY while traffic
+     * is captured by a routed interface whose flows can be attributed to a
+     * source process — i.e., the sing-box TUN engine (standalone TUN mode, or
+     * System-proxy mode which upgrades itself to that engine when split is
+     * enabled). The plain local ports of Proxy-only mode CANNOT attribute a
+     * loopback connection to its process, so an active split there would be a
+     * silent lie in the footer/labels while doing nothing at all.
+     */
+    fun allowedInMode(mode: String): Boolean =
+        mode == VpnModes.TUN || mode == VpnModes.SYSTEM_PROXY
 }
 
 @Serializable

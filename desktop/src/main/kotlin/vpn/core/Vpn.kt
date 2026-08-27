@@ -803,29 +803,68 @@ object VpnService {
             false,
             "Could not obtain the sing-box core (no bundled copy and GitHub unreachable).",
         )
-        val settings = Storage.loadSettings()
-        val tunMode = settings.useTun()
-        val split = settings.splitParams()
         val link = config.xrayLink
             ?: return VpnResult(false, "This config has no hysteria2 link.")
         val parsed = Links.parse(link)
             ?: return VpnResult(false, "Could not parse the hysteria2 link.")
+        val settings = Storage.loadSettings()
+        val tunMode = settings.useTun()
+        val split = settings.splitParams()
+        val tunRequested = settings.mode == VpnModes.TUN
+
+        // Plain config is always built: a degraded split/TUN session falls
+        // back to exactly this flow instead of reporting a dead "Connected".
         val json = SingBox.buildHysteria2Json(
-            parsed, tun = tunMode,
-            splitMode = split?.first, splitApps = split?.second,
+            parsed, tun = false, splitMode = null, splitApps = null,
             dnsLeakProtection = settings.dnsLeakProtection,
         )
-        AppLog.i(
-            "SingBox",
-            "Starting ${config.protocol} via ${core.name}" +
-                (if (tunMode) " (TUN mode)" else " (proxy)") +
-                (if (split != null) ", ${settings.splitLabel()}" else ""),
-        )
+
+        /** Plain proxy start + verification + mode finishing (shared tail). */
+        suspend fun startPlain(): VpnResult {
+            if (!SingBox.start(json)) {
+                SingBox.kill()
+                return VpnResult(
+                    false,
+                    "The core started but the local proxy did not open. Check the app log " +
+                        "(Settings → View app log) for the core's error.",
+                )
+            }
+            if (!SingBox.verifyTraffic()) {
+                SingBox.kill()
+                Proxy.restoreState()
+                AppLog.e("SingBox", "${config.protocol}: proxy up but no traffic passed")
+                return VpnResult(false, tunnelFailureHint(config))
+            }
+            if (settings.mode == VpnModes.PROXY_ONLY) {
+                val eps = Preflight.endpointSummary(config.protocol)
+                AppLog.i("SingBox", "${config.protocol} connected (proxy only): $eps")
+                return VpnResult(
+                    true,
+                    "Connected — LOCAL PROXY ONLY: $eps. Windows settings are untouched; " +
+                        "point your browser/app at this address manually.",
+                )
+            }
+            Proxy.enable(SingBox.MIXED_PORT)
+            AppLog.i("SingBox", "${config.protocol} connected (proxy 127.0.0.1:${SingBox.MIXED_PORT})")
+            return VpnResult(true, "Connected (system proxy on 127.0.0.1:${SingBox.MIXED_PORT})")
+        }
 
         if (tunMode) {
-            // TUN needs the wintun driver next to the core AND admin rights.
-            if (!tunElevatedStart(json)) {
-                return VpnResult(false, TUN_DECLINED_MSG)
+            val tunJson = SingBox.buildHysteria2Json(
+                parsed, tun = true,
+                splitMode = split?.first, splitApps = split?.second,
+                dnsLeakProtection = settings.dnsLeakProtection,
+            )
+            AppLog.i(
+                "SingBox",
+                "Starting ${config.protocol} via ${core.name}" +
+                    (if (tunMode) " (TUN mode)" else " (proxy)") +
+                    (if (split != null) ", ${settings.splitLabel()}" else ""),
+            )
+            if (!tunElevatedStart(tunJson)) {
+                if (tunRequested) return VpnResult(false, TUN_DECLINED_MSG)
+                AppLog.i("SingBox", "elevated start declined - falling back to plain proxy flow")
+                return startPlain()
             }
             var tries = 0
             while (tries < 20 && !SingBox.isRunning()) {
@@ -837,11 +876,14 @@ object VpnService {
                 // zombie tunnel survives a declined UAC.
                 SingBox.kill()
                 killTunCore()
-                return VpnResult(
-                    false,
-                    "The core started but neither the tunnel nor the local proxy came up. " +
-                        "Check the app log (Settings → View app log).",
-                )
+                if (tunRequested) {
+                    return VpnResult(
+                        false,
+                        "The core started but neither the tunnel nor the local proxy came up. " +
+                            "Check the app log (Settings → View app log).",
+                    )
+                }
+                return startPlain()
             }
             if (split == null) {
                 // Without split rules a plain request must already traverse
@@ -857,44 +899,35 @@ object VpnService {
                 AppLog.i("SingBox", "${config.protocol} connected in TUN mode (full system tunnel)")
                 return VpnResult(true, "Connected — full-system TUN tunnel active")
             }
-            // Split tunneling: our own probe is routed by the split rules, so
-            // the adapter + liveness checks above are the only guarantees here.
+
+            // SPLIT SESSION: never again report success on faith alone. The
+            // v3.6.x bug: "Connected — include tunnel active" while the TUN
+            // adapter never materialized and NOTHING was routed at all
+            // (process rules need the adapter first), which users saw as
+            // "connected but nothing comes through".
+            if (!tunnelConnected()) {
+                AppLog.e("SingBox", "${config.protocol}: split session without a tunnel adapter")
+                SingBox.kill()
+                killTunCore()
+                if (tunRequested) {
+                    return VpnResult(
+                        false,
+                        "The tunnel adapter did not come up, so per-app routing cannot work. " +
+                            "Run as administrator or check the wintun driver (app log).",
+                    )
+                }
+                return startPlain()
+            }
+            // WinINET coherence: a stale proxy setting from an earlier session
+            // must not point browsers into a port this engine does not own.
+            Proxy.restoreState()
             AppLog.i("SingBox", "${config.protocol} connected with ${settings.splitLabel()}")
             return VpnResult(
                 true,
                 "Connected — ${settings.splitLabel()?.replace("split ", "") ?: "split tunnel active"}",
             )
         }
-
-        if (!SingBox.start(json)) {
-            SingBox.kill()
-            return VpnResult(
-                false,
-                "The core started but the local proxy did not open. Check the app log " +
-                    "(Settings → View app log) for the core's error.",
-            )
-        }
-        // The proxy port opening does not prove the tunnel works: a DPI that
-        // drops QUIC leaves the handshake unfinished. Verify with a real
-        // request before reporting success.
-        if (!SingBox.verifyTraffic()) {
-            SingBox.kill()
-            Proxy.restoreState()
-            AppLog.e("SingBox", "${config.protocol}: proxy up but no traffic passed")
-            return VpnResult(false, tunnelFailureHint(config))
-        }
-        if (settings.mode == VpnModes.PROXY_ONLY) {
-            val eps = Preflight.endpointSummary(config.protocol)
-            AppLog.i("SingBox", "${config.protocol} connected (proxy only): $eps")
-            return VpnResult(
-                true,
-                "Connected — LOCAL PROXY ONLY: $eps. Windows settings are untouched; " +
-                    "point your browser/app at this address manually.",
-            )
-        }
-        Proxy.enable(SingBox.MIXED_PORT)
-        AppLog.i("SingBox", "${config.protocol} connected (proxy 127.0.0.1:${SingBox.MIXED_PORT})")
-        return VpnResult(true, "Connected (system proxy on 127.0.0.1:${SingBox.MIXED_PORT})")
+        return startPlain()
     }
 
     // ------------------------------------------------------------------
@@ -987,6 +1020,28 @@ object VpnService {
                         "⚠ TUN mode could not start, so this session is not a full-system tunnel.",
                 )
             }
+            // SPLIT/TUN session: require the adapter to actually exist, else
+            // the per-app rules route nothing while we claim success.
+            if (split != null && !tunnelConnected()) {
+                AppLog.e("WireProxy", "split session without a tunnel adapter")
+                SingBox.kill()
+                killTunCore()
+                if (settings.mode == VpnModes.TUN) {
+                    return VpnResult(
+                        false,
+                        "The tunnel adapter did not come up, so per-app routing cannot work. " +
+                            "Run as administrator or check the wintun driver (app log).",
+                    )
+                }
+                // wireproxy itself is still running and already verified.
+                Proxy.enable(WireProxy.HTTP_PORT)
+                return VpnResult(
+                    true,
+                    "Connected (system proxy on 127.0.0.1:${WireProxy.HTTP_PORT}) — " +
+                        "the per-app component did not start, so routing is not restricted by app.",
+                )
+            }
+            Proxy.restoreState()
             AppLog.i("WireProxy", "connected in TUN mode")
             return VpnResult(
                 true,
@@ -1192,6 +1247,31 @@ object VpnService {
                 AppLog.i("Xray", "Connected via ${parsed.protocol} in TUN mode")
                 return VpnResult(true, "Connected — full-system TUN tunnel active")
             }
+            // SPLIT SESSION verification — same contract as the sing-box
+            // path: without a live tunnel adapter the per-app rules route
+            // NOTHING, and reporting "Connected" produced the user-visible
+            // "connected but nothing comes through" blackout.
+            if (!tunnelConnected()) {
+                AppLog.e("Xray", "${parsed.protocol}: split session without a tunnel adapter")
+                SingBox.kill()
+                killTunCore()
+                if (settings.mode == VpnModes.TUN) {
+                    return VpnResult(
+                        false,
+                        "The tunnel adapter did not come up, so per-app routing cannot work. " +
+                            "Run as administrator or check the wintun driver (app log).",
+                    )
+                }
+                // xray itself is still running and already verified above:
+                // keep serving via the plain system proxy instead.
+                Proxy.enable(Xray.HTTP_PORT)
+                return VpnResult(
+                    true,
+                    "Connected (system proxy on 127.0.0.1:${Xray.HTTP_PORT}) — " +
+                        "the per-app component did not start, so routing is not restricted by app.",
+                )
+            }
+            Proxy.restoreState()
             AppLog.i("Xray", "Connected via ${parsed.protocol} with ${settings.splitLabel()}")
             return VpnResult(
                 true,

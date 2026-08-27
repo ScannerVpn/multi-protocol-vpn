@@ -29,6 +29,7 @@ import vpn.core.ScanTunnels
 import vpn.core.ServerConfig
 import vpn.core.SingBox
 import vpn.core.SshService
+import vpn.core.SplitModes
 import vpn.core.Storage
 import vpn.core.Subscription
 import vpn.core.VpnConfig
@@ -930,16 +931,31 @@ object AppState {
 
     fun setMode(mode: String) {
         if (mode !in VpnModes.ALL || connectedOrBusy) return
+        // Switching into Proxy-only PARKS an active split configuration:
+        // plain local ports cannot attribute connections to processes, so
+        // keeping the split flag on would only lie in labels/footers. The app
+        // list itself is kept so re-enabling restores everything.
+        val parkSplit = mode == VpnModes.PROXY_ONLY && settings.splitMode != SplitModes.OFF
+        if (parkSplit) AppLog.i("App", "Proxy-only mode selected - split tunneling parked off")
         // Replace the whole object: settings is snapshot state, so mutating a
         // field in place would never trigger recomposition (the UI would only
         // refresh on the next tab switch).
-        settings = settings.copy(mode = mode)
+        settings = settings.copy(
+            mode = mode,
+            splitMode = if (parkSplit) SplitModes.OFF else settings.splitMode,
+        )
         Storage.saveSettings(settings)
         AppLog.i("App", "Connection mode set to $mode")
     }
 
     fun setSplitMode(mode: String) {
         if (connectedOrBusy) return
+        // Defense-in-depth: the UI keeps this switch disabled outside the
+        // modes that support per-process routing; never trust it blindly.
+        if (mode != SplitModes.OFF && !SplitModes.allowedInMode(settings.mode)) {
+            AppLog.i("App", "Split tunneling refused in mode=${settings.mode}")
+            return
+        }
         settings = settings.copy(splitMode = mode)
         Storage.saveSettings(settings)
         AppLog.i("App", "Split tunneling set to $mode (${settings.splitApps.size} app(s))")

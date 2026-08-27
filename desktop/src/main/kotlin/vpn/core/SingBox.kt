@@ -309,7 +309,8 @@ object SingBox {
     "auto_detect_interface": true
   }
 """.trimIndent()
-        val dns = if (dnsLeakProtection) leakSafeDns().replace("__OUTBOUND__", "proxy-out") else ""
+        val dns = if (dnsPinActive(dnsLeakProtection, splitMode))
+            leakSafeDns().replace("__OUTBOUND__", "proxy-out") else ""
         return """
 {
   "log": {"level": "warn"},
@@ -325,7 +326,19 @@ $route}""".trimIndent()
      * DNS block for leak-safe configs: a local hijacking listener plus
      * sing-box 1.x `servers[].detour` semantics — every lookup is forced
      * through the tunnel outbound, so the ISP's plaintext DNS is unreachable.
+     *
+     * PIN GATING: in INCLUDE-split mode the pin must stay OFF. INCLUDE means
+     * "only the listed apps are routed; everything else behaves as if no VPN
+     * existed" — forcing the OTHER apps' DNS through the tunnel would break
+     * that promise and blackhole their lookups whenever the tunnel dies (or
+     * make them depend on it while their browsing stays direct).
      */
+    internal fun dnsPinActive(dnsLeakProtection: Boolean, splitMode: String?): Boolean =
+        dnsLeakProtection && when (splitMode) {
+            null, SplitModes.OFF, SplitModes.EXCLUDE -> true
+            else -> false // INCLUDE: everyone outside the list stays fully direct
+        }
+
     private fun leakSafeDns(): String = """
   "dns": {
     "servers": [
@@ -365,7 +378,8 @@ $route}""".trimIndent()
         } else {
             "\"route\": {\"final\": \"hy2-out\", \"auto_detect_interface\": true}"
         }
-        val dns = if (tun && dnsLeakProtection) leakSafeDns().replace("__OUTBOUND__", "hy2-out") else ""
+        val dns = if (tun && dnsPinActive(dnsLeakProtection, splitMode))
+            leakSafeDns().replace("__OUTBOUND__", "hy2-out") else ""
         return """
 {
   "log": {"level": "warn"},

@@ -650,7 +650,7 @@ private fun DashboardFooter() {
         )
         FooterText("SPLIT ${if (settings.splitMode == SplitModes.OFF) "OFF" else settings.splitMode.uppercase()}")
         Spacer(Modifier.weight(1f))
-        FooterText("MULTIVPN v3.6.9")
+        FooterText("MULTIVPN v3.6.10")
     }
 }
 
@@ -1000,6 +1000,10 @@ private fun ModeAndSplitControls(onManageApps: () -> Unit) {
                 Text("Split tunneling", fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp, color = C.TextPrimary)
                 Text(
                     when {
+                        // Windows cannot attribute a plain local-proxy
+                        // connection to its process — per-app routing is
+                        // only real while the TUN engine runs.
+                        !SplitModes.allowedInMode(settings.mode) -> "Unavailable in Proxy-only mode"
                         splitActive -> "Per-app routing is active"
                         splitOn -> "Pick apps to enable routing"
                         else -> "Tunnel only selected applications"
@@ -1011,8 +1015,9 @@ private fun ModeAndSplitControls(onManageApps: () -> Unit) {
             Spacer(Modifier.width(10.dp))
             Switch(
                 checked = splitOn,
+                enabled = SplitModes.allowedInMode(settings.mode) || splitOn,
                 onCheckedChange = { on ->
-                    if (!busy) {
+                    if (!busy && (on == false || SplitModes.allowedInMode(settings.mode))) {
                         AppState.setSplitMode(
                             if (on) {
                                 settings.splitMode.takeIf { it != SplitModes.OFF } ?: SplitModes.INCLUDE
@@ -1077,9 +1082,10 @@ private fun ModeAndSplitControls(onManageApps: () -> Unit) {
             }
             Spacer(Modifier.height(7.dp))
             Text(
-                "Per-app routing needs the TUN engine: on connect you get one UAC prompt, and the " +
-                    "system proxy is NOT enabled — the selected apps are the only ones routed through " +
-                    "the VPN, all other traffic goes direct.",
+                "Per-app routing uses the full-system TUN component: one UAC prompt on connect, " +
+                    "and the Windows system proxy itself stays OFF — the selected apps are routed " +
+                    "through the VPN by the tunnel adapter, all other traffic goes direct exactly " +
+                    "as if no VPN existed.",
                 color = C.TextFaint,
                 fontSize = 10.5.sp,
                 lineHeight = 13.sp,
