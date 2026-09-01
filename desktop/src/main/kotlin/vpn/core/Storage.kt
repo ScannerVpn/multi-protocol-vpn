@@ -43,23 +43,6 @@ object Storage {
 
     fun loadConfigs(): List<VpnConfig> {
         val loaded = loadList("configs.json", VpnConfig.serializer())
-<<<<<<< HEAD
-        val fixed: List<VpnConfig> = loaded.items
-            .map { remapLegacyPaths(it) }
-            .map { migrateCategories(it) }
-            .map { c: VpnConfig ->
-                c.copy(
-                    p12Pass = SecretBox.unwrap(c.p12Pass),
-                    psk = SecretBox.unwrap(c.psk),
-                    xrayLink = SecretBox.unwrap(c.xrayLink),
-                )
-            }
-        if (fixed != loaded.items && loaded.parsed && fixed.isNotEmpty()) {
-            saveConfigs(fixed)
-            AppLog.i("Storage", "Migrated configs.json (legacy paths / categories)")
-        }
-        return fixed
-=======
         // ORDER MATTERS. The structural migrations run FIRST, on the values
         // exactly as they came off disk, so the "did anything actually
         // change?" comparison below sees only real path/category edits.
@@ -91,7 +74,6 @@ object Storage {
             AppLog.i("Storage", "Migrated configs.json (legacy paths / categories)")
         }
         return decrypted
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     }
 
     fun saveConfigs(list: List<VpnConfig>) =
@@ -111,13 +93,6 @@ object Storage {
         loadList("subscriptions.json", Subscription.serializer()).items
 
     /** v3.1 migration: generated configs move into the "my_servers" folder,
-<<<<<<< HEAD
-     *  re-linked to their server by IP when possible. */
-    private fun migrateCategories(c: VpnConfig): VpnConfig {
-        val migrated = if (c.isGenerated && c.category == "manual") c.copy(category = "my_servers") else c
-        if (migrated.category == "my_servers" && migrated.serverId == null && migrated.serverIp.isNotBlank()) {
-            loadServers().firstOrNull { it.ip == migrated.serverIp }?.let { s ->
-=======
      *  re-linked to their server by IP when possible.
      *  [servers] is passed in (lazily, once) — the previous version called
      *  loadServers() per config, re-reading and re-decrypting servers.json
@@ -126,7 +101,6 @@ object Storage {
         val migrated = if (c.isGenerated && c.category == "manual") c.copy(category = "my_servers") else c
         if (migrated.category == "my_servers" && migrated.serverId == null && migrated.serverIp.isNotBlank()) {
             servers().firstOrNull { it.ip == migrated.serverIp }?.let { s ->
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 return migrated.copy(serverId = s.id)
             }
         }

@@ -20,11 +20,8 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FolderOpen
-<<<<<<< HEAD
-=======
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.SettingsEthernet
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -60,10 +57,6 @@ fun SettingsScreen() {
     var showLog by remember { mutableStateOf(false) }
     var cleanResult by remember { mutableStateOf<String?>(null) }
 
-<<<<<<< HEAD
-    Column(
-        Modifier.fillMaxSize().wrapContentWidth(Alignment.CenterHorizontally).verticalScroll(rememberScrollState()).widthIn(max = 880.dp).padding(horizontal = 20.dp),
-=======
     val layout = LocalLayout.current
     Column(
         Modifier
@@ -72,7 +65,6 @@ fun SettingsScreen() {
             .verticalScroll(rememberScrollState())
             .widthIn(max = 880.dp)
             .padding(horizontal = layout.screenPadding),
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     ) {
         Spacer(Modifier.height(20.dp))
         ScreenHeader("Settings", "App behaviour and maintenance")
@@ -90,17 +82,16 @@ fun SettingsScreen() {
             }
             Spacer(Modifier.height(4.dp))
             ToggleRow(
-<<<<<<< HEAD
-=======
                 "Close button hides to tray",
                 "The X button keeps the app running in the notification area",
                 TraySettings.closeToTray,
             ) {
                 TraySettings.closeToTray = it
+                AppState.settings = AppState.settings.copy(closeToTray = it)
+                Storage.saveSettings(AppState.settings)
             }
             Spacer(Modifier.height(4.dp))
             ToggleRow(
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 "DNS leak protection",
                 "Force DNS through the tunnel (1.1.1.1 / 8.8.8.8) — applies on next connect",
                 AppState.settings.dnsLeakProtection,
@@ -150,8 +141,6 @@ fun SettingsScreen() {
                     cleanResult = "Cleanup finished"
                 }
             }
-<<<<<<< HEAD
-=======
             Spacer(Modifier.height(4.dp))
             // Emergency escape hatch: a crashed session (or a %TEMP% cleanup
             // that ate our saved state) can leave Windows pointing at a dead
@@ -166,7 +155,6 @@ fun SettingsScreen() {
                 cleanResult = null
                 AppState.resetSystemProxy { cleanResult = it }
             }
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             cleanResult?.let {
                 Spacer(Modifier.height(6.dp))
                 Text(it, color = C.Success, fontSize = 11.5.sp)
@@ -174,15 +162,12 @@ fun SettingsScreen() {
         }
 
         Spacer(Modifier.height(16.dp))
-<<<<<<< HEAD
-=======
         SectionTitle("Backup")
         GlassCard {
             BackupRows()
         }
 
         Spacer(Modifier.height(16.dp))
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         SectionTitle("About")
         GlassCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -190,15 +175,11 @@ fun SettingsScreen() {
                 Spacer(Modifier.width(14.dp))
                 Column {
                     Text("MultiVPN", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = C.TextPrimary)
-<<<<<<< HEAD
-                    Text("Version 3.6.3 · Compose Multiplatform", fontSize = 11.5.sp, color = C.TextSecondary)
-=======
                     Text(
                         "Version ${vpn.BuildInfo.VERSION} · Compose Multiplatform",
                         fontSize = 11.5.sp,
                         color = C.TextSecondary,
                     )
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                     Spacer(Modifier.height(3.dp))
                     Text(
                         "IKEv2 · WireGuard · AmneziaWG · OpenVPN · Hysteria2 · VLESS · Trojan · Shadowsocks",
@@ -220,9 +201,6 @@ fun SettingsScreen() {
 private fun AppLogDialog(onDismiss: () -> Unit) {
     // Read the log once per dialog opening: without remember{} every
     // recomposition re-read the whole file from disk.
-<<<<<<< HEAD
-    val text = remember { AppLog.tail().ifEmpty { "Log is empty." } }
-=======
     val full = remember { AppLog.tail().ifEmpty { "Log is empty." } }
     var filter by remember { mutableStateOf(false) }
     val text = if (filter) {
@@ -231,7 +209,6 @@ private fun AppLogDialog(onDismiss: () -> Unit) {
     } else {
         full
     }
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {},
@@ -239,8 +216,6 @@ private fun AppLogDialog(onDismiss: () -> Unit) {
         title = { Text("App log", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
         text = {
             Column {
-<<<<<<< HEAD
-=======
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     // Error-only view: the raw file interleaves INFO chatter
                     // from every module; triaging a broken connect starts at
@@ -249,7 +224,6 @@ private fun AppLogDialog(onDismiss: () -> Unit) {
                     AppTextButton("Errors only", { filter = true }, color = if (filter) C.Error else C.TextSecondary)
                     Spacer(Modifier.weight(1f))
                 }
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 Surface(
                     color = Color(0xFF080C16),
                     shape = RoundedCornerShape(13.dp),
@@ -292,8 +266,6 @@ private fun AppLogDialog(onDismiss: () -> Unit) {
 }
 
 @Composable
-<<<<<<< HEAD
-=======
 private fun BackupRows() {
     var passphrase by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
@@ -382,7 +354,6 @@ private fun pickOpenFile(): String? {
 }
 
 @Composable
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 private fun ProxyPortRow() {
     val saved = AppState.settings.proxyPort
     var text by remember(saved) { mutableStateOf(saved.toString()) }
@@ -437,7 +408,8 @@ private fun ProxyPortRow() {
 }
 
 @Composable
-private fun ToggleRow(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {    Row(
+private fun ToggleRow(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
         modifier = Modifier.fillMaxWidth(),

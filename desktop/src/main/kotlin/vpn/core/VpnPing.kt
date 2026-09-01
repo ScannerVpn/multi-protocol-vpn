@@ -316,10 +316,16 @@ internal object VpnPing {
 
             // Latency of the request that PROVED connectivity (TrafficProbe
             // races its endpoints and rejects captive-portal answers).
+            //
+            // RETURN it explicitly. Before 3.6.15 this was the try block's
+            // trailing expression and the function ENDED with
+            // `error("unreachable")` — Kotlin discarded the value and threw on
+            // EVERY successful xray ping, so vless/trojan/ss rows could never
+            // show a number (app.log: "latency infra error: unreachable").
             val ms = TrafficProbe.latencyThroughProxy(ports.second, PING_TIMEOUT_MS)
-            if (ms != null) RealPingResult.Ok(ms) else RealPingResult.Failed
+            return@withPermit if (ms != null) RealPingResult.Ok(ms) else RealPingResult.Failed
         } catch (_: Exception) {
-            RealPingResult.Failed
+            return@withPermit RealPingResult.Failed
         } finally {
             // Kill OUR core only — never the image-wide sweep, which would
             // murder sibling racers' cores. lastPid (session state) untouched.
@@ -327,11 +333,6 @@ internal object VpnPing {
             releaseScratchPorts(ports)
             conf.delete()
         }
-        // Unreachable: every branch above returns, but Kotlin's flow analysis
-        // cannot see through the try/finally + non-local labelled returns, so
-        // the compiler demands a terminal expression here.
-        @Suppress("UNREACHABLE_CODE")
-        error("unreachable")
     }
 
     /** Port probe against an arbitrary local port (the fixed-port variants

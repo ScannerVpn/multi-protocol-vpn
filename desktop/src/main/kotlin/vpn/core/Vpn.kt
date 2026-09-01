@@ -2,45 +2,6 @@ package vpn.core
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-<<<<<<< HEAD
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
-import java.io.File
-import java.net.Inet4Address
-import java.net.InetSocketAddress
-import java.net.Socket
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.net.NetworkInterface
-import java.time.Duration
-
-enum class VpnStatus { DISCONNECTED, CONNECTING, CONNECTED, DISCONNECTING, ERROR }
-
-data class VpnResult(val ok: Boolean, val message: String)
-
-/** Tri-state outcome of a pre-connect latency measurement. */
-sealed class RealPingResult {
-    /** Traffic passed; [ms] is the measured round trip of the HTTP probe. */
-    data class Ok(val ms: Int) : RealPingResult()
-
-    /** The core ran but no traffic passed — server is dead, blocked or misconfigured. */
-    object Failed : RealPingResult()
-
-    /** The test could not run (core missing, another instance owns the proxy). */
-    object Skipped : RealPingResult()
-}
-
-/**
- * Windows VPN connections for three protocols:
- *  - ikev2: native Windows client via rasdial; fast path dials the existing
- *    profile (no UAC), elevated fallback cleans stale certs and re-imports;
- *  - wireguard / amnezia: WireGuard tunnel service via wireguard.exe /
- *    amneziawg.exe /installtunnelservice (one UAC); the client app is
- *    auto-downloaded and silently installed when missing.
-=======
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -63,27 +24,11 @@ import java.io.File
  *  - hysteria2: sing-box local proxy (same TUN option);
  *  - openvpn: openvpn.exe as SYSTEM via a one-off scheduled task.
  *
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
  * Connection state is read from ipconfig/rasdial output (Java cannot see
  * RAS adapters) collected by hidden processes (see [HiddenRun]).
  */
 object VpnService {
 
-<<<<<<< HEAD
-    /** The IKEv2 virtual pool handed out by setup-ikev2.sh (rightsourceip). */
-    private const val IKEV2_PREFIX = "10.10.10."
-
-    /** The WireGuard pool handed out by setup-wireguard.sh. */
-    private const val WG_PREFIX = "10.2.0."
-
-    /** The OpenVPN pool handed out by setup-openvpn.sh. */
-    private const val OVPN_PREFIX = "10.8.0."
-
-    /** The sing-box TUN adapter address (see SingBox.tunInbound). */
-    private const val TUN_PREFIX = "172.19."
-
-=======
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     private const val TUN_DECLINED_MSG =
         "TUN/split-tunnel mode needs administrator rights (the UAC prompt was declined " +
             "or timed out). Retry and accept the prompt, or switch the mode on the " +
@@ -112,13 +57,6 @@ object VpnService {
     /** CA subjects this app ever issued; used to find and remove its certs. */
     private val CA_SUBJECTS = listOf("CN=Freebuff IKEv2 CA", "CN=VPN Root CA")
 
-<<<<<<< HEAD
-    private val httpClient: HttpClient by lazy {
-        HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build()
-    }
-
-=======
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     fun profileName(configName: String): String =
         "VPN-" + configName.replace(Regex("[^a-zA-Z0-9]"), "-")
 
@@ -144,38 +82,9 @@ object VpnService {
     fun protocolLabel(config: VpnConfig): String = Links.label(config.protocol, config.awgVersion)
 
     // ------------------------------------------------------------------
-<<<<<<< HEAD
-    // Status / ping
-    // ------------------------------------------------------------------
-
-    private val statusFile: File
-        get() = File(System.getProperty("java.io.tmpdir"), "multivpn_status.txt")
-
-    private val ipconfigFile: File
-        get() = File(System.getProperty("java.io.tmpdir"), "multivpn_ipconfig.txt")
-
-    private val pingFile: File
-        get() = File(System.getProperty("java.io.tmpdir"), "multivpn_ping.txt")
-
-    /** Ground-truth connected check for any supported protocol. */
-    suspend fun isVpnUp(): Boolean = withContext(Dispatchers.IO) {
-        tunnelConnected() ||
-            // Imported .ovpn configs can hand out subnets outside the four
-            // hardcoded prefixes tunnelConnected() knows — while THIS session
-            // connected such a tunnel, the session flag is the truth source.
-            openvpnSessionActive ||
-            // RAS/IKEv2 adapters are often invisible to Java AND their ipconfig
-            // section can be missed by locale-specific parsing — rasdial output
-            // is the authoritative answer for dial-up profiles.
-            connectedIkev2Profile() != null ||
-            Xray.isRunning() || SingBox.isRunning() || WireProxy.isRunning()
-    }
-
-=======
     // Session state
     // ------------------------------------------------------------------
 
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     /**
      * True while an OpenVPN connect that verified as up is still considered
      * active in this app run. tunnelConnected() only recognizes the four
@@ -205,8 +114,6 @@ object VpnService {
     @Volatile
     private var sessionTunMode: Boolean? = null
 
-<<<<<<< HEAD
-=======
     // ------------------------------------------------------------------
     // Status / ping (delegates — implementation in VpnStatusProbe / VpnPing)
     // ------------------------------------------------------------------
@@ -225,7 +132,6 @@ object VpnService {
             Xray.isRunning() || SingBox.isRunning() || WireProxy.isRunning()
     }
 
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     /** Which latency strategy applies to a config (pure decision). */
     internal enum class LatencyEngine {
         /** Start a temp xray core and push a real HTTP request through it. */
@@ -282,15 +188,9 @@ object VpnService {
             // Route purely by classification; [sshPort] no longer feeds any
             // estimate (kept in the signature for API stability only).
             when (classifyLatencyEngine(config)) {
-<<<<<<< HEAD
-                LatencyEngine.XRAY -> quickXrayPing(link!!)
-                LatencyEngine.SINGBOX -> quickHysteriaPing(config)
-                LatencyEngine.WIREPROXY -> quickWireguardPing(config)
-=======
                 LatencyEngine.XRAY -> VpnPing.quickXrayPing(link!!)
                 LatencyEngine.SINGBOX -> VpnPing.quickHysteriaPing(config)
                 LatencyEngine.WIREPROXY -> VpnPing.quickWireguardPing(config)
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 // vless/trojan/ss rows whose stored link no longer parses,
                 // ikev2/openvpn and anything without a pre-connect verifier:
                 // NO number, NO port fishing, ever again.
@@ -305,374 +205,6 @@ object VpnService {
             else -> null
         }
 
-<<<<<<< HEAD
-    /**
-     * Serializes ALL realping tests across the protocol families: they share
-     * the same fixed local proxy base port (xray SOCKS = sing-box mixed =
-     * wireproxy SOCKS), and every kill() targets its whole process family,
-     * so parallel tests — or a test during a live session — would kill each
-     * other or the user's connection mid-flight.
-     */
-    private val realPingGate = Mutex()
-
-    /** Real-traffic "realping" for vless/trojan/ss: start xray with this one
-     * link, push an HTTP request through the local proxy, kill, measure. */
-    private suspend fun quickXrayPing(parsed: ProxyLink): RealPingResult = realPingGate.withLock {
-        // Never disturb a live connection: killing xray is process-wide, so
-        // while any tunnel is up (or coming up) the test must stand down.
-        if (connectionActive || Xray.isRunning()) return@withLock RealPingResult.Skipped
-
-        val exe = Xray.ensureXrayBinary(allowDownload = false)
-            ?: return@withLock RealPingResult.Skipped
-
-        // Fail fast: if even the TCP handshake to the endpoint fails, no
-        // amount of core spinning will make traffic pass.
-        if (tcpLatency(parsed.address, parsed.port) == null) {
-            return@withLock RealPingResult.Failed
-        }
-
-        val conf = File.createTempFile("multivpn_xping_", ".json")
-        conf.writeText(Xray.buildClientJson(parsed))
-        try {
-            val pid = HiddenRun.startDetached(
-                listOf(exe.absolutePath, "run", "-c", conf.absolutePath),
-                workingDir = exe.parentFile,
-            ) ?: return@withLock RealPingResult.Skipped
-            if (pid > 0) Xray.trackPid(pid)
-
-            var tries = 0
-            while (tries < 10 && !Xray.isRunning()) {
-                delay(400); tries++
-            }
-            if (!Xray.isRunning()) {
-                Xray.kill()
-                return@withLock RealPingResult.Failed
-            }
-
-            val start = System.nanoTime()
-            var ok = false
-            try {
-                val proxy = java.net.Proxy(
-                    java.net.Proxy.Type.HTTP,
-                    InetSocketAddress("127.0.0.1", Xray.HTTP_PORT),
-                )
-                val conn = java.net.URL("http://cp.cloudflare.com/generate_204")
-                    .openConnection(proxy) as java.net.HttpURLConnection
-                conn.connectTimeout = 6000
-                conn.readTimeout = 6000
-                conn.requestMethod = "GET"
-                ok = conn.responseCode in 200..399
-                conn.disconnect()
-            } catch (_: Exception) {
-            }
-            Xray.kill()
-            if (ok) RealPingResult.Ok(((System.nanoTime() - start) / 1_000_000).toInt())
-            else RealPingResult.Failed
-        } catch (_: Exception) {
-            Xray.kill()
-            RealPingResult.Failed
-        } finally {
-            conf.delete()
-        }
-    }
-
-    /**
-     * Quick hysteria2 "realping": start sing-box proxy, try HTTP through it,
-     * kill. Serialized with the other families and skipped entirely while a
-     * session is live — SingBox.kill() would also murder the TUN engine
-     * wrapping another protocol's tunnel.
-     */
-    private suspend fun quickHysteriaPing(config: VpnConfig): RealPingResult = realPingGate.withLock {
-        if (connectionActive || Xray.isRunning() || WireProxy.isRunning()) {
-            return@withLock RealPingResult.Skipped // shared base port / family kills
-        }
-        if (SingBox.isRunning()) return@withLock RealPingResult.Skipped
-
-        val core = SingBox.ensureCore(allowDownload = false)
-            ?: return@withLock RealPingResult.Skipped
-        val link = config.xrayLink ?: return@withLock RealPingResult.Skipped
-        val parsed = Links.parse(link) ?: return@withLock RealPingResult.Skipped
-
-        val json = SingBox.buildHysteria2Json(
-            parsed, tun = false, splitMode = null, splitApps = null,
-            dnsLeakProtection = true,
-        )
-        if (!SingBox.start(json)) return@withLock RealPingResult.Failed
-
-        // Wait for proxy to open (up to 5s).
-        var tries = 0
-        while (tries < 12 && !SingBox.isRunning()) {
-            delay(400); tries++
-        }
-        if (!SingBox.isRunning()) {
-            SingBox.kill()
-            return@withLock RealPingResult.Failed
-        }
-
-        // Real HTTP traffic test through the proxy.
-        val start = System.nanoTime()
-        var ok = false
-        try {
-            val proxy = java.net.Proxy(
-                java.net.Proxy.Type.HTTP,
-                InetSocketAddress("127.0.0.1", SingBox.MIXED_PORT),
-            )
-            val conn = java.net.URL("http://cp.cloudflare.com/generate_204")
-                .openConnection(proxy) as java.net.HttpURLConnection
-            conn.connectTimeout = 8000
-            conn.readTimeout = 8000
-            conn.requestMethod = "GET"
-            ok = conn.responseCode in 200..399
-            conn.disconnect()
-        } catch (_: Exception) {
-        }
-        SingBox.kill()
-        if (ok) RealPingResult.Ok(((System.nanoTime() - start) / 1_000_000).toInt())
-        else RealPingResult.Failed
-    }
-
-    /** Quick WireGuard/Amnezia "realping": start wireproxy, try HTTP through it, kill. */
-    private suspend fun quickWireguardPing(config: VpnConfig): RealPingResult = realPingGate.withLock {
-        if (connectionActive || Xray.isRunning() || SingBox.isRunning()) {
-            return@withLock RealPingResult.Skipped
-        }
-        if (WireProxy.isRunning()) return@withLock RealPingResult.Skipped
-
-        val conf = config.tunnelConfPath?.let(::File) ?: return@withLock RealPingResult.Skipped
-        if (!conf.exists()) return@withLock RealPingResult.Skipped
-
-        if (WireProxy.ensureCore() == null) return@withLock RealPingResult.Skipped
-        val text = WireProxy.buildConfig(conf, WireProxy.isAmneziaConf(conf))
-            ?: return@withLock RealPingResult.Skipped
-
-        if (!WireProxy.start(text)) return@withLock RealPingResult.Failed
-
-        // Wait for proxy to open (up to 5s).
-        var tries = 0
-        while (tries < 12 && !WireProxy.isRunning()) {
-            delay(400); tries++
-        }
-        if (!WireProxy.isRunning()) {
-            WireProxy.kill()
-            return@withLock RealPingResult.Failed
-        }
-
-        // Real HTTP traffic test through the proxy.
-        val start = System.nanoTime()
-        var ok = false
-        try {
-            val proxy = java.net.Proxy(
-                java.net.Proxy.Type.HTTP,
-                InetSocketAddress("127.0.0.1", WireProxy.HTTP_PORT),
-            )
-            val conn = java.net.URL("http://cp.cloudflare.com/generate_204")
-                .openConnection(proxy) as java.net.HttpURLConnection
-            conn.connectTimeout = 8000
-            conn.readTimeout = 8000
-            conn.requestMethod = "GET"
-            ok = conn.responseCode in 200..399
-            conn.disconnect()
-        } catch (_: Exception) {
-        }
-        WireProxy.kill()
-        if (ok) RealPingResult.Ok(((System.nanoTime() - start) / 1_000_000).toInt())
-        else RealPingResult.Failed
-    }
-
-    /**
-     * Scans a list of ports on [host] and returns the first one that accepts TCP.
-     * Returns null when none are reachable. Retained ONLY for diagnostics that
-     * explicitly need raw reachability — never used to produce a latency pill.
-     */
-    suspend fun scanPorts(host: String, ports: List<Int>, timeoutMs: Int = 3000): Int? =
-        withContext(Dispatchers.IO) {
-            for (p in ports) {
-                try {
-                    Socket().use { s ->
-                        s.connect(InetSocketAddress(host, p), timeoutMs)
-                        return@withContext p
-                    }
-                } catch (_: Exception) {}
-            }
-            null
-        }
-
-    /**
-     * Locale-tolerant decimal parser for values captured from Windows tooling
-     * (PowerShell's Measure-Object prints "12,5" on comma-decimal locales,
-     * which toDoubleOrNull rejects outright). Accepts digit/dot/comma input
-     * only; anything else returns null so callers keep their no-data answer.
-     */
-    internal fun localeAwareDouble(text: String): Double? {
-        val cleaned = text.trim().filter { it.isDigit() || it == '.' || it == ',' }
-        if (cleaned.isEmpty()) return null
-        // With BOTH separators present, the LAST one is the decimal mark and
-        // the other was grouping ("1,234.5" en-US / "1.234,5" de-DE).
-        val lastDot = cleaned.lastIndexOf('.')
-        val lastComma = cleaned.lastIndexOf(',')
-        val normalized = when {
-            lastDot >= 0 && lastComma >= 0 ->
-                if (lastComma > lastDot) cleaned.replace(".", "").replace(',', '.')
-                else cleaned.replace(",", "")
-            lastComma >= 0 -> cleaned.replace(',', '.')
-            else -> cleaned
-        }
-        return normalized.toDoubleOrNull()
-    }
-
-    private fun tcpLatency(host: String, port: Int): Int? = try {
-        val start = System.nanoTime()
-        Socket().use { s ->
-            s.connect(InetSocketAddress(host, port), 5000)
-        }
-        ((System.nanoTime() - start) / 1_000_000).toInt()
-    } catch (_: Exception) {
-        null
-    }
-
-    /**
-     * True when a VPN adapter is UP and carries one of our tunnel addresses.
-     *
-     * An address alone is NOT enough: Windows keeps the last assigned IP on a
-     * DISCONNECTED wintun/TAP adapter (observed: 10.8.0.6 lingering on a
-     * "Media state: Media disconnected" adapter after OpenVPN died), which
-     * made the app report Connected forever. So the adapter must also be up —
-     * checked via its route to the tunnel's own subnet (a disconnected
-     * adapter has only broadcast/multicast/loopback routes, no on-link route
-     * for its old address).
-     */
-    private fun tunnelConnected(): Boolean {
-        // Fast path: an UP interface with a VPN IPv4 (Java sees all adapters,
-        // including disconnected ones — hence the interface.isUp check).
-        val javaSeesIt = try {
-            NetworkInterface.getNetworkInterfaces().asSequence()
-                .filter { it.isUp }
-                .flatMap { it.inetAddresses.asSequence() }
-                .any { it is Inet4Address && isVpnAddress(it.hostAddress) }
-        } catch (_: Exception) {
-            false
-        }
-        if (javaSeesIt) return true
-
-        // ipconfig path for adapters Java cannot see (RAS/IKEv2). The output
-        // marks disconnected adapters with "Media State . . . : Media
-        // disconnected" — an address printed directly above such a line
-        // belongs to a dead adapter and must not count.
-        return try {
-            runCatching { ipconfigFile.delete() }
-            HiddenRun.runRawAndWait(
-                "cmd.exe /c ipconfig > \"${ipconfigFile.absolutePath}\"",
-                timeoutMs = 5000,
-            )
-            val text = if (ipconfigFile.exists()) ipconfigFile.readText() else ""
-            hasLiveTunnelAddress(text)
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    /**
-     * Parses ipconfig text: tracks adapter blocks whose "Media State" says
-     * disconnected and ignores VPN-looking addresses inside them. A block
-     * runs from one adapter heading to the next; ipconfig prints "Media
-     * State" right after the adapter name when the adapter is down.
-     * Locale-tolerant: looks for the bare address lines rather than trusting
-     * localized labels, and resets at every adapter heading.
-     */
-    internal fun hasLiveTunnelAddress(ipconfigText: String): Boolean {
-        var mediaDisconnected = false
-        var live = false
-        for (rawLine in ipconfigText.lineSequence()) {
-            val line = rawLine.trim()
-            if (ADAPTER_SECTION_START.matches(line)) {
-                if (live) return true
-                // New adapter block: reset state.
-                mediaDisconnected = false
-                continue
-            }
-            if (line.startsWith("Media State", ignoreCase = true) ||
-                line.startsWith("Medienstatus", ignoreCase = true) ||
-                line.startsWith("État du média", ignoreCase = true)) {
-                mediaDisconnected = line.contains("disconnected", ignoreCase = true) ||
-                    line.contains("getrennt", ignoreCase = true) || // German
-                    line.contains("déconnecté", ignoreCase = true)  // French
-                continue
-            }
-            ADDR_REGEX.findAll(line).forEach { m ->
-                if (isVpnAddress(m.value) && !mediaDisconnected) live = true
-            }
-        }
-        return live
-    }
-
-    private val ADAPTER_SECTION_START =
-        Regex("^[^\\s].*(adapter|Adapter|Connection|Verbindung|Connexion|connessione).*:\\s*$")
-
-    private val ADDR_REGEX = Regex("""(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})""")
-
-    private fun isVpnAddress(addr: String?): Boolean =
-        addr != null && (addr.startsWith(IKEV2_PREFIX) || addr.startsWith(WG_PREFIX) ||
-            addr.startsWith(OVPN_PREFIX) || addr.startsWith(TUN_PREFIX))
-
-    /** Name of the currently connected IKEv2 (rasdial) profile, if any. */
-    private fun connectedIkev2Profile(): String? = try {
-        runCatching { statusFile.delete() }
-        HiddenRun.runRawAndWait(
-            "cmd.exe /c rasdial > \"${statusFile.absolutePath}\"",
-            timeoutMs = 5000,
-        )
-        val text = if (statusFile.exists()) statusFile.readText() else ""
-        // English / German / French Windows wording; anything else reports
-        // no profile (the ipconfig path still covers the adapter itself).
-        Regex("(?:Connected to|Verbunden mit|Connecté à)\\s+(.+)").find(text)
-            ?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }
-    } catch (_: Exception) {
-        null
-    }
-
-    /**
-     * Locale-independent ping (Test-Connection averages the latency itself).
-     * The host comes from user-supplied share links, so it is validated
-     * against a strict allow-list BEFORE it ever reaches a shell command —
-     * otherwise a crafted link like `vless://x@$(calc):443` executes code.
-     * @return average round-trip in ms, or null on timeout/failure.
-     */
-    suspend fun pingMs(host: String): Int? = withContext(Dispatchers.IO) {
-        val safe = safeHost(host) ?: return@withContext null
-        try {
-            runCatching { pingFile.delete() }
-            HiddenRun.runRawAndWait(
-                "cmd.exe /c powershell -NoProfile -Command \"(Test-Connection -Count 3 " +
-                    "-ComputerName $safe -ErrorAction SilentlyContinue | " +
-                    "Measure-Object -Property ResponseTime -Average).Average\" > \"${pingFile.absolutePath}\"",
-                timeoutMs = 20_000,
-            )
-            pingFile.takeIf { it.exists() }?.readText()?.trim()
-                ?.takeIf { it.isNotEmpty() && it[0].isDigit() }
-                ?.let { localeAwareDouble(it) }?.let { Math.round(it).toInt() }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    /**
-     * Shell-safe form of [host] for interpolation into cmd/PowerShell command
-     * lines: IPv4, IPv6 (bracketed or bare), or a hostname of letters/digits/
-     * hyphens/dots. Anything else — spaces, quotes, `$`, backticks, `;` —
-     * returns null and the caller must refuse to run the command.
-     */
-    internal fun safeHost(host: String?): String? {
-        val h = host?.trim().orEmpty().removePrefix("[").removeSuffix("]")
-        if (h.isEmpty() || h.length > 253) return null
-        // Hostname / FQDN labels; also accepts a plain IPv4 literal.
-        val hostRe = Regex("^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?" +
-            "(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$")
-        if (hostRe.matches(h)) return h
-        // Bare IPv6 literal (contains ':' — impossible in a hostname).
-        if (h.contains(':') && h.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' || it == ':' || it == '.' }) return h
-        return null
-    }
-=======
     /** Delegates kept on the facade for tests and future callers. */
     suspend fun scanPorts(host: String, ports: List<Int>, timeoutMs: Int = 3000): Int? =
         VpnPing.scanPorts(host, ports, timeoutMs)
@@ -685,7 +217,6 @@ object VpnService {
 
     internal fun hasLiveTunnelAddress(ipconfigText: String): Boolean =
         VpnStatusProbe.hasLiveTunnelAddress(ipconfigText)
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 
     // ------------------------------------------------------------------
     // Connect / disconnect (protocol dispatch)
@@ -725,10 +256,7 @@ object VpnService {
             }
         }
         connectionActive = result.ok
-<<<<<<< HEAD
-=======
         VpnPing.setSessionLive(result.ok)
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         result
     }
 
@@ -738,13 +266,8 @@ object VpnService {
         isWireGuard(config) -> WireProxy.isRunning() && WireProxy.verifyTraffic(6000)
         isSingBox(config) -> SingBox.isRunning() &&
             (SingBox.verifyTraffic(6000) || SingBox.verifyDirectTraffic(6000))
-<<<<<<< HEAD
-        config.protocol == "openvpn" -> tunnelConnected() || openvpnInitialized()
-        else -> tunnelConnected() || connectedIkev2Profile() != null
-=======
         config.protocol == "openvpn" -> VpnStatusProbe.tunnelConnected() || OpenVpn.openvpnInitialized()
         else -> VpnStatusProbe.tunnelConnected() || VpnStatusProbe.connectedIkev2Profile() != null
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     }
 
     private fun recoveredMessage(config: VpnConfig): String = when {
@@ -776,11 +299,7 @@ object VpnService {
                 Proxy.restoreState()
             }
             config.protocol == "openvpn" -> {
-<<<<<<< HEAD
-                stopOpenvpn()
-=======
                 OpenVpn.stop()
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 openvpnSessionActive = false
             }
             else -> {
@@ -793,11 +312,7 @@ object VpnService {
         // Tunnel protocols: drop any live IKEv2 tunnel so the Disconnect
         // button never leaves a connection up (proxies can coexist).
         if (!isProxyMode(config)) {
-<<<<<<< HEAD
-            connectedIkev2Profile()?.let { live ->
-=======
             VpnStatusProbe.connectedIkev2Profile()?.let { live ->
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 HiddenRun.runAndWait(listOf("rasdial", live, "/disconnect"), timeoutMs = 30_000)
             }
         }
@@ -807,10 +322,7 @@ object VpnService {
             tries++
         }
         connectionActive = false
-<<<<<<< HEAD
-=======
         VpnPing.setSessionLive(false)
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         sessionTunMode = null
         Unit
     }
@@ -836,10 +348,7 @@ object VpnService {
             }
         }
         connectionActive = false
-<<<<<<< HEAD
-=======
         VpnPing.setSessionLive(false)
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         openvpnSessionActive = false
         sessionTunMode = null
         Unit
@@ -853,30 +362,19 @@ object VpnService {
      */
     fun killAllCores() {
         connectionActive = false
-<<<<<<< HEAD
-=======
         VpnPing.setSessionLive(false)
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         openvpnSessionActive = false
         sessionTunMode = null
         runCatching { Xray.kill() }
         runCatching { SingBox.kill() }
         runCatching { WireProxy.kill() }
-<<<<<<< HEAD
-        if (ovpnMarker.exists()) runCatching { stopOpenvpnDetached() }
-=======
         if (OpenVpn.marker.exists()) runCatching { OpenVpn.stopDetached() }
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         // Sweep stale multivpn_* leftovers (scripts, results, downloads) that
         // earlier runs — including crashed ones — left behind in %TEMP%.
         sweepStaleTempFiles()
     }
 
-<<<<<<< HEAD
-    /** Deletes multivpn_* / xray_*.zip temp files older than a day. */
-=======
     /** Deletes multivpn_* temp files older than a day. */
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     private fun sweepStaleTempFiles() {
         runCatching {
             val tmp = File(System.getProperty("java.io.tmpdir"))
@@ -899,11 +397,7 @@ object VpnService {
         runCatching {
             val script = File.createTempFile("multivpn_corekill_", ".ps1")
             val resultFile = File(System.getProperty("java.io.tmpdir"), "multivpn_corekill.txt")
-<<<<<<< HEAD
-            script.writeText(buildKillProcessScript(resultFile.absolutePath, singBoxImageName()))
-=======
             script.writeText(VpnScripts.buildKillProcessScript(resultFile.absolutePath, singBoxImageName()))
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             HiddenRun.startDetached(
                 listOf(
                     "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
@@ -1025,11 +519,7 @@ object VpnService {
             // adapter never materialized and NOTHING was routed at all
             // (process rules need the adapter first), which users saw as
             // "connected but nothing comes through".
-<<<<<<< HEAD
-            if (!tunnelConnected()) {
-=======
             if (!VpnStatusProbe.tunnelConnected()) {
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 AppLog.e("SingBox", "${config.protocol}: split session without a tunnel adapter")
                 SingBox.kill()
                 killTunCore()
@@ -1159,11 +649,7 @@ object VpnService {
             }
             // SPLIT/TUN session: require the adapter to actually exist, else
             // the per-app rules route nothing while we claim success.
-<<<<<<< HEAD
-            if (split != null && !tunnelConnected()) {
-=======
             if (split != null && !VpnStatusProbe.tunnelConnected()) {
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 AppLog.e("WireProxy", "split session without a tunnel adapter")
                 SingBox.kill()
                 killTunCore()
@@ -1233,11 +719,7 @@ object VpnService {
 
     /** Kills a TUN-mode sing-box core, which runs elevated (one UAC prompt). */
     private suspend fun killTunCore() {
-<<<<<<< HEAD
-        runElevatedScript(60) { f -> buildKillProcessScript(f, singBoxImageName()) }
-=======
         VpnScripts.runElevatedScript(60) { f -> VpnScripts.buildKillProcessScript(f, singBoxImageName()) }
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         SingBox.kill()
     }
 
@@ -1260,13 +742,9 @@ object VpnService {
      */
     suspend fun cleanupProfiles(profileNames: List<String>, allVpnProfiles: Boolean) =
         withContext(Dispatchers.IO) {
-<<<<<<< HEAD
-            runElevatedScript(120) { f -> buildCleanupScript(f, profileNames, allVpnProfiles) }
-=======
             VpnScripts.runElevatedScript(120) { f ->
                 VpnScripts.buildCleanupScript(f, profileNames, allVpnProfiles, CA_SUBJECTS)
             }
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         }
 
     private suspend fun connectIkev2(config: VpnConfig): VpnResult {
@@ -1279,11 +757,7 @@ object VpnService {
         HiddenRun.runAndWaitCancellable(listOf("rasdial", name), timeoutMs = 35_000)
         var tries = 0
         while (tries < 3) {
-<<<<<<< HEAD
-            if (tunnelConnected()) {
-=======
             if (VpnStatusProbe.tunnelConnected()) {
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 AppLog.i("VPN", "Connected via fast path (no UAC)")
                 return VpnResult(true, "Connected")
             }
@@ -1291,13 +765,8 @@ object VpnService {
             tries++
         }
 
-<<<<<<< HEAD
-        val result = runElevatedScript(240) { resultFile ->
-            buildIkev2ConnectScript(
-=======
         val result = VpnScripts.runElevatedScript(240) { resultFile ->
             VpnScripts.buildIkev2ConnectScript(
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 resultFile,
                 name = name,
                 server = config.serverIp,
@@ -1305,10 +774,7 @@ object VpnService {
                 p12Path = config.p12Path,
                 p12Pass = config.p12Pass?.takeIf { it.isNotBlank() }
                     ?: SshService.CLIENT_P12_PASSWORD,
-<<<<<<< HEAD
-=======
                 caSubjects = CA_SUBJECTS,
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             )
         }
         if (result.ok) AppLog.i("VPN", "IKEv2 connected via elevated flow")
@@ -1339,17 +805,12 @@ object VpnService {
             val pid = HiddenRun.startDetached(
                 listOf(exe.absolutePath, "run", "-c", conf.absolutePath),
                 workingDir = exe.parentFile,
-<<<<<<< HEAD
-            ) ?: return@repeat
-            if (pid > 0) Xray.trackPid(pid)
-=======
             ) ?: run {
                 // Process creation failed outright — no point polling a port.
                 AppLog.e("Xray", "could not start xray.exe (process creation failed)")
                 return@repeat
             }
             Xray.trackPid(pid)
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             var tries = 0
             while (tries < 15) {
                 if (Xray.isRunning()) { portOpen = true; return@repeat }
@@ -1439,11 +900,7 @@ object VpnService {
             // path: without a live tunnel adapter the per-app rules route
             // NOTHING, and reporting "Connected" produced the user-visible
             // "connected but nothing comes through" blackout.
-<<<<<<< HEAD
-            if (!tunnelConnected()) {
-=======
             if (!VpnStatusProbe.tunnelConnected()) {
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 AppLog.e("Xray", "${parsed.protocol}: split session without a tunnel adapter")
                 SingBox.kill()
                 killTunCore()
@@ -1504,622 +961,6 @@ object VpnService {
     }
 
     // ------------------------------------------------------------------
-<<<<<<< HEAD
-    // OpenVPN
-    // ------------------------------------------------------------------
-
-    /** Scheduled task used to run openvpn.exe as SYSTEM (see [buildOvpnConnectScript]). */
-    private const val OVPN_TASK = "MultiVPN_OpenVPN"
-
-    private val ovpnLogFile: File
-        get() = File(Storage.dataDir, "bin/openvpn/openvpn.log")
-
-    /**
-     * Marks that a SYSTEM OpenVPN task is (or may still be) registered, so
-     * closing the app can clean it up even after a crash or a restart.
-     */
-    private val ovpnMarker: File
-        get() = File(Storage.dataDir, "openvpn-task.active")
-
-    /** Marker path for interpolation into the PowerShell stop script. */
-    private val ovpnMarkerPs: String
-        get() = psEscape(ovpnMarker.absolutePath)
-
-    private suspend fun connectOpenvpn(config: VpnConfig): VpnResult {
-        val conf = config.ovpnPath?.let(::File)
-            ?: return VpnResult(false, "This config has no .ovpn file.")
-        if (!conf.exists()) {
-            return VpnResult(false, "OpenVPN config file missing: ${conf.absolutePath}. Re-run setup.")
-        }
-
-        // Ensure the OpenVPN binary is available: extract from bundled
-        // resources first, download only as a fallback.
-        if (!ensureOpenvpnBinary(allowDownload = true, forceDownload = false)) {
-            return VpnResult(
-                false,
-                "OpenVPN binary is not available (bundled copy missing and download failed).",
-            )
-        }
-        val exe = findOpenvpnExe() ?: return VpnResult(
-            false,
-            "OpenVPN executable not found after extraction.",
-        )
-
-        // Third-party .ovpn files often carry quirks that make the community
-        // binary abort before any connection attempt: stray control bytes
-        // (0x1A is treated as EOF by OpenVPN's parser), inline
-        // <auth-user-pass> (rejected by this build), explicit-exit-notify on
-        // tcp (udp-only) and a verify-x509-name CN pin that does not match.
-        // Keep the cleaned copy next to the binary: the SYSTEM task cannot
-        // read the user's %TEMP% reliably.
-        val cleaned = sanitizeOvpn(conf, File(exe.parentFile, "current.ovpn"))
-        runCatching { ovpnLogFile.delete() }
-        runCatching { ovpnMarker.writeText(OVPN_TASK) }
-        val result = runElevatedScript(120) { f ->
-            buildOvpnConnectScript(f, exe.absolutePath, cleaned.absolutePath)
-        }
-        if (result.ok) {
-            var tries = 0
-            while (tries < 12) {
-                // The subnet check alone fails for imported third-party
-                // configs whose pool is outside the hardcoded prefixes, so
-                // OpenVPN's own log line (always English, independent of the
-                // Windows locale) is accepted as an equally strong signal:
-                // it appears ONLY after TUN routes were actually installed.
-                if (tunnelConnected() || openvpnInitialized()) {
-                    AppLog.i("VPN", "OpenVPN tunnel is up")
-                    openvpnSessionActive = true
-                    return VpnResult(true, "Connected")
-                }
-                delay(1000)
-                tries++
-            }
-        } else if (ovpnLogFile.exists()) {
-            // Belt-and-braces for imported third-party configs: if the log
-            // proves initialization even though the elevated script's subnet
-            // probe gave up (foreign address pool), keep the tunnel alive.
-            // The log is deleted before every connect, so this cannot be a
-            // stale hit; a declined UAC never starts OpenVPN and leaves no
-            // log, skipping this branch entirely.
-            var rescueTries = 0
-            while (rescueTries < 6) {
-                if (tunnelConnected() || openvpnInitialized()) {
-                    AppLog.i("VPN", "OpenVPN tunnel is up (log signal, foreign subnet)")
-                    openvpnSessionActive = true
-                    return VpnResult(true, "Connected")
-                }
-                delay(1000)
-                rescueTries++
-            }
-        }
-        // The task ran but no tunnel: OpenVPN's own log says why (bad cert,
-        // unreachable server, TLS mismatch…). Surface its last error lines.
-        val reason = ovpnLastError()
-        stopOpenvpn()
-        return VpnResult(
-            false,
-            if (reason.isNotEmpty()) {
-                "OpenVPN could not connect: $reason"
-            } else {
-                result.message.ifEmpty { "OpenVPN started but the tunnel did not come up." }
-            },
-        )
-    }
-
-    /**
-     * True when the managed OpenVPN process logged its initialization line.
-     * OpenVPN writes logs in English regardless of the OS locale, and this
-     * marker only appears after the tun adapter, routes and TLS handshake all
-     * succeeded — a stronger per-config signal than matching one of the four
-     * known address pools. The log file is deleted before every connect, so a
-     * hit always belongs to the current attempt.
-     */
-    internal fun openvpnInitialized(): Boolean = runCatching {
-        ovpnLogFile.exists() &&
-            ovpnLogFile.readText()
-                .contains("Initialization Sequence Completed", ignoreCase = true)
-    }.getOrDefault(false)
-
-    /** Interesting tail of the OpenVPN log for the error card. */
-    private fun ovpnLastError(): String = runCatching {
-        val lines = ovpnLogFile.readLines()
-        val marked = lines.filter {
-            Regex("(?i)(error|fatal|cannot|failed|denied|verify|timeout)").containsMatchIn(it)
-        }
-        (if (marked.isNotEmpty()) marked else lines).takeLast(3)
-            .joinToString(" | ") { it.replace(Regex("^\\d{4}-\\d{2}-\\d{2} [\\d:]+ "), "").trim() }
-            .take(400)
-    }.getOrDefault("")
-
-    /** Stops the SYSTEM-level OpenVPN process (needs one elevated script). */
-    private suspend fun stopOpenvpn() {
-        val run = runElevatedScriptDetailed(90) { f -> buildOvpnStopScript(f) }
-        if (run.finished) {
-            // The script ran — it deleted the marker itself on the elevated
-            // side; deleting again here is harmless belt-and-braces.
-            runCatching { ovpnMarker.delete() }
-        } else {
-            // The stop never happened (UAC declined/timed out). KEEP the
-            // marker: killAllCores() at next launch retries the cleanup via
-            // stopOpenvpnDetached(). Deleting it here orphaned the SYSTEM
-            // tunnel until reboot.
-            AppLog.e("VPN", "OpenVPN stop did not run — keeping task marker for retry")
-        }
-    }
-
-    /**
-     * Fire-and-forget variant for the app-close path: the window is going
-     * away, so we cannot await the elevated script's result. The marker is
-     * deleted by the elevated script itself (see [buildOvpnStopScript]) —
-     * NOT here, so a declined UAC prompt leaves the marker behind and the
-     * next launch retries the cleanup.
-     */
-    private fun stopOpenvpnDetached() {
-        val script = File.createTempFile("multivpn_ovpnstop_", ".ps1")
-        val resultFile = File(System.getProperty("java.io.tmpdir"), "multivpn_ovpnstop.txt")
-        script.writeText(buildOvpnStopScript(resultFile.absolutePath))
-        HiddenRun.startDetached(
-            listOf(
-                "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
-                "-File", script.absolutePath,
-            ),
-        )
-    }
-
-    /**
-     * Writes a cleaned copy of an .ovpn file for the community OpenVPN binary.
-     *
-     * Fixes three real-world breakers found in imported configs:
-     *  - Control bytes below 0x20 (a stray 0x1A / Ctrl-Z makes OpenVPN treat
-     *    the rest of the file as EOF → "No closing quotation" style errors);
-     *  - `explicit-exit-notify` is udp-only; on tcp it aborts the run;
-     *  - inline `<auth-user-pass>` is rejected by this build, so the block is
-     *    extracted to a sidecar file and referenced via --auth-user-pass.
-     * Writes to [target] when given (the SYSTEM-level task cannot read the
-     * user's %TEMP%), else to a temp copy.
-     * Internal so the test source set can cover the sanitizer directly.
-     */
-    internal fun sanitizeOvpn(conf: File, target: File? = null): File {
-        val raw = runCatching { conf.readBytes() }.getOrElse { return conf }
-        val text = String(raw, Charsets.UTF_8)
-            .replace("\u0000", "")
-            .map { if (it.code < 0x20 && it != '\n' && it != '\r' && it != '\t') ' ' else it }
-            .joinToString("")
-
-        val proto = Regex("(?im)^\\s*proto\\s+(tcp|udp)").find(text)?.groupValues?.get(1)
-        var clean = if (proto == "tcp") {
-            text.replace(Regex("(?im)^\\s*explicit-exit-notify\\s.*$"), "")
-        } else text
-
-        // verify-x509-name pins the server cert's CN to a literal (easy-rsa
-        // defaults to "server", but many existing servers carry whatever CN
-        // their PKI was created with — e.g. "ChangeMe" — which aborts the
-        // handshake with VERIFY X509NAME ERROR before any TLS exchange). The
-        // remote-cert-tls server line still enforces the TLS-server role, so
-        // dropping the CN pin makes the config work against those servers
-        // without weakening the CA/chain validation.
-        clean = clean.replace(Regex("(?im)^\\s*verify-x509-name\\s.*$"), "")
-
-        val creds = Regex("(?is)<auth-user-pass>\\s*([^<]+?)</auth-user-pass>").find(clean)
-        val passFile = if (creds != null) {
-            val f = File(target?.parentFile ?: File(System.getProperty("java.io.tmpdir")), "ovpn_auth.txt")
-            f.writeText(creds.groupValues[1].trim() + "\n")
-            f
-        } else null
-        val withCreds = if (creds != null) {
-            clean.replace(
-                creds.value,
-                "auth-user-pass \"${passFile!!.absolutePath.replace("\\", "\\\\")}\"",
-            )
-        } else clean
-
-        val cleaned = target ?: File.createTempFile("multivpn_ovpn_", ".ovpn").also {
-            it.deleteOnExit()
-        }
-        cleaned.parentFile?.mkdirs()
-        cleaned.writeText(withCreds)
-        return cleaned
-    }
-
-    private fun openvpnDir(): File = File(Storage.dataDir, "bin/openvpn")
-
-    /** True when every file openvpn.exe needs is present next to it. */
-    private fun openvpnComplete(): Boolean {
-        val exe = findOpenvpnExe() ?: return false
-        // DLLs only matter for the bundled copy; a system install has its own.
-        if (exe.parentFile?.absolutePath == openvpnDir().absolutePath) {
-            val need = listOf(
-                "libcrypto-1_1-x64.dll", "libpkcs11-helper-1.dll",
-                "libssl-1_1-x64.dll", "vcruntime140.dll",
-            )
-            return need.all { File(openvpnDir(), it).exists() }
-        }
-        return true
-    }
-
-    private fun findOpenvpnExe(): File? {
-        // First look in the app's own bundled openvpn directory
-        val bundled = File(openvpnDir(), "openvpn.exe")
-        if (bundled.exists()) return bundled
-
-        // Then look in Program Files (system installation)
-        val pf = System.getenv("ProgramFiles") ?: return null
-        return listOf("$pf\\OpenVPN\\bin\\openvpn.exe")
-            .map(::File).firstOrNull { it.exists() }
-    }
-
-    /** Public helper for first-run download. */
-    suspend fun downloadOpenvpnBinary(): Boolean = withContext(Dispatchers.IO) {
-        // Force download even if already present
-        if (openvpnComplete()) return@withContext true
-        val msi = latestOpenvpnMsiUrl()?.let { downloadToFile(it) } ?: return@withContext false
-        val install = runElevatedScript(300) { f -> buildMsiInstallScript(f, msi.absolutePath) }
-        install.ok && openvpnComplete()
-    }
-
-    /** Ensures the bundled OpenVPN binary is present, copying from resources if needed. */
-    private suspend fun ensureOpenvpnBinary(allowDownload: Boolean = true, forceDownload: Boolean = false): Boolean = withContext(Dispatchers.IO) {
-        if (forceDownload) {
-            return@withContext downloadOpenvpnBinary()
-        }
-        if (openvpnComplete()) return@withContext true
-        // Copy from resources (file names must match what is actually bundled).
-        val files = listOf(
-            "openvpn.exe", "libcrypto-1_1-x64.dll", "libpkcs11-helper-1.dll",
-            "libssl-1_1-x64.dll", "vcruntime140.dll", "wintun.dll",
-        )
-        val targetDir = File(Storage.dataDir, "bin/openvpn")
-        val copied = Resources.extractAll("/bin/openvpn", files, targetDir)
-        AppLog.i("VPN", "Extracted $copied OpenVPN files from resources")
-        if (openvpnComplete()) return@withContext true
-        if (allowDownload) {
-            return@withContext downloadOpenvpnBinary()
-        }
-        return@withContext false
-    }
-
-    private fun latestOpenvpnMsiUrl(): String? = runCatching {
-        val req = HttpRequest.newBuilder(URI.create("https://swupdate.openvpn.org/community/releases/"))
-            .timeout(Duration.ofSeconds(30)).GET().build()
-        val body: String = httpClient.send(req, HttpResponse.BodyHandlers.ofString()).body()
-        val msiFiles: List<String> = Regex("openvpn-install-[\\w.-]+-amd64\\.msi")
-            .findAll(body).map { it.value }.toList()
-        val best: String? = msiFiles.maxWithOrNull(compareBy { file: String -> versionKeyLong(file) })
-        best?.let { "https://swupdate.openvpn.org/community/releases/$it" }
-    }.getOrNull()
-
-    /**
-     * Numeric sort key for an OpenVPN MSI file name, e.g.
-     * "openvpn-install-2.6.12-I10-amd64.msi" → [2, 6, 12, 10].
-     * Lexicographic comparison would rank "9.x" above "10.x"; this ranks
-     * each dot-separated numeric component by value instead. Non-numeric
-     * components (rare) sort as 0 and keep the entry comparable.
-     */
-    internal fun versionKey(fileName: String): List<Int> =
-        fileName.substringAfter("install-").substringBefore("-amd64")
-            .split('.', '-', 'I')
-            .filter { it.isNotBlank() }
-            .map { it.filter(Char::isDigit).toIntOrNull() ?: 0 }
-
-    /** [versionKey] packed into a single Long so it is directly Comparable:
-     *  up to 4 components of up to 5 digits each (max 99'999 per component). */
-    internal fun versionKeyLong(fileName: String): Long {
-        val parts = versionKey(fileName).take(4)
-        var key = 0L
-        for (i in 0 until 4) {
-            key = key * 100_000 + (parts.getOrNull(i) ?: 0)
-                .coerceIn(0, 99_999)
-        }
-        return key
-    }
-
-    private fun downloadToFile(url: String): File? = runCatching {
-        AppLog.i("VPN", "Downloading ${url.substringAfterLast('/')}")
-        val target = File.createTempFile("multivpn_dl_", ".msi")
-        val req = HttpRequest.newBuilder(URI.create(url))
-            .timeout(Duration.ofSeconds(300)).GET().build()
-        val resp = httpClient.send(req, HttpResponse.BodyHandlers.ofFile(target.toPath()))
-        if (resp.statusCode() !in 200..299 || target.length() < 1_000_000) {
-            target.delete(); null
-        } else target
-    }.getOrNull()
-
-    // ------------------------------------------------------------------
-    // Elevated script plumbing (result via temp file, hidden windows)
-    // ------------------------------------------------------------------
-
-    private suspend fun runElevatedScript(timeoutSec: Long, scriptBuilder: (resultFile: String) -> String): VpnResult =
-        runElevatedScriptDetailed(timeoutSec, scriptBuilder).result
-
-    /**
-     * [runElevatedScript] plus the information the callers that manage crash
-     * markers need: whether the elevated script actually got to RUN (false =
-     * UAC declined / timed out — the machine state was NOT changed).
-     */
-    private class ElevatedRun(val finished: Boolean, val result: VpnResult)
-
-    private suspend fun runElevatedScriptDetailed(
-        timeoutSec: Long,
-        scriptBuilder: (resultFile: String) -> String,
-    ): ElevatedRun {
-        val stamp = System.currentTimeMillis()
-        val scriptFile = File.createTempFile("multivpn_${stamp}", ".ps1")
-        val resultFile = File(System.getProperty("java.io.tmpdir"), "multivpn_result_$stamp.txt")
-        return try {
-            scriptFile.writeText(scriptBuilder(resultFile.absolutePath))
-            // Cancellable: a stuck UAC prompt must not make the Cancel button
-            // spin — cancellation terminates the powershell child.
-            val exit = HiddenRun.runAndWaitCancellable(
-                listOf(
-                    "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
-                    "-File", scriptFile.absolutePath,
-                ),
-                timeoutMs = timeoutSec * 1000,
-            ) ?: return ElevatedRun(
-                false,
-                VpnResult(
-                    false,
-                    "The elevated script did not finish in time. Was the UAC prompt declined?",
-                ),
-            )
-            if (exit < 0) {
-                // The child could not even start (process creation failed) —
-                // treat like "never ran".
-                ElevatedRun(false, VpnResult(false, "Could not launch the elevated script."))
-            } else {
-                ElevatedRun(true, readResultFile(resultFile))
-            }
-        } finally {
-            runCatching { scriptFile.delete() }
-            runCatching { resultFile.delete() }
-        }
-    }
-
-    private fun readResultFile(resultFile: File): VpnResult {
-        val raw = try {
-            if (resultFile.exists()) resultFile.readText() else ""
-        } catch (_: Exception) {
-            ""
-        }
-        // Out-File -Encoding utf8 in Windows PowerShell writes a BOM; strip
-        // it or the status line never equals "OK".
-        val text = raw.trim().removePrefix("\uFEFF")
-        if (text.isEmpty()) {
-            return VpnResult(false, "No result was written. Was the UAC prompt declined?")
-        }
-        val status = text.substringBefore('\n').trim().uppercase()
-        val message = text.substringAfter('\n', "").trim()
-        return when (status) {
-            "OK" -> VpnResult(true, message)
-            "ERROR" -> VpnResult(false, message.ifEmpty { "Unknown error" })
-            else -> VpnResult(
-                false,
-                message.ifEmpty { "Connection failed. Check server or certificates." },
-            )
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // Script builders ('§' is a placeholder for '$', replaced at the end)
-    // ------------------------------------------------------------------
-
-    private fun String.dollarize() = replace('§', '$')
-
-    private fun psEscape(s: String) =
-        s.replace("`", "``").replace("$", "`$").replace("\"", "`\"")
-
-    /** Shared self-elevating prelude for every generated script. */
-    private fun elevatedPrelude(resultFile: String): String = """
-§ErrorActionPreference = "Stop"
-§ResultFile = "${psEscape(resultFile)}"
-
-function Write-Result(§status, §message) {
-    "§status`n§message" | Out-File -FilePath §ResultFile -Encoding utf8
-}
-
-§isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not §isAdmin) {
-    try {
-        §script = §MyInvocation.MyCommand.Path
-        Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"§script`"" -Wait
-    } catch {
-        Write-Result "ERROR" "Admin elevation was declined: §(§_.Exception.Message)"
-    }
-    exit 0
-}
-""".trimIndent()
-
-    private fun buildIkev2ConnectScript(
-        resultFile: String,
-        name: String,
-        server: String,
-        caPath: String?,
-        p12Path: String?,
-        p12Pass: String,
-    ): String {
-        val imports = StringBuilder()
-        if (!caPath.isNullOrEmpty()) {
-            imports.append(
-                "    Import-Certificate -FilePath \"${psEscape(caPath)}\" -CertStoreLocation Cert:\\LocalMachine\\Root | Out-Null\n"
-            )
-        }
-        if (!p12Path.isNullOrEmpty()) {
-            imports.append(
-                "    §PfxPass = ConvertTo-SecureString -String \"${psEscape(p12Pass)}\" -AsPlainText -Force\n" +
-                    "    Import-PfxCertificate -FilePath \"${psEscape(p12Path)}\" -CertStoreLocation Cert:\\LocalMachine\\My -Password §PfxPass | Out-Null\n"
-            )
-        }
-
-        return (elevatedPrelude(resultFile) + """
-§Name = "${psEscape(name)}"
-§Server = "${psEscape(server)}"
-
-try {
-    # Remove certificates from earlier setups: every server re-setup
-    # regenerates the PKI and a stale client cert makes rasdial fail with
-    # "Policy match error". CA subjects must match setup-ikev2.sh.
-    §caSubjects = @(${CA_SUBJECTS.joinToString(", ") { "\"$it\"" }})
-    foreach (§store in @("Cert:\LocalMachine\My", "Cert:\LocalMachine\Root", "Cert:\LocalMachine\CA")) {
-        foreach (§s in §caSubjects) {
-            Get-ChildItem §store -ErrorAction SilentlyContinue |
-                Where-Object { §_.Issuer -eq §s -or §_.Subject -eq §s } |
-                Remove-Item -ErrorAction SilentlyContinue
-        }
-    }
-
-$imports
-    # Drop any live connection before recreating the profile (Windows
-    # refuses to remove a profile that is currently connected).
-    rasdial §Name /disconnect 2>&1 | Out-Null
-    Get-VpnConnection -Name §Name -ErrorAction SilentlyContinue | Remove-VpnConnection -Force
-    Add-VpnConnection -Name §Name -ServerAddress §Server -TunnelType IKEv2 -AuthenticationMethod MachineCertificate -EncryptionLevel Required -Force
-
-    §output = rasdial §Name 2>&1 | Out-String
-    §exit = §LASTEXITCODE
-    # Judge success by output text: rasdial's exit code is unreliable in some
-    # PowerShell hosts (observed returning non-zero after a successful connect).
-    if (§output -match "Successfully connected|Command completed successfully|already connected") {
-        Write-Result "OK" §output
-    } else {
-        Write-Result "FAIL" "rasdial exit code: §exit`n§output"
-    }
-} catch {
-    Write-Result "ERROR" §_.Exception.Message
-}
-""".trimIndent()).dollarize()
-    }
-
-    private fun buildMsiInstallScript(resultFile: String, msiPath: String): String =
-        (elevatedPrelude(resultFile) + """
-try {
-    §p = Start-Process msiexec -ArgumentList "/i `"${psEscape(msiPath)}`" /qn /norestart" -Wait -PassThru -WindowStyle Hidden
-    if (§p.ExitCode -eq 0) {
-        Write-Result "OK" "Installer finished."
-    } else {
-        Write-Result "FAIL" "msiexec exit code: §(§p.ExitCode)"
-    }
-} catch {
-    Write-Result "ERROR" §_.Exception.Message
-}
-""".trimIndent()).dollarize()
-
-    /**
-     * Starts openvpn.exe as SYSTEM through a one-off scheduled task.
-     *
-     * An elevated (admin) process is NOT enough: openvpn refuses the wintun
-     * driver with "Wintun requires SYSTEM privileges and therefore should be
-     * used with interactive service" — verified live. A scheduled task with
-     * the SYSTEM principal gives exactly the privilege level the driver wants
-     * without installing OpenVPN's own service or shipping psexec.
-     */
-    private fun buildOvpnConnectScript(resultFile: String, exe: String, confPath: String): String =
-        (elevatedPrelude(resultFile) + """
-try {
-    §exe  = "${psEscape(exe)}"
-    §conf = "${psEscape(confPath)}"
-    §dir  = Split-Path §exe -Parent
-    §log  = "${psEscape(ovpnLogFile.absolutePath)}"
-
-    # Clear any previous run. Native stderr must go through cmd: with
-    # §ErrorActionPreference='Stop' even a redirect turns "not found" into a
-    # terminating NativeCommandError.
-    cmd /c "schtasks /end /tn $OVPN_TASK >nul 2>&1"
-    cmd /c "schtasks /delete /tn $OVPN_TASK /f >nul 2>&1"
-    cmd /c "taskkill /IM openvpn.exe /F >nul 2>&1"
-
-    §args = '--config "' + §conf + '" --log "' + §log + '" --verb 3 --connect-retry-max 3 --windows-driver wintun'
-    §action = New-ScheduledTaskAction -Execute §exe -Argument §args -WorkingDirectory §dir
-    §principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    §settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
-    Register-ScheduledTask -TaskName $OVPN_TASK -Action §action -Principal §principal -Settings §settings -Force | Out-Null
-    Start-ScheduledTask -TaskName $OVPN_TASK
-
-    # Poll for the tunnel address instead of sleeping a fixed time. The
-    # hardcoded prefixes only cover OUR provisions — an imported third-party
-    # .ovpn whose pool is 10.7.x / 192.168.50.x etc. would always report
-    # FAIL and get torn down while perfectly healthy, so OpenVPN's own
-    # English log line (locale-independent, appears only after TUN routes
-    # were actually installed) is accepted as an equally strong signal.
-    §up = §false
-    for (§i = 0; §i -lt 20; §i++) {
-        Start-Sleep -Milliseconds 900
-        if ((ipconfig | Out-String) -match "10\.8\.0\.") { §up = §true; break }
-        if ((Test-Path §log) -and ((Get-Content -Raw §log -ErrorAction SilentlyContinue) -match "Initialization Sequence Completed")) { §up = §true; break }
-    }
-    if (§up) {
-        Write-Result "OK" "OpenVPN tunnel is up."
-    } else {
-        Write-Result "FAIL" "OpenVPN ran but the tunnel did not come up."
-    }
-} catch {
-    Write-Result "ERROR" §_.Exception.Message
-}
-""".trimIndent()).dollarize()
-
-    /** Ends and removes the SYSTEM task; a user-level taskkill cannot stop it. */
-    private fun buildOvpnStopScript(resultFile: String): String {
-        // Marker path is interpolated as a literal (escaped for PowerShell);
-        // '$MULTIVPN_MARKER' here is a plain placeholder, not Kotlin syntax.
-        val script = elevatedPrelude(resultFile) + """
-try {
-    cmd /c "schtasks /end /tn $OVPN_TASK >nul 2>&1"
-    cmd /c "schtasks /delete /tn $OVPN_TASK /f >nul 2>&1"
-    cmd /c "taskkill /IM openvpn.exe /F >nul 2>&1"
-    # The marker is deleted HERE, on the elevated side: if the user declines
-    # the UAC prompt the script never runs, the marker survives, and the next
-    # app start retries the cleanup. (Deleting it from the app side before
-    # knowing the outcome made a declined prompt lose openvpn.exe forever.)
-    Remove-Item -ErrorAction SilentlyContinue "@MARKER@"
-    Write-Result "OK" "Stopped."
-} catch {
-    Write-Result "ERROR" §_.Exception.Message
-}
-""".trimIndent()
-        return script.dollarize().replace("@MARKER@", ovpnMarkerPs)
-    }
-
-    private fun buildKillProcessScript(resultFile: String, imageName: String): String =
-        (elevatedPrelude(resultFile) + """
-try {
-    cmd /c "taskkill /IM ${imageName} /F >nul 2>&1"
-    Write-Result "OK" "Stopped."
-} catch {
-    Write-Result "ERROR" §_.Exception.Message
-}
-""".trimIndent()).dollarize()
-
-    private fun buildCleanupScript(
-        resultFile: String,
-        profileNames: List<String>,
-        allVpnProfiles: Boolean,
-    ): String {
-        val removeProfiles = if (allVpnProfiles) {
-            """Get-VpnConnection -ErrorAction SilentlyContinue | Where-Object { §_.Name -like "VPN-*" } | Remove-VpnConnection -Force"""
-        } else {
-            profileNames.joinToString("\n") { n ->
-                """Get-VpnConnection -Name "${psEscape(n)}" -ErrorAction SilentlyContinue | Remove-VpnConnection -Force"""
-            }
-        }
-        return (elevatedPrelude(resultFile).replace("§ErrorActionPreference = \"Stop\"", "§ErrorActionPreference = \"Continue\"") + """
-try {
-$removeProfiles
-
-    §caSubjects = @(${CA_SUBJECTS.joinToString(", ") { "\"$it\"" }})
-    foreach (§store in @("Cert:\LocalMachine\My", "Cert:\LocalMachine\Root", "Cert:\LocalMachine\CA")) {
-        foreach (§s in §caSubjects) {
-            Get-ChildItem §store -ErrorAction SilentlyContinue |
-                Where-Object { §_.Issuer -eq §s -or §_.Subject -eq §s } |
-                Remove-Item -ErrorAction SilentlyContinue
-        }
-    }
-    "OK" | Out-File -FilePath §ResultFile -Encoding utf8
-} catch {
-    "ERROR: §(§_.Exception.Message)" | Out-File -FilePath §ResultFile -Encoding utf8
-}
-""".trimIndent()).dollarize()
-    }
-}
-=======
     // OpenVPN (implementation in OpenVpn; session flag lives here)
     // ------------------------------------------------------------------
 
@@ -2143,4 +984,3 @@ $removeProfiles
     suspend fun downloadOpenvpnBinary(): Boolean = OpenVpn.downloadBinary()
 }
 
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)

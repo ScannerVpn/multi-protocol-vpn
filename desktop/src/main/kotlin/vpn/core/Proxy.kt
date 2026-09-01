@@ -1,11 +1,8 @@
 package vpn.core
 
 import java.io.File
-<<<<<<< HEAD
-=======
 import java.net.InetSocketAddress
 import java.net.Socket
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 
 /**
  * Windows system proxy (WinINet, HKCU) used by the proxy-mode protocols
@@ -14,8 +11,6 @@ import java.net.Socket
  * The pre-app state is captured before enabling and restored on disable, so
  * a user who already runs behind a corporate/other proxy does not lose that
  * setting forever after one VPN session.
-<<<<<<< HEAD
-=======
  *
  * WHY THE STATE FILE LIVES IN THE DATA DIR (not %TEMP%):
  * this file is the ONLY record of what the machine's proxy looked like before
@@ -26,7 +21,6 @@ import java.net.Socket
  * Now: the state lives next to the configs, and a missing state file means
  * "we cannot know the old value" → [restoreState] still DISABLES a proxy that
  * points at a dead local port instead of doing nothing.
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
  */
 object Proxy {
 
@@ -36,12 +30,6 @@ object Proxy {
     private const val BYPASS =
         "localhost;127.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*;<local>"
 
-<<<<<<< HEAD
-    private const val STATE_FILE = "multivpn_proxy_state.txt"
-    private const val SEP = "\u0001"
-
-    private fun stateFile(): File = File(System.getProperty("java.io.tmpdir"), STATE_FILE)
-=======
     private const val STATE_FILE = "proxy_state.txt"
     private const val SEP = "\u0001"
 
@@ -51,7 +39,6 @@ object Proxy {
     /** Legacy location; read once so an in-flight session is not orphaned. */
     private fun legacyStateFile(): File =
         File(System.getProperty("java.io.tmpdir"), "multivpn_proxy_state.txt")
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 
     /** Captures the current proxy values once, before we overwrite them. */
     fun saveState() {
@@ -59,16 +46,6 @@ object Proxy {
         if (f.exists()) return // already captured this session — never overwrite
         val enabled = if (isEnabled()) "1" else "0"
         val server = proxyServer() ?: ""
-<<<<<<< HEAD
-        runCatching { f.writeText("$enabled$SEP$server") }
-        AppLog.i("Proxy", "Saved previous system proxy state (enabled=$enabled)")
-    }
-
-    /** Restores what [saveState] captured and forgets it. Best-effort. */
-    fun restoreState() {
-        val f = stateFile()
-        val raw = runCatching { f.readText() }.getOrNull() ?: return
-=======
         runCatching {
             f.parentFile?.mkdirs()
             f.writeText("$enabled$SEP$server")
@@ -100,7 +77,6 @@ object Proxy {
             }
             return
         }
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         runCatching {
             val parts = raw.split(SEP)
             val enabled = parts.getOrNull(0) ?: "0"
@@ -118,10 +94,7 @@ object Proxy {
             refresh()
         }
         runCatching { f.delete() }
-<<<<<<< HEAD
-=======
         runCatching { legacyStateFile().delete() }
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         AppLog.i("Proxy", "Restored previous system proxy state")
     }
 
@@ -151,8 +124,6 @@ object Proxy {
         refresh()
     }
 
-<<<<<<< HEAD
-=======
     /**
      * User-facing emergency reset (Settings → "Reset system proxy"): turns the
      * proxy off, drops our saved state and tells WinINet. Always safe — the
@@ -166,7 +137,6 @@ object Proxy {
         AppLog.i("Proxy", "system proxy force-reset by the user")
     }
 
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     fun isEnabled(): Boolean {
         val f = File(System.getProperty("java.io.tmpdir"), "multivpn_proxy.txt")
         runCatching { f.delete() }
@@ -192,27 +162,6 @@ object Proxy {
     }
 
     /**
-<<<<<<< HEAD
-     * True when the system proxy is ON and points at one of THIS app's local
-     * inbounds — i.e. a previous run left it behind (crash / force kill) and
-     * its core is gone, which takes the whole system's internet down.
-     */
-    fun isOurs(): Boolean {
-        if (!isEnabled()) return false
-        val srv = proxyServer() ?: return false
-        val ours = setOf(
-            "127.0.0.1:${ProxyPorts.socks}",
-            "127.0.0.1:${ProxyPorts.http}",
-            "127.0.0.1:${ProxyPorts.tunProbe}",
-            "127.0.0.1:${ProxyPorts.base}",
-        )
-        return srv in ours
-    }
-
-    /** Disables the leftover proxy only when it belongs to this app. */
-    fun disableIfOurs() {
-        if (isOurs()) disable()
-=======
      * Parses the loopback port out of a ProxyServer value, or null when the
      * value does not name a local proxy at all (corporate proxy, PAC-style
      * "http=host:port;https=..." lists we must not touch).
@@ -272,7 +221,6 @@ object Proxy {
     /** Disables a leftover proxy when it is ours OR simply dead. */
     fun disableIfOurs() {
         if (isOurs() || pointsAtDeadLocalProxy()) disable()
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     }
 
     /** Notify running apps that proxy settings changed (WinINet). */

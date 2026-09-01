@@ -5,7 +5,7 @@
 > جزئیات تاریخی: `HANDOFF.md` (درس‌های دیباگ در §۵ آن). آخرین بازبینی کد: `AUDIT-2026-08-31.md`.
 > **قانون دائمی:** بعد از هر دورِ کار، همین فایل را به‌روز کن (وضعیت، قراردادها، باقی‌مانده). گزارش فقط در چت کافی نیست.
 >
-> آخرین به‌روزرسانی: **۱ سپتامبر ۲۰۲۶ — نسخه 3.6.14، دور ۶: ۱۴ فیچر پیشنهادی (تری، watchdog، سرچ، cache پینگ، بکاپ، BBR و...).**
+> آخرین به‌روزرسانی: **۱ سپتامبر ۲۰۲۶ — نسخه 3.6.15، دور ۷: فیکس ۵ باگ رگرسیون دور ۶ (auto-reconnect، پینگ xray، tray، Fastest، closeToTray).**
 
 ---
 
@@ -28,16 +28,19 @@
 **هویت اپ:** پنجره‌ی 430×780 موبایلی‌مانند، نوار عنوان سفارشی، تک‌ستونه. ذائقه‌ی UI کاربر: فشرده؛
 هر فکت فقط **یک بار** روی صفحه (این قانون در §۴ قراردادهاست).
 
-## ۲. وضعیت فعلی (تأییدشده با اجرا — ۳۱ اوت ۲۰۲۶)
+## ۲. وضعیت فعلی (تأییدشده با اجرا — ۱ سپتامبر ۲۰۲۶)
 
-- **۲۱۶ تست، ۰ شکست** — `gradlew test` آفلاین ~۳۰ ثانیه (نتایج: `desktop/build/test-results/test`).
+- **۲۲۹ تست، ۰ شکست** — `gradlew test` آفلاین ~۳۰ ثانیه (نتایج: `desktop/build/test-results/test`).
 - `createDistributable` سبز؛ EXE: `desktop/build/compose/binaries/main/app/MultiVPN/MultiVPN.exe`.
-- نسخه **3.6.14** — فقط در `desktop/build.gradle.kts` (`val appVersion`)؛ تسک `generateBuildInfo`
+- نسخه **3.6.15** — فقط در `desktop/build.gradle.kts` (`val appVersion`)؛ تسک `generateBuildInfo`
   کلاس `vpn.BuildInfo` تولید می‌کند و UI از آن می‌خواند. **هرگز نسخه را جای دیگری هاردکد نکن** (سابقه‌ی drift در 3.6.3).
 - Kover: LINE ~41% / BRANCH ~37% (فقط `vpn.core` پوشش داده می‌شود؛ `vpn.ui` عمداً مستثنی).
-- ریپو **git ندارد** (فولدر کاری). CI در `.github/workflows/windows-build.yml` به
+- ریپو **git دارد** (از ۱ سپتامبر): remote `origin` = `https://github.com/ScannerVpn/multi-protocol-vpn`،
+  برنچ `main`، احراز با `gh auth` (اکانت ScannerVpn). CI در `.github/workflows/windows-build.yml` به
   `desktop/core-hashes.json` و `desktop/wireproxy-source.pin` وابسته است — بدون آن‌ها عمداً fail می‌شود.
 - هسته‌ها (~۱۳۰MB) در git نیستند — پس از checkout تازه: `fetch-cores.ps1`.
+- ⚠️ `.gitattributes:14` یک خط نامعتبر دارد (`feat:` به‌عنوان attribute) — git روی هر دستور هشدار
+  چاپ می‌کند ولی کار می‌کند؛ پاک‌کردنش یک خط کار است.
 
 ## ۳. نقشه‌ی کد (چه فایلی چه کاری می‌کند)
 
@@ -55,10 +58,10 @@ stateهای observable (latency، pinging، vpnStatus، settings، ...) آنجا
 | `Vpn.kt` داخلی‌ها + `SingBox.kt` (616L) | هسته‌ی sing-box: hysteria2 proxy، TUN engine وصل‌شده به SOCKS هسته‌ی دیگر، `startElevated`، `verifyTraffic`/`verifyDirectTraffic` |
 | `WireProxy.kt` (216L) | userspace wg/amnezia → SOCKS/HTTP پروکسی |
 | `HiddenRun.kt` (298L) | اجرای پروسه‌ی مخفی با JNA (`CreateProcessW`)؛ حالا delegate به `ProcessRunner` — بدنه‌ی واقعی در `JnaHiddenRun`؛ `HiddenRun.install/restoreDefault` فقط برای تست‌ها |
-| `TrayIconManager.kt` + `TraySettings.kt` (UI) | system tray (java.awt): آیکون وضعیت‌رنگی، منو (Open/Connect-Disconnect/Quit)، دوبل‌کلیک=بازکردن؛ toggle «close to tray» در Settings |
+| `TrayIconManager.kt` + `TraySettings.kt` (UI) | system tray (java.awt): آیکون وضعیت‌رنگی، منو (Open/Connect-Disconnect/Quit)، دوبل‌کلیک=بازکردن. `TraySettings` فقط mirror درون-حافظه است؛ منبع حقیقت `AppSettings.closeToTray` روی دیسک |
 | `Proxy.kt` (240L) | system proxy ویندوز + heal (وضعیت در dataDir ذخیره؛ `pointsAtDeadLocalProxy`) |
 | `TrafficStats.kt` (199L) | شمارنده‌ی ترافیک سشن — `Source`: `ADAPTER` (دقیق دوطرفه وقتی آداپتور تونل هست) / `PROCESS_COMBINED` (IO هسته؛ جدایی down/up ناممکن → فقط عدد ترکیبی، «نصف‌کردن» = عدد جعلی) / `NONE`. `rate()` روی تغییر source/via یا کانتر معکوس null می‌دهد |
-| `Models.kt` (142L) | `ServerConfig` / `VpnConfig` (فیلدهای اصلی: protocol, xrayLink, tunnelConfPath, ovpnPath, awgVersion, category) / `AppSettings` (mode, splitMode, splitApps, proxyPort, dnsLeakProtection, autoConnect) / `VpnModes` / `SplitModes` |
+| `Models.kt` (148L) | `ServerConfig` / `VpnConfig` (فیلدهای اصلی: protocol, xrayLink, tunnelConfPath, ovpnPath, awgVersion, category) / `AppSettings` (mode, splitMode, splitApps, proxyPort, dnsLeakProtection, autoConnect, closeToTray) / `VpnModes` / `SplitModes` |
 | `Links.kt` (232L) | پارسر share-linkها → `ProxyLink` (address, port, protocol, network, security, params, secret) |
 | `Storage.kt` (299L) | persistence (JSON در dataDir)؛ سرورها با DPAPI (`SecretBox`) رمز می‌مانند |
 | `PingCache.kt` | cache پینگ per-config (latency_cache.json)؛ >10min = stale — UI خاکستری نشان می‌دهد، هرگز فریش جعل نمی‌شود |
@@ -74,7 +77,8 @@ stateهای observable (latency، pinging، vpnStatus، settings، ...) آنجا
 | فایل | محتوا |
 |---|---|
 | `HomeScreen.kt` (1366L) | `ConnectionCard` (رینگ + وضعیت + `SessionTimer` + **`SessionFactsRow`** + `LocationRow`)، `TrafficCard` زیر آن. `SessionFactsRow` = چیف‌های `IP · protocol · ping` — جایگزین سه StatCard حذف‌شده. `PingChip` با همان آستانه‌های `LatencyPill` (150/400) |
-| `AppState.kt` (1434L) | state مرکزی + `connectActive` (§۶)، `pingConfig`/`pingAllConfigs` (§۷)، `startupHeal`، `startPolling`، `startBackgroundJobs` (watchdog اتصال مجدد + رفرش دوره‌ای سابسکریپشن، §۸-2/6). خطای زیرساختیِ پینگ → `Skipped` (نه Failed — ردیف قرمز جعلی نمی‌سازد) |
+| `AppState.kt` (1505L) | state مرکزی + `connectActive` (§۶)، `pingConfig`/`pingAllConfigs` (§۷)، `startupHeal`، `startPolling`، `startBackgroundJobs` (watchdog + رفرش سابسکریپشن). تصمیمِ watchdog در تابع خالص `shouldAutoReconnect` + `reconnectBackoffMs` (تست‌شده). لچ `userDisconnected` = «کاربر خودش قطع کرد، دست نزن». خطای زیرساختیِ پینگ → `Skipped` |
+| `ConfigSort.kt` | ordering «Fastest»: fresh → cached → stale → unknown → failed، tie-break روی نام. تابع خالص، بدون Compose |
 | `ConfigsScreen.kt` (838L) | لیست کانفیگ‌ها + «Ping all» + «Fastest» (مرتب‌سازی پینگ) + سرچ نام/IP + فیلتر پروتکل + سابسکریپشن؛ در حالت فیلتر فولدرها خودکار باز می‌شوند |
 | `ServersScreen.kt` (696L) | کارت سرور: Test SSH / Ping (ICMP) / Setup VPN / Import all |
 | `Components.kt` (537L) | `LatencyPill` (سبز <150 / کهربا <400 / قرمز)، `CachedLatencyPill` (خاکستری «cached/stale»)، `IcmpPill` (سرورها)، `AppButton`، `GlassCard` و... |
@@ -90,6 +94,8 @@ stateهای observable (latency، pinging، vpnStatus، settings، ...) آنجا
 | `core/LatencyRoutingTest.kt` + `RealPingAndStatusTest.kt` | `classifyLatencyEngine` و سه‌وضعیتیِ پینگ |
 | `core/LinksParseTest.kt` / `WireProxyConfigTest.kt` / `SplitRouteTest`+`SplitRoutingTest` / `SanitizeOvpnTest.kt` / `SecurityFixesTest.kt` (safeHost/MSI version/tar) / `StorageTest` / `CoreManifestTest` / `VpnScriptsTest` / `PreflightTest` / `KillSwitchCleanupScriptTest` / `HiddenRunCancelTest` / `TunnelStatusTest` / `ServerProbeTest` / `AppListReproTest` / `ScanTunnelsTest` / `ParseScanTest` / `GrabScanLiveTest` / `LiveAwgTest` / `SourceEncodingTest` / `VpnRobustnessTest` | هرکدام برای ماژول هم‌نام |
 | `ui/LayoutTest.kt` / `ui/WindowChromeTest.kt` | breakpointها و نوار عنوان سفارشی |
+| `ui/ReconnectWatchdogTest.kt` | شرط auto-reconnect: قطعِ دستی هرگز بازیابی نمی‌شود، سشنی که هرگز وصل نشده retry نمی‌خورد، سقف تلاش، backoff اشباع‌شونده |
+| `ui/ConfigSortTest.kt` | ordering «Fastest»: cached بعد از ری‌استارت کار می‌کند، fresh بر cached مقدم، stale عقب‌تر، failed ته لیست، tie پایدار |
 
 ### سرور (`server/`)
 `setup-ikev2.sh` / `setup-wireguard.sh` / `setup-xray.sh` / `setup-openvpn.sh` / `scan-tunnels.sh` —
@@ -170,6 +176,40 @@ hysteria2 → **SINGBOX**؛ wireguard/amnezia → **WIREPROXY**؛ بقیه (ikev
 3. **`Subscriptions` با `allowTrailingCommas`:** subscription خراب کاربر `subscriptions.json.corrupt-*` شده (فایل‌ها نگه داشته می‌شوند — data loss نیست)؛ یا پارسر سخت‌گیرانه یا migrate بادوام.
 4. **Contributors-scanner گیت‌هاب:** باگ heuristic خود GitHub است؛ راهش `.mailmap` یا support.github.com.
 5. **تزریق `ProcessRunner` به SshService/بدنه‌های connect:** seam ساخته شد و Proxy/SingleInstance مسیرش باز است (3.6.14)؛ بقیه‌ی callers هنوز مستقیم HiddenRun صدا می‌زنند.
+6. **اسکریپت‌های سرور با BBR یک‌بار روی VPS اجرا نشده‌اند** — بلوک BBR از 3.6.14 در کد هست ولی سرورِ فعلی هنوز provision قدیمی دارد.
+
+⚠️ **درس دور ۷ (مهم برای هر ایجنت بعدی):** دور ۶ چهارده فیچر را «۲۱۶ تست سبز» تحویل داد،
+ولی ۵ باگِ کاربر-visible داشت که **هیچ‌کدام** با تست گرفته نشده بودند، چون منطقشان داخل
+حلقه‌های `LaunchedEffect`/coroutine دفن بود و تستی نداشتند. اگر منطق تصمیم‌گیری (شرط
+watchdog، ordering لیست، ...) قابل تست نیست، **قبل از تحویل به یک تابع خالص بیرون بکش**
+(`AppState.shouldAutoReconnect`, `ConfigSort.byLatency` الگوی درست‌اند). «تست سبز» بدون
+تستِ همان منطق، تأیید نیست.
+
+✅ **دور ۷ (3.6.15) — ۵ باگ رگرسیونِ دور ۶، همه با تست قفل شدند (۲۲۹ تست / ۰ شکست):**
+
+1. **اتصال خودکار مسخره / Disconnect بی‌اثر** (شکایت کاربر): watchdog فقط
+   `status == DISCONNECTED` را می‌دید — که *همان* چیزی است که `disconnectActive()` ست می‌کند —
+   پس هر قطعِ دستی را «افتادن ناخواسته» می‌خواند و ~۵ ثانیه بعد دوباره وصل می‌شد؛ و چون
+   شرط «قبلاً وصل بوده» را نداشت، کانفیگی که *هرگز* وصل نمی‌شود را روی تایمر تکرار می‌کرد
+   (تجربه‌ی «به‌محض باز شدن وصل می‌شود»). فیکس: لچ `userDisconnected` (در
+   `disconnectActive` + `cancelConnect` ست، در `connectActive` پاک) و پرچم `sawConnected`
+   (فقط سشنی که واقعاً CONNECTED شده بازیابی می‌شود). منطق در تابع خالص
+   `AppState.shouldAutoReconnect(...)` + `reconnectBackoffMs(...)` → `ReconnectWatchdogTest` (۶ تست).
+2. **پینگ vless/trojan/ss همیشه بی‌عدد:** `quickXrayPing` مقدار موفق را به‌عنوان
+   trailing-expression تولید می‌کرد و تابع با `error("unreachable")` تمام می‌شد؛ Kotlin مقدار را
+   دور می‌ریخت و **هر پینگ موفق** exception می‌داد → `Skipped`. لاگ کاربر: ۹ بار
+   `latency infra error: unreachable`، و `latency_cache.json` خالی مانده بود. فیکس: `return@withPermit` صریح.
+3. **tray → Open کار نمی‌کرد:** بستنِ پنجره هم `isMinimized = true` می‌گذاشت هم مخفی می‌کرد؛
+   پرچم minimize بعد از مخفی‌سازی باقی می‌ماند و Open پنجره‌ی مینیمایز را «نشان» می‌داد.
+   فیکس: فقط `isVisible = false` برای مخفی‌سازی، و در Open پاک کردن `isMinimized` + `requestFocus`.
+4. **دکمه Fastest بعد از ری‌استارت بی‌اثر:** ordering فقط روی مپ پینگِ *همین اجرا* بود که پس از
+   لانچ خالی است، درحالی‌که همه‌ی اعدادِ روی صفحه از `PingCache` می‌آمدند. فیکس: `ConfigSort` با
+   لایه‌بندی fresh → cached → stale → unknown → failed (ردیف failed حتی اگر cache سریع داشته باشد
+   ته لیست است) + tie-break پایدار روی نام → `ConfigSortTest` (۶ تست).
+5. **toggle «Close to tray» ذخیره نمی‌شد:** `TraySettings` فقط holder درون-حافظه بود، هر لانچ off.
+   فیکس: فیلد `closeToTray` در `AppSettings` (persist در settings.json) + mirror در `AppState.load`.
+   (`ignoreUnknownKeys` سازگاری JSON قدیمی را حفظ می‌کند.)
+
 
 ✅ **فیکس‌های آدیت ۳۱ اوت — انجام‌شده در 3.6.13** (تست‌های قفل‌کننده در `AuditRegressionTest`):
 P1 سمیافور `racerGate(PARALLEL=8)` دور `quickXrayPing` (پول دیگر خالی نمی‌شود، عدد ردیف‌ها پاک نمی‌شود)؛
@@ -209,7 +249,7 @@ P3 همه: pill جداگانه‌ی «ICMP» در Servers (`IcmpPill`)، آست�
     `FakeHiddenRun` روی هر OS اجرا می‌شوند (`ProcessRunnerTest`). `findChildPid` جزو seam نیست (نیاز fake ندارد).
     [تست‌های تازه: ProcessRunnerTest (۴) + BackupTest (۴) + قبلی‌ها = ۲۱۶]
 
-نکته‌ی نسخه: `build.gradle.kts` در 3.6.14 است؛ آخرین EXE با این نسخه ساخته شده.
+نکته‌ی نسخه: `build.gradle.kts` در 3.6.15 است؛ آخرین EXE با این نسخه ساخته شده.
 
 ## ۹. دستورهای تکرارشونده
 
@@ -217,7 +257,7 @@ P3 همه: pill جداگانه‌ی «ICMP» در Servers (`IcmpPill`)، آست�
 $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.19.10-hotspot"   # پیش‌نیاز مطلق
 cd desktop
 .\fetch-cores.ps1                                   # فقط checkout تازه (هسته‌ها در git نیستند)
-.\gradlew.bat --no-daemon --offline test            # ۲۱۶ تست
+.\gradlew.bat --no-daemon --offline test            # ۲۲۹ تست
 .\gradlew.bat --no-daemon --offline createDistributable
 .\build.bat                                         # میان‌بُر: JDK + fetch + بیلد + چاپ مسیر EXE
 # اجرا: build\compose\binaries\main\app\MultiVPN\MultiVPN.exe

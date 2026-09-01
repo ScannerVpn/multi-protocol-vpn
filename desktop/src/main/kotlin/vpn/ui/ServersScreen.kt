@@ -63,10 +63,6 @@ import java.awt.Frame
 fun ServersScreen() {
     var showAdd by remember { mutableStateOf(false) }
 
-<<<<<<< HEAD
-    Column(
-        Modifier.fillMaxSize().wrapContentWidth(Alignment.CenterHorizontally).widthIn(max = 880.dp).padding(horizontal = 20.dp),
-=======
     val layout = LocalLayout.current
     Column(
         Modifier
@@ -74,7 +70,6 @@ fun ServersScreen() {
             .wrapContentWidth(Alignment.CenterHorizontally)
             .widthIn(max = 880.dp)
             .padding(horizontal = layout.screenPadding),
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     ) {
         Spacer(Modifier.height(20.dp))
         ScreenHeader(
@@ -135,11 +130,7 @@ private fun ServerCard(server: ServerConfig, index: Int = 0) {
                     color = C.TextSecondary,
                 )
             }
-<<<<<<< HEAD
-            LatencyPill(pingMs, pingFailed, pinging, Modifier.padding(end = 6.dp))
-=======
             IcmpPill(pingMs, pingFailed, pinging, Modifier.padding(end = 6.dp))
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             if (server.isReady) {
                 Pill("Ready", C.Success, C.SuccessDim)
             } else {

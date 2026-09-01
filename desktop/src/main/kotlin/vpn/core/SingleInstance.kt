@@ -14,26 +14,15 @@ import kotlin.system.exitProcess
 /**
  * Ensures only ONE app instance runs. Without this, every launch piled up
  * another JVM (the "OpenJDK Platform binary" entries in Task Manager), each
-<<<<<<< HEAD
- * fighting over the same proxy ports ??? and a killed leftover left the system
-=======
  * fighting over the same proxy ports — and a killed leftover left the system
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
  * proxy pointing at a dead core, taking the whole internet down.
  *
  * The mutex is the zombie detector: only when another instance actually
  * HOLDS it do we evict other MultiVPN.exe processes (never on a normal
-<<<<<<< HEAD
- * start ??? the jpackage launcher runs as parent+child of the SAME image
- * name, so an unconditional sweep would kill our own process tree).
- *
- * Everything here is pure JNA (Toolhelp snapshot + TerminateProcess) ??? no
-=======
  * start — the jpackage launcher runs as parent+child of the SAME image
  * name, so an unconditional sweep would kill our own process tree).
  *
  * Everything here is pure JNA (Toolhelp snapshot + TerminateProcess) — no
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
  * spawned powershell, which proved too slow/flaky on the exit path.
  */
 object SingleInstance {
@@ -67,20 +56,12 @@ object SingleInstance {
                 runCatching { Kernel32.INSTANCE.CloseHandle(h) }
             }
             if (attempt == 0) {
-<<<<<<< HEAD
-                AppLog.i("Instance", "mutex held by another instance ??? evicting it")
-=======
                 AppLog.i("Instance", "mutex held by another instance — evicting it")
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 killOtherInstances()
                 Thread.sleep(1200)
             }
         }
-<<<<<<< HEAD
-        AppLog.i("Instance", "another instance is still running ??? exiting")
-=======
         AppLog.i("Instance", "another instance is still running — exiting")
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         runCatching {
             JOptionPane.showMessageDialog(
                 null,
