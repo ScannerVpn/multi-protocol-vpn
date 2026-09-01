@@ -33,11 +33,7 @@ cd desktop
 # 1) یک‌بار در هر checkout تازه: هسته‌ها در git نیستند (~۱۳۰MB)
 powershell -ExecutionPolicy Bypass -File .\fetch-cores.ps1
 
-<<<<<<< HEAD
-# 2) تست‌ها — ۱۲۳ تست، همه آفلاین، ~۳۰ ثانیه
-=======
 # 2) تست‌ها — ۲۰۸ تست، همه آفلاین، ~۳۰ ثانیه
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 .\gradlew.bat test
 
 # 3) بیلد دستی (معادل کاری که build.bat می‌کند)
@@ -999,11 +995,7 @@ SSH چک کن که سرور همان لحظه در دسترس است.
 2. `git log --oneline` برای تاریخچه.
 3. `desktop\fetch-cores.ps1` را اجرا کن و جدول خلاصه‌اش را چک کن — اگر `resources/bin/`
    خالی باشد اپ بیلد می‌شود ولی با هیچ پروتکلی وصل نمی‌شود و خطای واضحی هم نمی‌دهد.
-<<<<<<< HEAD
-4. `.\gradlew.bat test` — باید ۱۲۳ تست سبز باشد. بعد `createDistributable`.
-=======
 4. `.\gradlew.bat test` — باید ۲۰۸ تست سبز باشد. بعد `createDistributable`.
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 5. `MultiVPN.exe` را اجرا کن؛ Setup → **Hysteria2** باید کانفیگ‌های موجود x-ui را detect
    کند و اتصالش کار کند (بهترین سناریوی smoke-test).
 6. قبل از هر تغییر: `app.log` را ببین (Settings → View app log) — همه‌چیز لاگ می‌شود.

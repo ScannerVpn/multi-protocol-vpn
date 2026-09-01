@@ -5,12 +5,6 @@ plugins {
     kotlin("plugin.serialization") version "2.1.0"
     id("org.jetbrains.kotlin.plugin.compose") version "2.1.0"
     id("org.jetbrains.compose") version "1.7.3"
-<<<<<<< HEAD
-}
-
-group = "com.multivpn"
-version = "3.6.11"
-=======
     // Coverage. There was NO coverage tool at all, so "74 tests" (actually
     // 149) told nobody which of the 5 000 lines of core logic they touched.
     // `gradlew koverHtmlReport` -> build/reports/kover/html/index.html
@@ -26,18 +20,15 @@ version = "3.6.11"
  * said 3.6.11. The generateBuildInfo task below emits vpn.BuildInfo from this
  * value, and every UI string reads it, so drift is now impossible.
  */
-val appVersion = "3.6.14"
+val appVersion = "3.6.15"
 
 group = "com.multivpn"
 version = appVersion
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 
 kotlin {
     jvmToolchain(17)
 }
 
-<<<<<<< HEAD
-=======
 /** Generates vpn/BuildInfo.kt so the UI can never hardcode a stale version. */
 val generatedSrcDir = layout.buildDirectory.dir("generated/buildinfo")
 
@@ -68,13 +59,10 @@ val generateBuildInfo by tasks.registering {
 
 sourceSets.main { kotlin.srcDir(generateBuildInfo) }
 
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 tasks.test {
     useJUnitPlatform()
 }
 
-<<<<<<< HEAD
-=======
 /**
  * Coverage scope: the `vpn.core` logic is what tests can actually reach.
  * Compose UI, the generated BuildInfo and the app entry point are excluded so
@@ -92,23 +80,10 @@ kover {
     }
 }
 
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 dependencies {
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
     implementation(compose.materialIconsExtended)
-<<<<<<< HEAD
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
-    implementation("com.hierynomus:sshj:0.38.0")
-    implementation("org.slf4j:slf4j-simple:2.0.16")
-    implementation("net.java.dev.jna:jna:5.14.0")
-    implementation("net.java.dev.jna:jna-platform:5.14.0")
-
-    testImplementation(kotlin("test"))
-    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
-=======
     // Coroutines 1.10.2 is the last line that pairs with Kotlin 2.1 without
     // pulling the 2.2-era stdlib expectations of 1.11.x.
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
@@ -124,7 +99,6 @@ dependencies {
 
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.14.4")
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
@@ -132,33 +106,6 @@ compose.desktop {
     application {
         mainClass = "vpn.MainKt"
         nativeDistributions {
-<<<<<<< HEAD
-            // Default distributable = PORTABLE app image (plain jpackage, NO WiX
-            // needed on the build machine):
-            //   gradlew createDistributable
-            //   -> build/compose/binaries/main/app/MultiVPN/MultiVPN.exe
-            // MSI/EXE installers stay available ON DEMAND; they REQUIRE WiX 3.x:
-            //   gradlew packageMsi packageExe
-            //   -> build/compose/binaries/main/{msi,exe}/MultiVPN-<ver>.{msi,exe}
-            // WARNING: Gradle's plain `build` lifecycle never runs any packaging
-            // task - call them explicitly (desktop\build.bat does this correctly).
-            // CI (GitHub Actions windows-latest ships WiX 3.x) additionally gets
-            // the MSI/EXE installers; local machines stay WiX-free by default.
-            targetFormats(
-                *(listOf(TargetFormat.AppImage) + if (System.getenv("CI") == "true") {
-                    listOf(TargetFormat.Msi, TargetFormat.Exe)
-                } else emptyList()).toTypedArray(),
-            )
-            packageName = "MultiVPN"
-            packageVersion = "3.6.11"
-            description = "MultiVPN - multi-protocol VPN client"
-            vendor = "MultiVPN"
-            // java.net.http: MSI downloads; jdk.crypto.ec: SSH host keys (sshj)
-            modules("java.net.http", "jdk.crypto.ec")
-            windows {
-                upgradeUuid = "8e2f7a41-6c3b-4d9e-9f5a-2b7c8d1e4a6f"
-                console = false
-=======
             // AppImage = the portable app folder (plain jpackage, no WiX):
             //   gradlew createDistributable
             //   -> build/compose/binaries/main/app/MultiVPN/MultiVPN.exe
@@ -209,7 +156,6 @@ compose.desktop {
                 console = false
                 menu = true
                 shortcut = true
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             }
         }
     }

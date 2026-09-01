@@ -47,8 +47,6 @@ object C {
     val BorderStrong = Color(0xFF2B3D5F)
     val OnAccent = Color(0xFF04121E)
 
-<<<<<<< HEAD
-=======
     /**
      * The app's own title bar (the window is undecorated — see
      * [vpn.ui.AppTitleBar]). Slightly darker than [Surface] so the bar reads as
@@ -56,7 +54,6 @@ object C {
      */
     val TitleBar = Color(0xFF070D19)
 
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     /** Shared brand gradient (cyan → sky). */
     val BrandGradient: Brush
         get() = Brush.linearGradient(listOf(Accent, Accent2))

@@ -40,10 +40,7 @@ import vpn.core.VpnModes
 import vpn.core.Preflight
 import vpn.core.WireProxy
 import vpn.core.Xray
-<<<<<<< HEAD
-=======
 import vpn.core.PingCache
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 import java.io.File
 import java.net.URI
 import java.net.http.HttpClient
@@ -79,8 +76,6 @@ object AppState {
     /** Epoch ms when the current session reached CONNECTED (0 = never). */
     var sessionStartedAt by mutableStateOf(0L)
 
-<<<<<<< HEAD
-=======
     // ---- live traffic counters ---------------------------------------
     //
     // Sampled by the same poller that watches the connection, so there is no
@@ -116,7 +111,6 @@ object AppState {
         trafficRate = null
     }
 
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     /** configId → latency ms (null while measuring, absent = never measured). */
     var latency by mutableStateOf<Map<String, Int>>(emptyMap())
         private set
@@ -125,8 +119,6 @@ object AppState {
     var pinging by mutableStateOf<Set<String>>(emptySet())
         private set
 
-<<<<<<< HEAD
-=======
     /**
      * Cached (persisted) latency values, loaded once at startup: configId →
      * PingCache.Entry (ms + when). A row whose live latency is absent but
@@ -137,7 +129,6 @@ object AppState {
     var latencyCached by mutableStateOf<Map<String, PingCache.Entry>>(emptyMap())
         private set
 
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     /** Installed apps discovered for the split-tunneling picker. */
     var installedApps by mutableStateOf<List<InstalledApp>>(emptyList())
         private set
@@ -170,12 +161,6 @@ object AppState {
                 val sshPort = servers.firstOrNull { it.ip == config.serverIp }?.sshPort
                 when (val rp = runCatching {
                     VpnService.configLatencyResult(config, sshPort)
-<<<<<<< HEAD
-                }.getOrElse { RealPingResult.Failed }) {
-                    is RealPingResult.Ok -> {
-                        latency = latency + (config.id to rp.ms)
-                        latencyFailed = latencyFailed - config.id
-=======
                 }.getOrElse { e ->
                     // An exception is an infrastructure failure (thread pool
                     // rejected, socket stack blew up, OOM, ...), NOT proof the
@@ -190,16 +175,12 @@ object AppState {
                         latencyFailed = latencyFailed - config.id
                         PingCache.put(config.id, rp.ms)
                         latencyCached = latencyCached - config.id
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                     }
                     RealPingResult.Failed -> {
                         latency = latency - config.id
                         latencyFailed = latencyFailed + config.id
-<<<<<<< HEAD
-=======
                         PingCache.remove(config.id)
                         latencyCached = latencyCached - config.id
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                     }
                     RealPingResult.Skipped -> {
                         // Untestable is not dead: stay silent (and forget old numbers).
@@ -214,11 +195,6 @@ object AppState {
     }
 
     /**
-<<<<<<< HEAD
-     * Measures latency for every config. The real-traffic tests are
-     * serialized inside VpnService (they share the local proxy ports), so
-     * launching them all is safe — they queue behind one mutex.
-=======
      * Measures latency for every config. Xray-family racers (vless/trojan/ss,
      * the overwhelming majority of subscription rows) run on private scratch
      * ports and execute [VpnPing.PARALLEL]-wide; the sing-box/wireproxy
@@ -226,7 +202,6 @@ object AppState {
      * ports. Launching all configs at once is therefore SAFE and FAST — the
      * pool inside VpnPing caps the real concurrency, and the UI fills in as
      * results land instead of after a global queue drains.
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
      */
     fun pingAllConfigs() {
         if (connectedOrBusy) return
@@ -253,15 +228,14 @@ object AppState {
         }
         AppLog.i("App", "Loaded ${servers.size} servers, ${configs.size} configs" +
             if (imported > 0) " (imported $imported from old Flutter app)" else "")
-<<<<<<< HEAD
-=======
         // Seed the visible list with AGED cached latencies: after a restart
         // every row used to read "—" until the user re-pinged. The cache is
         // shown stale-marked (grey) — honesty: an old number is never
         // displayed as a fresh one.
         latencyCached = configs.mapNotNull { c -> PingCache.get(c.id)?.let { c.id to it } }.toMap()
         runCatching { PingCache.retainAll(configs.map { it.id }.toSet()) }
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
+        // Mirror the persisted tray preference into its Compose holder.
+        TraySettings.closeToTray = settings.closeToTray
         // ONE-TIME cleanup of the RETIRED kill switch (removed in 3.6.5):
         // a machine that ran an older build may still be firewall
         // default-deny with no internet. Fire a detached elevated cleanup.
@@ -273,12 +247,9 @@ object AppState {
             AppLog.i("App", "Auto-connecting to ${activeConfig?.name} on launch")
             connectActive()
         }
-<<<<<<< HEAD
-=======
         // ONE daemon loop: auto-reconnect watchdog + periodic subscription
         // refresh (both no-op when their preconditions are not met).
         startBackgroundJobs()
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     }
 
     /**
@@ -289,12 +260,6 @@ object AppState {
      */
     private fun startupHeal() {
         scope.launch {
-<<<<<<< HEAD
-            val healedProxy = runCatching { Proxy.isOurs() }.getOrDefault(false)
-            if (healedProxy) {
-                withContext(Dispatchers.IO) {
-                    runCatching { Proxy.restoreState() }
-=======
             // isOurs() OR a dead loopback proxy: either way the machine has no
             // working HTTP path and must be freed. The dead-port branch also
             // covers a session that used a DIFFERENT base port than the one
@@ -309,7 +274,6 @@ object AppState {
                     if (runCatching { Proxy.pointsAtDeadLocalProxy() }.getOrDefault(false)) {
                         runCatching { Proxy.disable() }
                     }
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 }
                 AppLog.i("App", "healed: disabled leftover system proxy from a previous run")
             }
@@ -321,8 +285,6 @@ object AppState {
             }
         }
     }
-<<<<<<< HEAD
-=======
 
     /** Settings → emergency reset of the Windows system proxy. */
     fun resetSystemProxy(onDone: (String) -> Unit) {
@@ -331,7 +293,6 @@ object AppState {
             onDone("System proxy turned off and our saved state cleared.")
         }
     }
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     fun refreshVpnStatus() {
         // Don't overwrite a deliberate connection flow (CONNECTING/DISCONNECTING
         // or an in-flight connect job) with a background probe that might race
@@ -342,9 +303,6 @@ object AppState {
         scope.launch {
             val up = withContext(Dispatchers.IO) { VpnService.isVpnUp() }
             vpnStatus = if (up) VpnStatus.CONNECTED else VpnStatus.DISCONNECTED
-<<<<<<< HEAD
-            if (up) startPolling()
-=======
             if (up) {
                 // A tunnel adopted at startup (or after a heal) has no known
                 // start time. Without this the session clock displayed the
@@ -355,7 +313,6 @@ object AppState {
                 sessionStartedAt = 0L
                 resetTraffic()
             }
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         }
     }
 
@@ -957,11 +914,6 @@ object AppState {
             // Drop stale latency entries of the configs that just disappeared.
             latency = latency - oldIds
             latencyFailed = latencyFailed - oldIds
-<<<<<<< HEAD
-            saveSubscriptions()
-            saveConfigs()
-            AppLog.i("Subs", "Refreshed ${sub.name}: ${newConfigs.size} config(s)")
-=======
             latencyCached = latencyCached - oldIds
             saveSubscriptions()
             saveConfigs()
@@ -975,7 +927,6 @@ object AppState {
                 fresh.forEach { pingConfig(it) }
                 AppLog.i("Subs", "Auto-pinging ${fresh.size} new config(s) from ${sub.name}")
             }
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             return newConfigs.size
         } finally {
             refreshingSubs = refreshingSubs - sub.id
@@ -994,10 +945,7 @@ object AppState {
         }
         latency = latency - removedIds
         latencyFailed = latencyFailed - removedIds
-<<<<<<< HEAD
-=======
         latencyCached = latencyCached - removedIds
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         saveSubscriptions()
         saveConfigs()
         AppLog.i("Subs", "Deleted ${sub.name} (${removed.size} config(s))")
@@ -1137,11 +1085,6 @@ object AppState {
      * @return null on success, else the validation error message.
      */
     fun setProxyPort(portText: String): String? {
-<<<<<<< HEAD
-        val port = portText.trim().toIntOrNull()
-            ?: return "Port must be a number (1024–65000)."
-        if (!ProxyPorts.valid(port)) return "Port must be between 1024 and 65000."
-=======
         // Changing the base port mid-session desynchronises everything:
         // ProxyPorts.base moves, so isRunning()/kill() probe the WRONG ports,
         // the live core is orphaned and the system proxy keeps pointing at the
@@ -1156,7 +1099,6 @@ object AppState {
             return "Port too high: this app also uses ${port + 1} and " +
                 "${port + ProxyPorts.TUN_PROBE_OFFSET}."
         }
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         settings = settings.copy(proxyPort = port)
         Storage.saveSettings(settings)
         ProxyPorts.base = port
@@ -1218,6 +1160,9 @@ object AppState {
 
     fun connectActive() {
         val cfg = activeConfig ?: return
+        // The user asked for a connection: clear the "they turned it off"
+        // latch so the watchdog is armed again for THIS session.
+        userDisconnected = false
         // Pre-flight gate: a TUN/split attempt from a NON-elevated launch can
         // never succeed — previously it went straight into UAC prompts, retry
         // loops and minutes of spinner with zero explanation. Refuse here,
@@ -1257,8 +1202,6 @@ object AppState {
                     AppLog.i("VPN", "Connected to ${cfg.serverIp}")
                     vpnStatus = VpnStatus.CONNECTED
                     sessionStartedAt = System.currentTimeMillis()
-<<<<<<< HEAD
-=======
                     // The poller itself refuses to start while a connect job
                     // is active, and OUR handle stays set until this job's
                     // finally — which runs after this block. Without clearing
@@ -1267,7 +1210,6 @@ object AppState {
                     // the same clear the finally does, just earlier; its
                     // `connectJob === this` check makes the later one a no-op.
                     if (connectJob === this) connectJob = null
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                     startPolling()
                 } else {
                     AppLog.e("VPN", "Connect failed: ${res.message}")
@@ -1339,6 +1281,9 @@ object AppState {
      */
     fun cancelConnect() {
         val job = connectJob ?: return
+        // Cancelling a connect is also a deliberate "no": the watchdog stays
+        // out until the user presses connect again.
+        userDisconnected = true
         vpnStatus = VpnStatus.DISCONNECTING
         AppLog.i("VPN", "Cancel requested")
         job.cancel()
@@ -1369,6 +1314,9 @@ object AppState {
 
     fun disconnectActive() {
         val cfg = activeConfig ?: return
+        // Deliberate: the watchdog must not "restore" what the user just
+        // switched off (see [userDisconnected]).
+        userDisconnected = true
         connectJob?.cancel()
         pollJob?.cancel()
         vpnStatus = VpnStatus.DISCONNECTING
@@ -1386,23 +1334,14 @@ object AppState {
             }
             AppLog.i("VPN", "Disconnected from ${cfg.serverIp} (${cfg.protocol})")
             vpnStatus = VpnStatus.DISCONNECTED
-<<<<<<< HEAD
-=======
             sessionStartedAt = 0L
             resetTraffic()
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         }
     }
 
     private fun startPolling() {
         // Don't start a poller that could downgrade CONNECTING before the
         // connection coroutine finalizes — pollJob is cancelled at connect
-<<<<<<< HEAD
-        // start and when we reach CONNECTED we launch a fresh one.
-        if (connectJob != null) return
-        pollJob?.cancel()
-        pollJob = scope.launch {
-=======
         // start and when we reach CONNECTED we launch a fresh one. The guard
         // checks isActive so the SUCCESS path (which calls this while its own
         // job handle is still non-null but finishing) is allowed through; a
@@ -1413,7 +1352,6 @@ object AppState {
             // Seed the traffic baseline immediately: the first rate needs two
             // samples, so without this the card shows no speed for 3 seconds.
             sampleTraffic()
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             while (isActive) {
                 delay(3000)
                 // If a new connect attempt started, stop polling — it will
@@ -1422,10 +1360,6 @@ object AppState {
                 val up = withContext(Dispatchers.IO) { VpnService.isVpnUp() }
                 if (!up) {
                     vpnStatus = VpnStatus.DISCONNECTED
-<<<<<<< HEAD
-                    break
-                }
-=======
                     sessionStartedAt = 0L
                     resetTraffic()
                     break
@@ -1442,12 +1376,27 @@ object AppState {
     private var bgJob: Job? = null
 
     /**
+     * True while the user has DELIBERATELY put the app in a disconnected
+     * state (Disconnect button, Cancel during connect). The auto-reconnect
+     * watchdog must never fight the user: without this flag it saw the very
+     * DISCONNECTED status that `disconnectActive()` had just set, called it
+     * an "unexpected drop" and reconnected ~2s later — the tunnel became
+     * impossible to turn off while autoConnect was on (reported 1 Sep 2026).
+     * Cleared the moment the user asks to connect again.
+     */
+    @Volatile
+    private var userDisconnected = false
+
+    /**
      * ONE daemon loop for both periodic duties (started from [load]):
      *
      *  - AUTO-RECONNECT: when settings.autoConnect is on and a CONNECTED
-     *    session drops UNEXPECTEDLY (poller set DISCONNECTED — no user
-     *    disconnect ran, no connect job is in flight), reconnect with a
-     *    backoff so a dead server cannot spin UAC/cores forever.
+     *    session drops UNEXPECTEDLY, reconnect with a backoff so a dead
+     *    server cannot spin UAC/cores forever. "Unexpected" is the whole
+     *    point: [userDisconnected] gates it, and a session that never
+     *    reached CONNECTED does NOT count (a refused pre-flight or a config
+     *    the network blocks must not be retried in a loop — that was the
+     *    "app reconnects the moment you open it" complaint).
      *  - SUBSCRIPTION REFRESH: every [SUB_REFRESH_MS] re-download every
      *    subscription while the app is open, so subscription rows that died
      *    server-side get replaced without a manual visit. Failures just log;
@@ -1458,28 +1407,40 @@ object AppState {
         bgJob = scope.launch {
             var reconnectAttempts = 0
             var nextSubRefresh = System.currentTimeMillis() + SUB_REFRESH_MS
+            // Only a session that REALLY was up may be auto-restored.
+            var sawConnected = false
             while (isActive) {
                 delay(5000)
+                if (vpnStatus == VpnStatus.CONNECTED) {
+                    sawConnected = true
+                    reconnectAttempts = 0
+                }
                 // --- reconnect watchdog ---
-                if (settings.autoConnect &&
-                    vpnStatus == VpnStatus.DISCONNECTED &&
-                    connectJob == null &&
-                    reconnectAttempts < MAX_RECONNECT_ATTEMPTS &&
-                    activeConfig != null
+                if (shouldAutoReconnect(
+                        autoConnect = settings.autoConnect,
+                        userDisconnected = userDisconnected,
+                        sawConnected = sawConnected,
+                        status = vpnStatus,
+                        busy = connectJob != null,
+                        attempts = reconnectAttempts,
+                        hasActiveConfig = activeConfig != null,
+                    )
                 ) {
                     reconnectAttempts++
-                    val backoff = (10_000L shl (reconnectAttempts - 1).coerceAtMost(4))
+                    val backoff = reconnectBackoffMs(reconnectAttempts)
                     AppLog.i("VPN", "unexpected drop — auto-reconnect attempt $reconnectAttempts in ${backoff / 1000}s")
                     delay(backoff)
                     // Re-check after the wait: the user may have interacted.
-                    if (settings.autoConnect && vpnStatus == VpnStatus.DISCONNECTED && connectJob == null) {
+                    if (settings.autoConnect && !userDisconnected &&
+                        vpnStatus == VpnStatus.DISCONNECTED && connectJob == null
+                    ) {
+                        sawConnected = false // must prove itself again
                         connectActive()
                         // connectActive manages its own retries; give it room
                         // before this loop considers another attempt.
                         delay(CONNECT_TIMEOUT_MS)
                     }
                 }
-                if (vpnStatus == VpnStatus.CONNECTED) reconnectAttempts = 0
 
                 // --- periodic subscription refresh ---
                 val now = System.currentTimeMillis()
@@ -1491,13 +1452,10 @@ object AppState {
                             .onFailure { AppLog.e("Subs", "Periodic refresh of ${sub.name} failed: ${it.message}") }
                     }
                 }
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             }
         }
     }
 
-<<<<<<< HEAD
-=======
     private const val RECONNECT_BACKOFF_MS = 10_000L
 
     /** Give up quietly after this many consecutive failed reconnects. */
@@ -1506,7 +1464,39 @@ object AppState {
     /** How often subscriptions are re-downloaded while the app is open. */
     private const val SUB_REFRESH_MS = 12 * 60 * 60 * 1000L
 
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
+    /**
+     * The watchdog's whole decision, as a pure function so it can be tested
+     * without a UI, a core or a network (see ReconnectWatchdogTest).
+     *
+     * Every term is a bug that shipped in 3.6.14:
+     *  - [userDisconnected]: the loop reconnected what the user had just
+     *    switched off, making Disconnect useless while autoConnect was on.
+     *  - [sawConnected]: a config that CANNOT connect (blocked, dead server,
+     *    refused pre-flight) was retried on a timer, so opening the app looked
+     *    like "it connects by itself".
+     *  - [busy]: never race an in-flight connect job.
+     */
+    fun shouldAutoReconnect(
+        autoConnect: Boolean,
+        userDisconnected: Boolean,
+        sawConnected: Boolean,
+        status: VpnStatus,
+        busy: Boolean,
+        attempts: Int,
+        hasActiveConfig: Boolean,
+    ): Boolean =
+        autoConnect &&
+            !userDisconnected &&
+            sawConnected &&
+            status == VpnStatus.DISCONNECTED &&
+            !busy &&
+            attempts < MAX_RECONNECT_ATTEMPTS &&
+            hasActiveConfig
+
+    /** Backoff for attempt N (1-based): 10s, 20s, 40s, 80s, then flat. */
+    fun reconnectBackoffMs(attempt: Int): Long =
+        RECONNECT_BACKOFF_MS shl (attempt - 1).coerceIn(0, 3)
+
     // ------------------------------------------------------------------
 
     private fun saveServers() = Storage.saveServers(servers)

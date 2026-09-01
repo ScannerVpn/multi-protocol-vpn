@@ -15,10 +15,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-<<<<<<< HEAD
-=======
 import androidx.compose.foundation.layout.BoxWithConstraints
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -66,22 +63,16 @@ import vpn.core.AppLog
 import vpn.theme.C
 import vpn.theme.MultiVpnTheme
 import vpn.ui.AppState
-<<<<<<< HEAD
-=======
 import vpn.ui.AppTitleBar
 import vpn.ui.LayoutMode
 import vpn.ui.LocalLayout
 import vpn.ui.ProvideLayout
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 import vpn.ui.AuroraBackground
 import vpn.ui.ConfigsScreen
 import vpn.ui.HomeScreen
 import vpn.ui.ServersScreen
 import vpn.ui.SettingsScreen
-<<<<<<< HEAD
-=======
 import vpn.ui.WindowResize
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 import javax.swing.JOptionPane
 import javax.swing.SwingUtilities
 import kotlin.system.exitProcess
@@ -130,20 +121,6 @@ fun main() {
         CompositionLocalProvider(
             LocalWindowExceptionHandlerFactory provides loggingExceptionHandlerFactory,
         ) {
-<<<<<<< HEAD
-        Window(
-            onCloseRequest = {
-                // Closing the window must fully quit the app: kill the proxy
-                // cores and clear the system proxy so nothing is left running
-                // in the background, then exit the process for real.
-                AppState.shutdown()
-                exitApplication()
-            },
-            title = "MultiVPN — Multi-Protocol Client",
-            state = rememberWindowState(width = 1280.dp, height = 800.dp),
-        ) {
-            window.minimumSize = Dimension(980, 640)
-=======
         val windowState = rememberWindowState(width = 430.dp, height = 780.dp)
         val closeToTray = vpn.ui.TraySettings.closeToTray
         val quit: () -> Unit = {
@@ -157,16 +134,16 @@ fun main() {
         // Minimize-to-tray close: with closeToTray on, the X button (and the
         // in-app titlebar close) only HIDES the window — the tray icon's
         // "Open" / double-click restores it, "Quit" really exits.
+        //
+        // Hide ONLY. The first version also set windowState.isMinimized = true,
+        // and because that flag survives the hide, the tray's Open showed a
+        // window that was still minimized — it appeared to do nothing. The
+        // frame itself is captured inside the Window content (it does not
+        // exist yet out here).
+        val hideToTray = remember { mutableStateOf<(() -> Unit)?>(null) }
         val requestClose: () -> Unit = {
-            if (closeToTray) {
-                windowState.isMinimized = true // hide without killing the process
-                // On Windows an undecorated window has no taskbar-presence
-                // toggle via Compose; hiding via a frame call is the reliable
-                // route (the window still exists, tray restores it).
-                runCatching { java.awt.Window.getWindows().firstOrNull()?.isVisible = false }
-            } else {
-                quit()
-            }
+            val hide = hideToTray.value
+            if (closeToTray && hide != null) hide() else quit()
         }
         Window(
             onCloseRequest = { requestClose() },
@@ -204,12 +181,21 @@ fun main() {
             // (verified: style 0x960B0000 had WS_THICKFRAME clear), and hide the
             // Windows 11 DWM border line while we are there.
             LaunchedEffect(Unit) { WindowResize.enableFor(window) }
+            // Hand the real frame to the close handler (declared above, where
+            // `window` does not exist yet).
+            LaunchedEffect(Unit) {
+                hideToTray.value = { runCatching { window.isVisible = false } }
+            }
             // Tray icon: installed once; reflects connection state via AppState.
             LaunchedEffect(Unit) {
                 vpn.ui.TrayIconManager.install(
                     onShow = {
                         window.isVisible = true
+                        // A window hidden while minimized comes back minimized;
+                        // clear the flag so Open always shows a real window.
+                        windowState.isMinimized = false
                         window.toFront()
+                        window.requestFocus()
                     },
                     onQuit = quit,
                 )
@@ -217,7 +203,6 @@ fun main() {
             LaunchedEffect(AppState.vpnStatus) {
                 vpn.ui.TrayIconManager.updateStatus(AppState.vpnStatus, AppState.activeConfig?.name)
             }
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             // When a second monitor is attached, open the window there (handy
             // while testing on a separate display).
             runCatching {
@@ -227,9 +212,6 @@ fun main() {
                     window.setLocation(bounds.x + 50, bounds.y + 50)
                 }
             }
-<<<<<<< HEAD
-            MultiVpnTheme { App() }
-=======
             MultiVpnTheme {
                 Column(Modifier.fillMaxSize()) {
                     AppTitleBar(
@@ -240,7 +222,6 @@ fun main() {
                     App()
                 }
             }
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         }
         }
     }
@@ -252,8 +233,6 @@ fun main() {
 
 private data class NavItem(val label: String, val icon: ImageVector)
 
-<<<<<<< HEAD
-=======
 private val NAV_ITEMS = listOf(
     NavItem("Dashboard", Icons.Filled.Home),
     NavItem("Servers", Icons.Filled.Dns),
@@ -261,44 +240,11 @@ private val NAV_ITEMS = listOf(
     NavItem("Settings", Icons.Filled.Tune),
 )
 
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 @Composable
 fun App() {
     LaunchedEffect(Unit) { AppState.load() }
     var tab by remember { mutableStateOf(0) }
 
-<<<<<<< HEAD
-    Box(Modifier.fillMaxSize()) {
-        AuroraBackground(Modifier.fillMaxSize())
-
-        // Row + weight(1f) is load-bearing: screens used to be direct children
-        // of a window-wide Box while the sidebar (a later child) drew OVER them,
-        // hiding the left part of every page underneath. Now the sidebar owns
-        // its 212dp column and each screen only receives what remains.
-        Row(Modifier.fillMaxSize()) {
-            Sidebar(tab, onSelect = { tab = it })
-            Box(Modifier.weight(1f).fillMaxHeight()) {
-                AnimatedContent(
-                    targetState = tab,
-                    transitionSpec = {
-                        val forward = targetState > initialState
-                        val spec = tween<IntOffset>(320)
-                        (fadeIn(tween(260)) +
-                            slideInHorizontally(spec) { full -> if (forward) full / 5 else -full / 5 } +
-                            scaleIn(initialScale = 0.985f, animationSpec = tween(320))) togetherWith
-                            (fadeOut(tween(150)) +
-                                slideOutHorizontally(tween(200)) { full -> if (forward) -full / 7 else full / 7 })
-                    },
-                    label = "screen",
-                ) { t ->
-                    when (t) {
-                        0 -> HomeScreen()
-                        1 -> ServersScreen()
-                        2 -> ConfigsScreen()
-                        else -> SettingsScreen()
-                    }
-                }
-=======
     // ONE place measures the window; everything downstream reads LocalLayout.
     // BoxWithConstraints gives the real content width, which is what matters —
     // the window rect includes a 7px non-client inset per side.
@@ -393,7 +339,6 @@ private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
                         color = if (isSelected) C.TextPrimary else C.TextSecondary,
                     )
                 }
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             }
         }
     }
@@ -401,20 +346,6 @@ private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
 
 @Composable
 private fun Sidebar(selected: Int, onSelect: (Int) -> Unit) {
-<<<<<<< HEAD
-    val items = listOf(
-        NavItem("Dashboard", Icons.Filled.Home),
-        NavItem("Servers", Icons.Filled.Dns),
-        NavItem("Configs", Icons.Filled.Layers),
-        NavItem("Settings", Icons.Filled.Tune),
-    )
-    Surface(
-        color = Color(0xFF0B1120),
-        border = BorderStroke(1.dp, C.Border),
-        modifier = Modifier.fillMaxHeight().width(212.dp),
-    ) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 20.dp).fillMaxHeight()) {
-=======
     val layout = LocalLayout.current
     val items = NAV_ITEMS
     Surface(
@@ -430,7 +361,6 @@ private fun Sidebar(selected: Int, onSelect: (Int) -> Unit) {
                 )
                 .fillMaxHeight(),
         ) {
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             // Logo
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 8.dp)) {
                 Box(
@@ -535,11 +465,7 @@ private fun Sidebar(selected: Int, onSelect: (Int) -> Unit) {
                     }
                     Spacer(Modifier.height(7.dp))
                     Text("Multi-Protocol Client", fontSize = 9.5.sp, color = C.TextFaint)
-<<<<<<< HEAD
-                    Text("v3.6.11 · x86_64", fontSize = 9.5.sp, color = C.TextFaint)
-=======
                     Text(vpn.BuildInfo.LABEL, fontSize = 9.5.sp, color = C.TextFaint)
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 }
             }
         }

@@ -17,9 +17,6 @@ object ProxyPorts {
     const val DEFAULT = 10808
 
     const val MIN = 1024
-<<<<<<< HEAD
-    const val MAX = 65_000
-=======
 
     /**
      * Ceiling keeps the WHOLE scratch pool below Windows' ephemeral range
@@ -30,7 +27,6 @@ object ProxyPorts {
      * before the temp core bound it (3.6.13 audit P3).
      */
     const val MAX = 49_091
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 
     /** Offset for the internal TUN liveness probe (sing-box mixed inbound). */
     const val TUN_PROBE_OFFSET = 3
@@ -54,8 +50,6 @@ object ProxyPorts {
     /** sing-box mixed inbound in TUN mode (liveness probe only). */
     val tunProbe: Int get() = current + TUN_PROBE_OFFSET
 
-<<<<<<< HEAD
-=======
     /**
      * Scratch port pairs for realping racers. The session always binds the
      * fixed [socks]/[http] ports, but a ping must NOT touch those — ping
@@ -76,7 +70,6 @@ object ProxyPorts {
     /** True when [port] is one of the fixed session ports (never scratch). */
     fun isSessionPort(port: Int): Boolean = port == socks || port == http || port == tunProbe
 
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     fun valid(port: Int): Boolean = port in MIN..MAX
 
     private fun sanitize(port: Int): Int = if (valid(port)) port else DEFAULT

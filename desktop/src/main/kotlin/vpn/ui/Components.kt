@@ -458,8 +458,6 @@ fun SegmentedChip(text: String, selected: Boolean, modifier: Modifier = Modifier
     }
 }
 
-<<<<<<< HEAD
-=======
 /**
  * Stale-marked latency from the persisted cache: same numeric content as
  * [LatencyPill] but neutral grey + a small "stale" suffix, so a number from
@@ -489,7 +487,6 @@ fun IcmpPill(ms: Int?, failed: Boolean, pinging: Boolean, modifier: Modifier = M
     }
 }
 
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 /** Latency pill: green <150ms, amber <400ms, red otherwise — animated colors. */
 @Composable
 fun LatencyPill(ms: Int?, failed: Boolean, pinging: Boolean, modifier: Modifier = Modifier) {

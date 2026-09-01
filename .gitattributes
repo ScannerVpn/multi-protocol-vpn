@@ -1,8 +1,6 @@
 # Shell scripts must keep LF endings: they run on Linux servers over SSH
 *.sh text eol=lf
 
-<<<<<<< HEAD
-=======
 # Patches are fed to `git apply` through stdin, including from bash on the CI
 # runner. git apply reads raw bytes: a UTF-16 patch (PowerShell's Set-Content
 # default) makes it report "No valid patches in input" and exit 128, which
@@ -11,7 +9,6 @@
 *.patch text eol=lf working-tree-encoding=UTF-8
 *.diff text eol=lf working-tree-encoding=UTF-8
 
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 # Source and text files are UTF-8 WITHOUT a BOM. PowerShell's Set-Content and
 # Out-File add a BOM by default, which corrupted ConfigsScreen.kt once
 # (U+2026 became "\u00E2\u20AC\u00A6" mojibake in the UI strings).

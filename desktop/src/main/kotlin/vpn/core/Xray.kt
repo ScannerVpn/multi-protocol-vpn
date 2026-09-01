@@ -40,12 +40,6 @@ object Xray {
     private fun q(s: String?) =
         "\"" + (s ?: "").replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
-<<<<<<< HEAD
-    /** Builds the xray client config JSON for a parsed share link. */
-    fun buildClientJson(link: ProxyLink): String {
-        val p = link.params
-        val network = link.network
-=======
     /**
      * Builds the xray client config JSON for a parsed share link.
      *
@@ -64,7 +58,6 @@ object Xray {
     fun buildClientJson(link: ProxyLink, socksPort: Int? = null, httpPort: Int? = null): String {
         val p = link.params
         val network = normalizeNetwork(link.network)
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         val security = if (link.security == "") "none" else link.security
 
         val stream = StringBuilder()
@@ -75,20 +68,13 @@ object Xray {
             parts.add("        \"fingerprint\": ${q(p["fp"] ?: "chrome")}")
             if (!p["pbk"].isNullOrBlank()) parts.add("        \"publicKey\": ${q(p["pbk"])}")
             parts.add("        \"shortId\": ${q(p["sid"] ?: "")}")
-<<<<<<< HEAD
-=======
             if (!p["spx"].isNullOrBlank()) parts.add("        \"spiderX\": ${q(p["spx"])}")
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             stream.append(",\n      \"realitySettings\": {\n")
             stream.append(parts.joinToString(",\n"))
             stream.append("\n      }")
         } else if (security == "tls") {
             val parts = mutableListOf<String>()
             if (!p["sni"].isNullOrBlank()) parts.add("        \"serverName\": ${q(p["sni"])}")
-<<<<<<< HEAD
-            if (p["allowInsecure"] == "1") parts.add("        \"allowInsecure\": true")
-            parts.add("        \"fingerprint\": ${q(p["fp"] ?: "chrome")}")
-=======
             if (p["allowInsecure"] == "1" || p["insecure"] == "1") {
                 parts.add("        \"allowInsecure\": true")
             }
@@ -101,27 +87,11 @@ object Xray {
                     parts.add("        \"alpn\": [${list.joinToString(", ") { q(it) }}]")
                 }
             }
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             stream.append(",\n      \"tlsSettings\": {\n")
             stream.append(parts.joinToString(",\n"))
             stream.append("\n      }")
         }
-<<<<<<< HEAD
-        when (network) {
-            "ws" -> {
-                stream.append(",\n      \"wsSettings\": {\n        \"path\": ${q(p["path"] ?: "/")}")
-                if (!p["host"].isNullOrBlank()) {
-                    stream.append(",\n        \"headers\": { \"Host\": ${q(p["host"])} }")
-                }
-                stream.append("\n      }")
-            }
-            "grpc" -> stream.append(
-                ",\n      \"grpcSettings\": { \"serviceName\": ${q(p["serviceName"] ?: "")} }",
-            )
-        }
-=======
         stream.append(transportSettings(network, p))
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 
         val flowExtra = if (p["flow"].isNullOrBlank()) "" else ", \"flow\": ${q(p["flow"])}"
         val outbound = when (link.protocol) {
@@ -157,15 +127,9 @@ $stream
 {
   "log": {"loglevel": "warning"},
   "inbounds": [
-<<<<<<< HEAD
-    {"listen": "127.0.0.1", "port": $SOCKS_PORT, "protocol": "socks",
-     "settings": {"auth": "noauth", "udp": true}},
-    {"listen": "127.0.0.1", "port": $HTTP_PORT, "protocol": "http"}
-=======
     {"listen": "127.0.0.1", "port": ${socksPort ?: SOCKS_PORT}, "protocol": "socks",
      "settings": {"auth": "noauth", "udp": true}},
     {"listen": "127.0.0.1", "port": ${httpPort ?: HTTP_PORT}, "protocol": "http"}
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
   ],
   "outbounds": [
 $outbound,
@@ -178,13 +142,6 @@ $outbound,
         """.trimIndent()
     }
 
-<<<<<<< HEAD
-    // ------------------------------------------------------------- binary
-
-    private val xrayFiles = listOf("xray.exe", "geoip.dat", "geosite.dat")
-
-    private fun xrayComplete(): Boolean = xrayFiles.all { File(xrayDir, it).exists() }
-=======
     /**
      * Maps a share link's `type=` to the transport name THIS xray build wants.
      *
@@ -265,7 +222,6 @@ $outbound,
     private val xrayFiles = CoreManifest.XRAY_FILES
 
     private fun xrayComplete(): Boolean = CoreManifest.allPresent(xrayDir, xrayFiles)
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 
     /** Obtains the xray binary. */
     suspend fun ensureXrayBinary(allowDownload: Boolean = true, forceDownload: Boolean = false): File? = withContext(Dispatchers.IO) {
@@ -274,11 +230,7 @@ $outbound,
         }
         // Always (re-)extract bundled files so a partial download (exe without
         // geoip.dat/geosite.dat) is repaired even when the exe already exists.
-<<<<<<< HEAD
-        val copied = Resources.extractAll("/bin/xray", xrayFiles, xrayDir)
-=======
         val copied = Resources.extractAll(CoreManifest.XRAY_RES, xrayFiles, xrayDir)
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         if (copied > 0) AppLog.i("Xray", "Extracted $copied/${xrayFiles.size} files from resources")
         if (xrayComplete()) return@withContext exe()
 
@@ -362,27 +314,6 @@ $outbound,
 
     fun kill() {
         val sys = System.getenv("SystemRoot") ?: "C:\\Windows"
-<<<<<<< HEAD
-        // Prefer the tracked PID: kills exactly OUR core, never another
-        // app's xray.exe the user may be running separately.
-        lastPid.takeIf { it > 0 }?.let { pid ->
-            HiddenRun.runAndWait(
-                listOf("$sys\\System32\\taskkill.exe", "/PID", pid.toString(), "/T", "/F"),
-                timeoutMs = 10_000,
-            )
-            lastPid = 0
-        }
-        if (lastPid == 0) {
-            // No PID known at entry — image-wide fallback instead of killing
-            // every xray.exe on the machine after we already handled ours.
-            repeat(2) {
-                HiddenRun.runAndWait(
-                    listOf("$sys\\System32\\taskkill.exe", "/IM", "xray.exe", "/F"),
-                    timeoutMs = 10_000,
-                )
-            }
-        }
-=======
         val pid = lastPid
         lastPid = 0
         killCommands(pid, sys).forEach { HiddenRun.runAndWait(it, timeoutMs = 10_000) }
@@ -424,19 +355,15 @@ $outbound,
         // orphaning a core that holds the proxy port. Issued twice because
         // a core that just spawned can miss the first sweep.
         return List(2) { listOf(exe, "/IM", "xray.exe", "/F") }
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     }
 
     /** PID of the core we started most recently (0 = unknown). */
     @Volatile
     private var lastPid: Int = 0
 
-<<<<<<< HEAD
-=======
     /** Read-only view for [TrafficStats] (0 = no tracked process). */
     fun trackedPid(): Int = lastPid
 
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     /** Called by VpnService after spawning xray, so kill() targets our PID. */
     fun trackPid(pid: Int) {
         lastPid = pid
@@ -444,29 +371,10 @@ $outbound,
 
     /**
      * Verifies the proxy actually carries traffic — an open local port does
-<<<<<<< HEAD
-     * not prove the upstream server answered.
-     */
-    suspend fun verifyTraffic(timeoutMs: Int = 9000): Boolean = withContext(Dispatchers.IO) {
-        runCatching {
-            val proxy = java.net.Proxy(
-                java.net.Proxy.Type.HTTP,
-                InetSocketAddress("127.0.0.1", HTTP_PORT),
-            )
-            val conn = java.net.URL("http://cp.cloudflare.com/generate_204")
-                .openConnection(proxy) as java.net.HttpURLConnection
-            conn.connectTimeout = timeoutMs
-            conn.readTimeout = timeoutMs
-            val code = conn.responseCode
-            conn.disconnect()
-            code in 200..399
-        }.getOrDefault(false)
-=======
      * not prove the upstream server answered. See [TrafficProbe]: HTTPS-first
      * across several providers, and a captive-portal 200 is not accepted.
      */
     suspend fun verifyTraffic(timeoutMs: Int = 9000): Boolean = withContext(Dispatchers.IO) {
         TrafficProbe.throughProxy(HTTP_PORT, timeoutMs)
->>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     }
 }
