@@ -27,14 +27,22 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.widthIn
+<<<<<<< HEAD
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.IntrinsicSize
+=======
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Apps
+<<<<<<< HEAD
+=======
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -42,6 +50,11 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Power
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Shield
+<<<<<<< HEAD
+=======
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.SwapVert
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material3.AlertDialog
@@ -81,12 +94,20 @@ import vpn.core.InstalledApp
 import vpn.core.Links
 import vpn.core.SplitModes
 import vpn.core.SshService
+<<<<<<< HEAD
+=======
+import vpn.core.TrafficStats
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 import vpn.core.VpnConfig
 import vpn.core.VpnModes
 import vpn.core.VpnService
 import vpn.core.VpnStatus
 import vpn.theme.C
 import vpn.core.Preflight
+<<<<<<< HEAD
+=======
+import vpn.core.ProxyPorts
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 
 @Composable
 fun HomeScreen() {
@@ -96,11 +117,29 @@ fun HomeScreen() {
     var showSplitPicker by remember { mutableStateOf(false) }
     var showModeSheet by remember { mutableStateOf(false) }
 
+<<<<<<< HEAD
+=======
+    val layout = LocalLayout.current
+
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     Column(
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
+<<<<<<< HEAD
             .padding(horizontal = 28.dp, vertical = 24.dp),
+=======
+            .padding(
+                start = layout.screenPadding,
+                end = layout.screenPadding,
+                top = layout.screenPadding,
+                // A little extra room at the end of the scroll in compact mode:
+                // the bottom nav bar is a SIBLING of this scroll area (not an
+                // overlay), so it never covers content, but ending the scroll
+                // flush against it looks cramped. Measured bar height: 71px.
+                bottom = layout.screenPadding + if (layout.compact) 12.dp else 0.dp,
+            ),
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     ) {
         DashboardHeader(
             onOpenPicker = { showPicker = true },
@@ -109,7 +148,11 @@ fun HomeScreen() {
         )
 
         if (state.lastError.isNotEmpty()) {
+<<<<<<< HEAD
             Spacer(Modifier.height(16.dp))
+=======
+            Spacer(Modifier.height(layout.cardGap))
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             ErrorCard(
                 message = state.lastError,
                 onRetry = { state.connectActive() },
@@ -118,6 +161,7 @@ fun HomeScreen() {
             )
         }
 
+<<<<<<< HEAD
         Spacer(Modifier.height(20.dp))
 
         // Hero row: connection panel + stats/details column.
@@ -206,6 +250,56 @@ fun HomeScreen() {
 
         Spacer(Modifier.height(20.dp))
         DashboardFooter()
+=======
+        Spacer(Modifier.height(layout.sectionGap))
+
+        val onToggle: () -> Unit = {
+            when (state.vpnStatus) {
+                VpnStatus.CONNECTED -> state.disconnectActive()
+                VpnStatus.DISCONNECTED, VpnStatus.ERROR -> state.connectActive()
+                // A stuck handshake must be escapable: tapping the orb
+                // while connecting aborts the attempt.
+                VpnStatus.CONNECTING -> state.cancelConnect()
+                VpnStatus.DISCONNECTING -> {}
+            }
+        }
+
+        // Hero: ONE column — connection card (with its compact
+        // server/protocol/ping line under the ring) and the traffic card
+        // directly below. The old side-by-side hero + three stat cards
+        // wasted half the window on duplicated information.
+        ConnectionCard(
+            status = state.vpnStatus,
+            config = state.activeConfig,
+            onToggle = onToggle,
+            onPickConfig = { showPicker = true },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(layout.cardGap))
+        TrafficCard(state)
+
+        // Health: only facts that appear NOWHERE else on the dashboard and
+        // answer "is the tunnel really healthy?" — split engine in use, DNS
+        // pin state. The UI single-fact contract (PLAN §4-6) forbids showing
+        // server/protocol/mode again here.
+        HealthCard(state)
+
+        // NOTE what is deliberately NOT here any more:
+        //  - the CONFIGS strip: it was the THIRD config picker on one screen
+        //    (header pill + the chip inside the connection card already show
+        //    the selection), it drew no selected state, and it clipped its last
+        //    tile with no scroll affordance. The Configs tab is the real list.
+        //  - the "Traffic mode" summary row: the same setting is already the
+        //    header's Mode + Apps buttons, and the two renderings disagreed
+        //    ("Full-system TUN · split (2)" vs "Split (only 2 app(s) tunneled)").
+        //  - "Connection details": Server/Protocol duplicated the stat cards
+        //    above it and Mode duplicated the header. TrafficCard took its slot
+        //    and kept its one unique row (the local proxy endpoints).
+        //  - DashboardFooter: its MODE/SPLIT/PROXY line repeated the header
+        //    chips AND the traffic card's Local proxy row — third rendering of
+        //    the same two facts on one screen. The version string stays in
+        //    Settings → About.
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     }
 
     if (showPicker) ConfigPickerDialog(onDismiss = { showPicker = false })
@@ -222,12 +316,103 @@ fun HomeScreen() {
     }
 }
 
+<<<<<<< HEAD
+=======
+/**
+ * The one compact line that replaced the three big stat cards: server IP,
+ * protocol, ping. Sits under the ring inside the connection card. The old
+ * StatCards repeated the same facts in three tall cards — this is the same
+ * information in a third of the space, and tappable chips open the config
+ * picker so the row is still a control, not just a caption.
+ */
+@Composable
+private fun SessionFactsRow(config: VpnConfig?, modifier: Modifier = Modifier) {
+    val latency = config?.let { AppState.latency[it.id] }
+    val failed = config != null && config.id in AppState.latencyFailed
+    val pinging = config != null && config.id in AppState.pinging
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+        modifier = modifier,
+    ) {
+        FactChip(icon = Icons.Filled.Public, text = config?.serverIp ?: "—")
+        Dot()
+        FactChip(
+            icon = config?.let { protocolIcon(it.protocol) } ?: Icons.Filled.Tune,
+            text = config?.let { Links.label(it.protocol, it.awgVersion) } ?: "—",
+        )
+        Dot()
+        PingChip(latency = latency, failed = failed, pinging = pinging)
+    }
+}
+
+/** A rounded, borderless label used inside [SessionFactsRow]. */
+@Composable
+private fun FactChip(icon: ImageVector, text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = C.Accent2, modifier = Modifier.size(13.dp))
+        Spacer(Modifier.width(5.dp))
+        Text(
+            text,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = C.TextSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun Dot() {
+    Box(
+        Modifier
+            .padding(horizontal = 8.dp)
+            .size(3.dp)
+            .clip(CircleShape)
+            .background(C.TextFaint),
+    )
+}
+
+/** Ping value with its colour code, or a dash while it has never been measured. */
+@Composable
+private fun PingChip(latency: Int?, failed: Boolean, pinging: Boolean) {
+    val (text, color) = when {
+        pinging -> "…" to C.TextFaint
+        failed -> "fail" to C.Error
+        latency == null -> "—" to C.TextFaint
+        // Same thresholds as LatencyPill (150/400): one number, one colour
+        // meaning app-wide (3.6.13 audit P3-4).
+        latency < 150 -> "${latency}ms" to C.Success
+        latency < 400 -> "${latency}ms" to C.Warning
+        else -> "${latency}ms" to C.Error
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            Icons.Filled.Speed,
+            null,
+            tint = color,
+            modifier = Modifier.size(13.dp),
+        )
+        Spacer(Modifier.width(5.dp))
+        Text(
+            text,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = color,
+        )
+    }
+}
+
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 @Composable
 private fun DashboardHeader(
     onOpenPicker: () -> Unit,
     onOpenMode: () -> Unit,
     onOpenApps: () -> Unit,
 ) {
+<<<<<<< HEAD
     val status = AppState.vpnStatus
     val cfg = AppState.activeConfig
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -267,6 +452,84 @@ private fun DashboardHeader(
             highlight = AppState.settings.splitMode != SplitModes.OFF,
             onClick = onOpenApps,
         )
+=======
+    val layout = LocalLayout.current
+    val status = AppState.vpnStatus
+    val cfg = AppState.activeConfig
+    val subtitle = when (status) {
+        VpnStatus.CONNECTED ->
+            "Connected via ${cfg?.let { Links.label(it.protocol, it.awgVersion) } ?: "—"}" +
+                " · ${cfg?.serverIp ?: "—"} · your traffic is protected"
+        VpnStatus.CONNECTING -> "Establishing secure tunnel…"
+        VpnStatus.DISCONNECTING -> "Closing connection…"
+        VpnStatus.ERROR -> "Connection failed — details below"
+        VpnStatus.DISCONNECTED -> "Not connected — pick a config, then press the power button"
+    }
+
+    if (layout.compact) {
+        // The title and three chips cannot share one row at phone width: the
+        // Row squeezed the "Dashboard" text to a few pixels and Compose wrapped
+        // it to ONE LETTER PER LINE down the left edge (seen in a 430dp
+        // capture). Title above, chips on their own row below.
+        Column(Modifier.fillMaxWidth()) {
+            Text("Dashboard", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = C.TextPrimary)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                subtitle,
+                fontSize = 11.sp,
+                color = C.TextSecondary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                HeaderChip(
+                    icon = Icons.Filled.Public,
+                    text = cfg?.name ?: "Choose config",
+                    highlight = cfg != null,
+                    onClick = onOpenPicker,
+                    modifier = Modifier.weight(1f),
+                )
+                HeaderChip(icon = Icons.Filled.Tune, text = "Mode", onClick = onOpenMode)
+                HeaderChip(
+                    icon = Icons.Filled.Apps,
+                    text = "${AppState.settings.splitApps.size}",
+                    highlight = AppState.settings.splitMode != SplitModes.OFF,
+                    onClick = onOpenApps,
+                )
+            }
+        }
+    } else {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.weight(1f)) {
+                Text("Dashboard", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = C.TextPrimary)
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    subtitle,
+                    fontSize = 12.sp,
+                    color = C.TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            HeaderChip(
+                icon = Icons.Filled.Public,
+                text = cfg?.name ?: "Choose config",
+                highlight = cfg != null,
+                onClick = onOpenPicker,
+            )
+            Spacer(Modifier.width(10.dp))
+            HeaderChip(icon = Icons.Filled.Tune, text = "Mode", onClick = onOpenMode)
+            Spacer(Modifier.width(10.dp))
+            HeaderChip(
+                icon = Icons.Filled.Apps,
+                text = "Apps (${AppState.settings.splitApps.size})",
+                highlight = AppState.settings.splitMode != SplitModes.OFF,
+                onClick = onOpenApps,
+            )
+        }
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     }
 }
 
@@ -276,12 +539,19 @@ private fun HeaderChip(
     text: String,
     highlight: Boolean = false,
     onClick: () -> Unit,
+<<<<<<< HEAD
 ) {
+=======
+    modifier: Modifier = Modifier,
+) {
+    val layout = LocalLayout.current
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(10.dp),
         color = if (highlight) C.Accent.copy(alpha = 0.12f) else C.Surface,
         border = BorderStroke(1.dp, if (highlight) C.Accent.copy(alpha = 0.55f) else C.Border),
+<<<<<<< HEAD
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -292,11 +562,31 @@ private fun HeaderChip(
             Text(
                 text,
                 fontSize = 12.sp,
+=======
+        modifier = modifier,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(
+                horizontal = if (layout.compact) 10.dp else 13.dp,
+                vertical = 9.dp,
+            ),
+        ) {
+            Icon(icon, null, tint = if (highlight) C.Accent else C.TextSecondary, modifier = Modifier.size(15.dp))
+            Spacer(Modifier.width(if (layout.compact) 5.dp else 7.dp))
+            Text(
+                text,
+                fontSize = if (layout.compact) 11.sp else 12.sp,
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 fontWeight = FontWeight.SemiBold,
                 color = if (highlight) C.TextPrimary else C.TextSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+<<<<<<< HEAD
                 modifier = Modifier.widthIn(max = 190.dp),
+=======
+                modifier = Modifier.widthIn(max = if (layout.compact) 150.dp else 190.dp),
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             )
         }
     }
@@ -310,6 +600,7 @@ private fun ConnectionCard(
     onPickConfig: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+<<<<<<< HEAD
     GlassCard(modifier = modifier) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -317,6 +608,18 @@ private fun ConnectionCard(
         ) {
             ConnectionRing(status = status, onToggle = onToggle)
             Spacer(Modifier.height(14.dp))
+=======
+    val layout = LocalLayout.current
+    GlassCard(modifier = modifier) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = layout.cardPadding + 4.dp, vertical = layout.cardPadding + 4.dp),
+        ) {
+            ConnectionRing(status = status, onToggle = onToggle)
+            Spacer(Modifier.height(if (layout.compact) 10.dp else 14.dp))
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             val (word, wordColor) = when (status) {
                 VpnStatus.CONNECTED -> "SECURED" to C.Success
                 VpnStatus.CONNECTING -> "CONNECTING…" to C.Warning
@@ -340,7 +643,16 @@ private fun ConnectionCard(
                     color = C.TextFaint,
                 )
             }
+<<<<<<< HEAD
             Spacer(Modifier.height(16.dp))
+=======
+            Spacer(Modifier.height(if (layout.compact) 10.dp else 12.dp))
+            // The one line that replaced the three stat cards: same facts, a
+            // third of the vertical space, and it reads as ONE fact — "where
+            // am I connected, how fast" — instead of three separate headlines.
+            SessionFactsRow(config = config, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(if (layout.compact) 10.dp else 12.dp))
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             LocationRow(config = config, onPick = onPickConfig, modifier = Modifier.weight(1f, fill = false))
         }
     }
@@ -365,7 +677,15 @@ private fun ConnectionRing(status: VpnStatus, onToggle: () -> Unit) {
         label = "sweep",
     )
 
+<<<<<<< HEAD
     Box(contentAlignment = Alignment.Center, modifier = Modifier.size(186.dp)) {
+=======
+    // The ring is the single biggest consumer of vertical space; on a phone-width
+    // window a 186dp orb plus its card padding pushed everything else below the
+    // fold. It shrinks with the layout mode instead.
+    val ringSize = LocalLayout.current.ringSize
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(ringSize)) {
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         when {
             busy -> {
                 Box(Modifier.fillMaxSize().border(3.dp, C.Border, CircleShape))
@@ -508,6 +828,7 @@ private fun LocationRow(config: VpnConfig?, onPick: () -> Unit, modifier: Modifi
     }
 }
 
+<<<<<<< HEAD
 @Composable
 private fun StatCard(
     label: String,
@@ -664,6 +985,31 @@ private fun FooterText(text: String) {
         color = C.TextFaint,
     )
 }
+=======
+// REMOVED: StatCard / StatsBlock.
+//
+// The three big cards (Server / Protocol / Latency) repeated facts the
+// connection card already carries — they now live as one compact
+// [SessionFactsRow] under the ring. The fill-fraction progress bars looked
+// quantitative but were hand-picked constants, so nothing was lost.
+
+// REMOVED: ConfigStrip / ConfigTile.
+//
+// The strip was the THIRD config picker on one screen — the header pill and the
+// chip inside the connection card already show the active config — and it drew
+// no selected state, capped itself at 16 entries and clipped the last tile with
+// no scroll affordance, so the rest were undiscoverable. Choosing a config now
+// happens in exactly two places: the header pill (which opens
+// ConfigPickerDialog) and the Configs tab.
+
+// REMOVED: DashboardFooter.
+//
+// Its MODE/SPLIT/PROXY line was the third rendering of two facts already on
+// screen (header chips, traffic card's Local proxy row) and the user asked
+// for it to go. The version string lives in Settings → About.
+
+// REMOVED: DashboardFooter and its FooterText helper — see note above.
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 
 @Composable
 private fun ErrorCard(
@@ -703,6 +1049,7 @@ private fun ErrorCard(
     }
 }
 
+<<<<<<< HEAD
 @Composable
 private fun DetailsCard(state: AppState) {
     val config = state.activeConfig
@@ -755,6 +1102,248 @@ private fun DetailsCard(state: AppState) {
                 },
             )
         }
+=======
+// REMOVED: DetailsCard ("Connection details").
+//
+// Four of its five rows restated something already on screen: Status is the
+// big OFFLINE/ONLINE label in the connection card, Server and Protocol are
+// two of the three stat cards directly above it, and Mode is the header's
+// Mode + Apps buttons. Its one unique row — where the local proxy listens —
+// moved into TrafficCard, which is what took its place.
+
+/**
+ * Live traffic card — replaces the old "Connection details", whose Server /
+ * Protocol / Mode rows all restated something already on screen.
+ *
+ * It shows what nothing else on the dashboard could: how much has actually
+ * moved, and how fast.
+ *
+ * HONESTY RULE (same as the latency pill): the numbers are only split into
+ * download/upload when the measurement really is per-direction — i.e. a tunnel
+ * adapter exists and Windows counted its bytes. In plain proxy mode there is no
+ * adapter and the core process's IO counters cannot be attributed to a
+ * direction, so ONE combined figure is shown and labelled as such rather than
+ * inventing a plausible-looking split. See [vpn.core.TrafficStats].
+ */
+@Composable
+private fun TrafficCard(state: AppState) {
+    val sample = state.traffic
+    val rate = state.trafficRate
+    val connected = state.vpnStatus == VpnStatus.CONNECTED
+
+    GlassCard {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Icon(
+                Icons.Filled.SwapVert,
+                null,
+                tint = if (connected) C.Accent2 else C.TextFaint,
+                modifier = Modifier.size(15.dp),
+            )
+            Spacer(Modifier.width(7.dp))
+            Text(
+                "Traffic",
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 13.5.sp,
+                color = C.TextPrimary,
+            )
+            Spacer(Modifier.weight(1f))
+            if (connected && state.sessionStartedAt > 0L) {
+                SessionTimer(startedAt = state.sessionStartedAt)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+
+        when {
+            // Exact per-direction bytes from the tunnel adapter.
+            sample != null && sample.perDirection -> {
+                Row(Modifier.fillMaxWidth()) {
+                    TrafficMetric(
+                        icon = Icons.Filled.ArrowDownward,
+                        label = "Download",
+                        total = TrafficStats.formatBytes(sample.rx),
+                        rate = rate?.let { TrafficStats.formatRate(it.rxPerSec) },
+                        tint = C.Success,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TrafficMetric(
+                        icon = Icons.Filled.ArrowUpward,
+                        label = "Upload",
+                        total = TrafficStats.formatBytes(sample.tx),
+                        rate = rate?.let { TrafficStats.formatRate(it.txPerSec) },
+                        tint = C.Accent2,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                InfoRow("Adapter", sample.via)
+            }
+
+            // Proxy mode: combined only, and said so.
+            sample != null -> {
+                TrafficMetric(
+                    icon = Icons.Filled.SwapVert,
+                    label = "Transferred (up + down)",
+                    total = TrafficStats.formatBytes(sample.rx),
+                    rate = rate?.let { TrafficStats.formatRate(it.rxPerSec) },
+                    tint = C.Accent,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Proxy mode has no tunnel adapter, so Windows cannot split this " +
+                        "by direction — switch to TUN mode for separate up/down counters.",
+                    fontSize = 10.sp,
+                    color = C.TextFaint,
+                    lineHeight = 13.sp,
+                )
+            }
+
+            connected -> Text(
+                "Measuring…",
+                fontSize = 11.5.sp,
+                color = C.TextSecondary,
+            )
+
+            else -> Text(
+                "Connect to see live download and upload.",
+                fontSize = 11.5.sp,
+                color = C.TextFaint,
+            )
+        }
+
+        // The one row worth keeping from the old details card: where the local
+        // proxy is actually listening. Users need it to point a browser at it.
+        // In TUN mode the sing-box mixed inbound listens on the probe port
+        // (the SOCKS base port belongs to xray-over-TUN there), so show that
+        // instead — an endpoint that does not exist would be a lie.
+        state.activeConfig?.takeIf { VpnService.isProxyMode(it) }?.let { cfg ->
+            Spacer(Modifier.height(8.dp))
+            val tun = AppState.settings.mode == VpnModes.TUN
+            InfoRow(
+                "Local proxy",
+                if (tun) "SOCKS 127.0.0.1:${ProxyPorts.tunProbe}" else Preflight.endpointSummary(cfg.protocol),
+            )
+        }
+    }
+}
+
+/**
+ * Health card — the tunnel's internal state that no other dashboard element
+ * shows: which engine actually carries the traffic (proxy ports vs sing-box
+ * TUN) and whether DNS is pinned through the tunnel. Pure facts from the
+ * same inputs the connect path uses; nothing here repeats the header chips
+ * or the session facts row (single-fact contract).
+ */
+@Composable
+private fun HealthCard(state: AppState) {
+    val cfg = state.activeConfig ?: return
+    val connected = state.vpnStatus == VpnStatus.CONNECTED
+    val mode = AppState.settings.mode
+    val splitMode = AppState.settings.splitMode
+
+    // The honest DNS answer: the pin is ACTIVE only when the same gate the
+    // config builders use says so (SingBox.dnsPinActive) AND the traffic
+    // path is sing-box TUN (hysteria2 native or the TUN engine over SOCKS).
+    // In xray-proxy mode the OS resolver goes through the local HTTP/SOCKS
+    // proxy only for apps that honour the system proxy — say that plainly.
+    val dnsText = when {
+        cfg.protocol == "hysteria2" ->
+            if (vpn.core.SingBox.dnsPinActive(AppState.settings.dnsLeakProtection, splitMode))
+                "pinned via tunnel (1.1.1.1 · 8.8.8.8)"
+            else
+                "system default (leak protection off)"
+        mode == VpnModes.TUN ->
+            if (AppState.settings.dnsLeakProtection && splitMode != SplitModes.INCLUDE)
+                "pinned via tunnel (1.1.1.1 · 8.8.8.8)"
+            else
+                "system default (leak protection off)"
+        mode == VpnModes.SYSTEM_PROXY ->
+            "via local proxy for proxy-aware apps"
+        else -> "no pinning in Proxy-only mode"
+    }
+
+    GlassCard {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Icon(
+                Icons.Filled.Shield,
+                null,
+                tint = if (connected) C.Success else C.TextFaint,
+                modifier = Modifier.size(15.dp),
+            )
+            Spacer(Modifier.width(7.dp))
+            Text("Health", fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp, color = C.TextPrimary)
+            Spacer(Modifier.weight(1f))
+            Text(
+                if (connected) "tunnel up" else "idle",
+                fontSize = 10.5.sp,
+                color = if (connected) C.Success else C.TextFaint,
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        InfoRow(
+            "Traffic path",
+            when {
+                mode == VpnModes.TUN -> "sing-box TUN engine (full system)"
+                cfg.protocol == "hysteria2" -> "sing-box mixed proxy"
+                else -> Preflight.endpointSummary(cfg.protocol)
+            },
+        )
+        InfoRow("DNS", dnsText)
+        if (splitMode != SplitModes.OFF && splitMode != null) {
+            InfoRow(
+                "Split",
+                if (splitMode == SplitModes.INCLUDE)
+                    "only ${AppState.settings.splitApps.size} selected app(s) tunnel"
+                else
+                    "${AppState.settings.splitApps.size} app(s) bypass the tunnel",
+            )
+        }
+    }
+}
+
+/** One direction's readout: big total, small rate underneath. */
+@Composable
+private fun TrafficMetric(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    total: String,
+    rate: String?,
+    tint: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = tint, modifier = Modifier.size(13.dp))
+            Spacer(Modifier.width(5.dp))
+            Text(
+                label.uppercase(),
+                fontSize = 9.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 1.1.sp,
+                color = C.TextFaint,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            total,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            color = C.TextPrimary,
+            maxLines = 1,
+        )
+        // Reserve the line even when there is no rate yet, so the card does not
+        // jump by one text height on the second sample.
+        Text(
+            rate ?: " ",
+            fontSize = 10.5.sp,
+            fontFamily = FontFamily.Monospace,
+            color = tint,
+            maxLines = 1,
+        )
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     }
 }
 
@@ -888,6 +1477,7 @@ fun ServerLogDialog(onDismiss: () -> Unit) {
 // Traffic mode + split tunneling (home screen)
 // ------------------------------------------------------------------
 
+<<<<<<< HEAD
 /**
  * Compact summary of the traffic mode; the full controls live in [ModeDialog]
  * so the home screen stays a single glance: config → orb → status.
@@ -922,6 +1512,16 @@ private fun ModeSummaryCard(onOpen: () -> Unit) {
         }
     }
 }
+=======
+// REMOVED: ModeSummaryCard.
+//
+// The bottom "Traffic mode" row was the same setting as the header's Mode +
+// Apps buttons, and the two renderings actively disagreed: this card said
+// "Full-system TUN · split (2)" while the details card said "Split (only 2
+// app(s) tunneled)" — full-system TUN and split tunneling are different
+// things. [ModeDialog] is still reachable from the header's Mode button, which
+// is now the only place the mode is shown or changed.
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 
 @Composable
 private fun ModeDialog(onDismiss: () -> Unit, onManageApps: () -> Unit) {

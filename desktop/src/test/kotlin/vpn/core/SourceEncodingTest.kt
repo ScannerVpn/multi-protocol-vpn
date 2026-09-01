@@ -72,6 +72,35 @@ class SourceEncodingTest {
         )
     }
 
+    /**
+     * The lossy-transcode signature the other tests CANNOT see.
+     *
+     * A tool that writes ASCII-only output turns every em dash / ellipsis into
+     * a literal '?', which is valid ASCII — no BOM, no U+FFFD, no mojibake
+     * lead byte. SingleInstance.kt carried five such lines ("proxy ports ???
+     * and a killed leftover") that shipped through every one of the checks
+     * above.
+     *
+     * Three or more consecutive '?' never occurs in real prose or code here,
+     * so it is a reliable marker. A run of two is left alone ("??" appears in
+     * Kotlin's elvis-ish idioms and in URLs).
+     */
+    @Test
+    fun `no ascii-transcoded punctuation`() {
+        val runs = Regex("\\?{3,}")
+        val offenders = kotlinSources().mapNotNull { f ->
+            val hit = runs.find(f.readText(Charsets.UTF_8)) ?: return@mapNotNull null
+            val line = f.readText(Charsets.UTF_8).substring(0, hit.range.first).count { it == '\n' } + 1
+            "${f.name}:$line -> \"${hit.value}\""
+        }
+        assertTrue(
+            offenders.isEmpty(),
+            "runs of '?' where punctuation used to be — a tool re-encoded these " +
+                "files as ASCII and the original character is gone:\n" +
+                offenders.joinToString("\n"),
+        )
+    }
+
     @Test
     fun `sources only use expected non-ascii characters`() {
         // Whitelist of the non-ASCII characters this codebase legitimately

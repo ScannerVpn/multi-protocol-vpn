@@ -33,6 +33,15 @@
     each download against the pinned hashes (supply-chain guard) and FAILS
     on any mismatch instead of silently bundling whatever arrived.
 
+<<<<<<< HEAD
+=======
+.PARAMETER RequireHashes
+    Treat a missing manifest or a missing/unpinned entry as a FATAL error
+    instead of a warning. This is what CI uses: without it, a build could
+    (and did) ship completely unverified cores because the manifest was
+    absent and the script only printed "[!] not verified" and carried on.
+
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\fetch-cores.ps1
 #>
@@ -40,7 +49,12 @@
 param(
     [switch]$SkipWireproxy,
     [switch]$Force,
+<<<<<<< HEAD
     [switch]$SaveHashes
+=======
+    [switch]$SaveHashes,
+    [switch]$RequireHashes
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 )
 
 $ErrorActionPreference = 'Stop'
@@ -84,19 +98,45 @@ function Assert-PinnedSha256([string]$path, [string]$key) {
     $actual = Get-Sha256 $path
     $script:computedHashes[$key] = $actual
     if (-not (Test-Path -LiteralPath $hashManifestPath)) {
+<<<<<<< HEAD
         Warn "no core-hashes.json - download '$key' NOT verified (sha256 $actual)"
+=======
+        $m = "no core-hashes.json - download '$key' is NOT verified (sha256 $actual)"
+        if ($RequireHashes) {
+            throw @"
+$m
+-RequireHashes was given (CI), so this is fatal. Run once WITHOUT it and with
+-SaveHashes, review the artifacts, then COMMIT desktop/core-hashes.json.
+"@
+        }
+        Warn $m
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         Warn 'run with -SaveHashes once, review the artifacts, then COMMIT the manifest'
         return
     }
     try {
         $manifest = Get-Content -Raw -LiteralPath $hashManifestPath | ConvertFrom-Json
     } catch {
+<<<<<<< HEAD
         Warn "core-hashes.json is not valid JSON - skipping verification ($($_.Exception.Message))"
+=======
+        $m = "core-hashes.json is not valid JSON ($($_.Exception.Message))"
+        if ($RequireHashes) { throw $m }
+        Warn "$m - skipping verification"
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         return
     }
     $expected = $manifest.$key
     if (-not $expected) {
+<<<<<<< HEAD
         Warn "no pinned hash for '$key' - download unverified (sha256 $actual)"
+=======
+        $m = "no pinned hash for '$key' - download unverified (sha256 $actual)"
+        if ($RequireHashes) {
+            throw "$m`n-RequireHashes was given: add the hash to core-hashes.json in a reviewed commit."
+        }
+        Warn $m
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         return
     }
     if ($actual -ne $expected.ToLower()) {
@@ -182,17 +222,35 @@ if (-not $Force -and (Complete-Set $sbDir $sbFiles)) {
     if ($LASTEXITCODE -ne 0) { throw 'tar extraction failed' }
     foreach ($n in $sbFiles) {
         $src = Get-ChildItem -Recurse $out -Filter $n | Select-Object -First 1
+<<<<<<< HEAD
         if (-not $src) { Warn "archive did not contain $n"; continue }
+=======
+        if (-not $src) {
+            # wintun.dll is fetched separately below when the archive omits it;
+            # anything else missing means the protocol silently will not work.
+            if ($n -eq 'wintun.dll') { Warn "archive did not contain $n (fetching separately)"; continue }
+            throw "hiddify archive did not contain $n"
+        }
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         Copy-Item $src.FullName (Join-Path $sbDir $n) -Force
     }
     if (-not (Test-Path (Join-Path $sbDir 'wintun.dll'))) {
         # wintun is also needed next to openvpn; fetch it from the official site.
+<<<<<<< HEAD
+=======
+        # Pinned URL (0.14.1) — wintun.net publishes per-version archives, so
+        # this is already a fixed artifact; Assert-PinnedSha256 covers the rest.
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         $wt = Join-Path $temp 'wintun.zip'
         Invoke-WebRequest -Uri 'https://www.wintun.net/builds/wintun-0.14.1.zip' -OutFile $wt
         Assert-PinnedSha256 $wt 'wintun-0.14.1.zip'
         Expand-Archive -LiteralPath $wt -DestinationPath (Join-Path $temp 'wintun') -Force
         $dll = Get-ChildItem -Recurse (Join-Path $temp 'wintun') -Filter 'wintun.dll' |
             Where-Object { $_.FullName -match 'amd64' } | Select-Object -First 1
+<<<<<<< HEAD
+=======
+        if (-not $dll) { throw 'wintun archive did not contain an amd64 wintun.dll' }
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         Copy-Item $dll.FullName (Join-Path $sbDir 'wintun.dll') -Force
     }
     Info 'extracted hiddify core'
@@ -270,8 +328,55 @@ if (-not $Force -and (Complete-Set $wpDir @('wireproxy.exe'))) {
     Info 'cloning artem-russkikh/wireproxy-awg'
     & git clone --depth 1 --quiet https://github.com/artem-russkikh/wireproxy-awg $srcDir
     if ($LASTEXITCODE -ne 0) { throw 'git clone failed' }
+<<<<<<< HEAD
     $patch = Join-Path $PSScriptRoot 'wireproxy-awg-awg31.patch'
     if (Test-Path $patch) {
+=======
+    # Record WHICH upstream commit went into the binary. A bare --depth 1
+    # clone of a moving HEAD is unreproducible: two builds of the same tag
+    # could embed different code, and a compromised upstream push would be
+    # invisible. The commit is printed and stored next to the exe.
+    $srcCommit = (& git -C $srcDir rev-parse HEAD).Trim()
+    Info "wireproxy-awg source commit $srcCommit"
+    $pinFile = Join-Path $PSScriptRoot 'wireproxy-source.pin'
+    if (Test-Path -LiteralPath $pinFile) {
+        $pinned = (Get-Content -Raw -LiteralPath $pinFile).Trim()
+        if ($pinned -and $pinned -ne $srcCommit) {
+            $m = @"
+wireproxy-awg upstream moved since the pin
+  pinned: $pinned
+  actual: $srcCommit
+Review the new commits before shipping, then update wireproxy-source.pin.
+"@
+            if ($RequireHashes) { throw $m } else { Warn $m }
+        } else {
+            Info 'wireproxy source commit matches the pin'
+        }
+    } else {
+        if ($RequireHashes) {
+            throw "no wireproxy-source.pin and -RequireHashes was given. Review commit $srcCommit, then write it to desktop/wireproxy-source.pin."
+        }
+        Warn "no wireproxy-source.pin - record commit $srcCommit there to pin it"
+    }
+    $patch = Join-Path $PSScriptRoot 'wireproxy-awg-awg31.patch'
+    # Does the checked-out source ALREADY speak AWG 3.x natively? Upstream
+    # merged "AWG 3 support" (#35) and bumped amneziawg-go to v3.1.x, so the
+    # patch is now obsolete AND no longer applies. Detect that instead of
+    # failing the build: the patch exists only for the older pre-#35 tree.
+    $nativeAwg3 = $false
+    if (Select-String -Path (Join-Path $srcDir 'awg_config.go') -Pattern 'HeaderProtectionKey' -Quiet -ErrorAction SilentlyContinue) {
+        $nativeAwg3 = $true
+    }
+    if ($nativeAwg3) {
+        Info 'source already supports AWG 3.x natively (upstream #35) - skipping the patch'
+        $awg31Native = Select-String -Path (Join-Path $srcDir 'awg_config.go') `
+            -Pattern 'RandomTrailers' -Quiet -ErrorAction SilentlyContinue
+        if ($awg31Native) { Info 'AWG 3.1 keys (RandomTrailers/DisableCookies) present too' }
+        else { Warn 'AWG 3.0 present but 3.1 keys missing - 3.1 servers may not connect' }
+    } elseif (-not (Test-Path $patch)) {
+        throw "patch file missing at $patch and the source has no native AWG 3.x support"
+    } else {
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         Info 'applying the AWG 3.0/3.1 header-protection patch'
         Push-Location $srcDir
         try {
@@ -279,6 +384,7 @@ if (-not $Force -and (Complete-Set $wpDir @('wireproxy.exe'))) {
             # an absolute Windows path argument ("G:\...") and then reports
             # "No valid patches in input", which silently produced an unpatched
             # binary that cannot talk to AmneziaWG 3.x servers.
+<<<<<<< HEAD
             $patchText = [System.IO.File]::ReadAllText($patch)
             $patchText | & git apply --whitespace=nowarn -
             if ($LASTEXITCODE -ne 0) {
@@ -296,6 +402,54 @@ if (-not $Force -and (Complete-Set $wpDir @('wireproxy.exe'))) {
     } else {
         Warn "patch file missing at $patch"
     }
+=======
+            # The patch file itself MUST be UTF-8 (see .gitattributes): a UTF-16
+            # copy makes git apply fail the same way, for the same silent result.
+            $patchText = [System.IO.File]::ReadAllText($patch)
+            $patchText | & git apply --whitespace=nowarn -
+            if ($LASTEXITCODE -ne 0) {
+                # NEVER build unpatched: the resulting exe looks fine, connects to
+                # nothing on AWG 3.x, and reports no error at all. Failing loudly
+                # here is the only way the operator finds out.
+                throw @'
+The AWG 3.0/3.1 patch did NOT apply, and the source does not support AWG 3.x
+natively either. Refusing to build: the binary would silently fail against
+every AmneziaWG 3.x server with no error message.
+Either update the pin to an upstream commit that has native support
+(look for "AWG 3 support"), or refresh the patch.
+'@
+            }
+            Info 'patch applied'
+        } finally { Pop-Location }
+    }
+    Push-Location $srcDir
+    try {
+        & go mod tidy 2>&1 | Out-Null
+        $env:GOOS = 'windows'; $env:GOARCH = 'amd64'
+        & go build -ldflags='-s -w' -o (Join-Path $wpDir 'wireproxy.exe') ./cmd/wireproxy
+        if ($LASTEXITCODE -ne 0) { throw 'go build failed' }
+    } finally { Pop-Location }
+    # Prove the patch really landed in the binary (the README's manual check,
+    # automated): the symbol only exists in patched builds.
+    $bytes = [System.IO.File]::ReadAllBytes((Join-Path $wpDir 'wireproxy.exe'))
+    $needle = [System.Text.Encoding]::ASCII.GetBytes('HeaderProtectionKey')
+    $found = $false
+    for ($i = 0; $i -le ($bytes.Length - $needle.Length); $i++) {
+        if ($bytes[$i] -eq $needle[0]) {
+            $ok = $true
+            for ($j = 1; $j -lt $needle.Length; $j++) {
+                if ($bytes[$i + $j] -ne $needle[$j]) { $ok = $false; break }
+            }
+            if ($ok) { $found = $true; break }
+        }
+    }
+    if (-not $found) {
+        throw 'built wireproxy.exe does not contain HeaderProtectionKey - the AWG 3.x patch did not take effect'
+    }
+    Info 'built wireproxy.exe (AWG 3.x symbols verified)'
+    $script:computedHashes['wireproxy.exe'] = Get-Sha256 (Join-Path $wpDir 'wireproxy.exe')
+    Set-Content -LiteralPath (Join-Path $wpDir 'source-commit.txt') -Value $srcCommit -Encoding ascii
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 }
 
 Remove-Item -Recurse -Force $temp -ErrorAction SilentlyContinue
@@ -325,6 +479,13 @@ Write-Host ''
 if ($missing -eq 0) {
     Info 'All cores present. Build with:  .\gradlew.bat createDistributable'
 } else {
+<<<<<<< HEAD
+=======
+    if ($RequireHashes) {
+        # CI must never ship a build whose protocols silently cannot connect.
+        throw "$missing core file(s) missing - refusing to continue (-RequireHashes)."
+    }
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     Warn "$missing file(s) missing - the protocols they belong to will not work."
     Warn 'The build will still succeed; see the README for manual steps.'
 }

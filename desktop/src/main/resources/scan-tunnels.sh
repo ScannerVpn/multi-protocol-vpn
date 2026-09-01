@@ -8,6 +8,10 @@
 #   MV-TUNNEL: ikev2
 # Nothing is installed, started or modified.
 set -e
+# Read-only inventory, but a half-failed pipeline must not silently report
+# "nothing found" — that would make the client re-install over an existing
+# server. Every intentionally-empty pipeline below ends in `|| true`.
+set -o pipefail
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
 info() { echo -e "${GREEN}[+]${NC} $1"; }

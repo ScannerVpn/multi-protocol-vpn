@@ -7,18 +7,35 @@
 # Supports: Ubuntu 20.04+, Debian 10+
 
 set -e
+# A failing stage inside a pipeline used to be invisible (`set -e` only checks
+# the LAST command): `pki --pub | pki --issue` could half-fail and still write
+# a truncated cert file. -o pipefail makes the whole pipeline fail instead.
+set -o pipefail
 umask 077
 
-SERVER_ADDR="${1:-$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')}"
+SERVER_ADDR="${1:-$(curl -fsS --max-time 10 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')}"
 # Distinctive CA subject: the Windows client uses it to find and remove stale
 # certificates from previous setups before importing the fresh ones.
 CA_CN="Freebuff IKEv2 CA"
 SERVER_CN="$SERVER_ADDR"
 CLIENT_CN="vpnclient"
-# Windows-compatible proposals: Windows 11 prefers ECP DH groups, Windows 10
-# MODP; keep both plus a 3DES fallback so any stock Windows client matches.
-IKE_PROPOSAL="aes256-sha256-ecp384,aes256-sha256-ecp256,aes128-sha256-ecp256,aes256-sha256-modp2048,aes128-sha256-modp2048,aes256-sha1-modp2048,aes128-sha1-modp2048,aes256-sha256-modp1024,3des-sha1-modp1024"
-ESP_PROPOSAL="aes256-sha256,aes128-sha256,aes256-sha1,aes128-sha1"
+# Windows-compatible proposals. DELIBERATELY no 3DES, no SHA-1 and no
+# MODP-1024: 3DES is a 64-bit-block cipher (Sweet32), SHA-1 is collision-broken
+# and MODP-1024 is deprecated by NIST SP 800-57 (Logjam).
+#
+# CRITICAL PAIRING: a stock Windows 7..11 client proposes ONLY
+# `3des-aes128-aes192-aes256-sha1-sha256-sha384-modp1024` by default, so
+# removing the weak entries here WOULD break every connection with
+# "policy match error" — unless the client profile is pinned to a strong
+# policy. That is exactly what Vpn.kt's buildIkev2ConnectScript now does via
+# Set-VpnConnectionIPsecConfiguration (AES256 / SHA256 / DHGroup14 / PFS2048),
+# which matches the FIRST proposal below. The weak entries only ever served
+# unconfigured clients, at the cost of letting a downgrade pick them for
+# everyone. Change one side and you MUST change the other.
+IKE_PROPOSAL="aes256-sha256-modp2048,aes256-sha384-modp2048,aes256gcm16-prfsha384-ecp384,aes256-sha256-ecp384,aes256-sha256-ecp256,aes128-sha256-modp2048"
+# PFS2048 on the client means the child SA rekeys with DH group 14, so the ESP
+# proposal has to offer modp2048 first.
+ESP_PROPOSAL="aes256-sha256-modp2048,aes256-sha256,aes256gcm16,aes128-sha256"
 
 # Windows requires an export password to import the PFX. The MultiVPN app
 # passes a RANDOM per-install passphrase as $2 (see SshService.generateP12Password);
@@ -66,6 +83,19 @@ net.ipv4.conf.all.accept_redirects = 0
 net.ipv4.conf.all.send_redirects = 0
 SYSCTL
 sysctl --system > /dev/null 2>&1
+
+# BBR congestion control: measurably faster tunnels on lossy/filtered
+# paths (the norm here). Best-effort - an old kernel without bbr just
+# keeps its default cubic.
+if modprobe tcp_bbr 2>/dev/null && sysctl -w net.core.default_qdisc=fq > /dev/null 2>&1 && \
+   sysctl -w net.ipv4.tcp_congestion_control=bbr > /dev/null 2>&1; then
+    grep -q tcp_congestion_control /etc/sysctl.d/99-vpn.conf || {
+        printf 'net.core.default_qdisc = fq\nnet.ipv4.tcp_congestion_control = bbr\n' >> /etc/sysctl.d/99-vpn.conf
+    }
+    info "BBR congestion control enabled"
+else
+    info "BBR unavailable on this kernel - keeping default congestion control"
+fi
 
 # Generate PKI
 PKI_DIR="/etc/ipsec.d"
@@ -142,23 +172,57 @@ info "Configuring firewall..."
 # DROP rules and never match.
 iptables -C INPUT -p udp --dport 500 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p udp --dport 500 -j ACCEPT
 iptables -C INPUT -p udp --dport 4500 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p udp --dport 4500 -j ACCEPT
+# ESP may arrive unencapsulated when there is no NAT in the path.
+iptables -C INPUT -p esp -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p esp -j ACCEPT
 # Do NOT change the global FORWARD policy — it weakens Docker/container isolation.
-# Use a scoped rule instead: only forward traffic from our VPN subnet to WAN.
-WAN_IF="$(ip route show default 2>/dev/null | awk '{print $5; exit}')"
+# Use scoped rules instead: only forward traffic from our VPN subnet to WAN,
+# plus the established way back.
+#
+# `-i eth+` was WRONG: modern Debian/Ubuntu use predictable names (ens3,
+# enp1s0, eno1), so the rule matched nothing and forwarding silently failed on
+# any host whose FORWARD policy is DROP (i.e. every host running Docker).
+# Traffic from the VPN subnet arrives on the strongSwan policy path, not on a
+# named interface, so match by SOURCE SUBNET only.
+VPN_SUBNET="10.10.10.0/24"
+WAN_IF="$(ip route show default 2>/dev/null | awk '{print $5; exit}' || true)"
 if [ -n "$WAN_IF" ]; then
-    iptables -C FORWARD -i eth+ -o "$WAN_IF" -s 10.10.10.0/24 -j ACCEPT 2>/dev/null || \
-        iptables -I FORWARD 1 -i eth+ -o "$WAN_IF" -s 10.10.10.0/24 -j ACCEPT
-    iptables -t nat -C POSTROUTING -s 10.10.10.0/24 -o "$WAN_IF" -j MASQUERADE 2>/dev/null || \
-        iptables -t nat -A POSTROUTING -s 10.10.10.0/24 -o "$WAN_IF" -j MASQUERADE
+    iptables -C FORWARD -s "$VPN_SUBNET" -o "$WAN_IF" -j ACCEPT 2>/dev/null || \
+        iptables -I FORWARD 1 -s "$VPN_SUBNET" -o "$WAN_IF" -j ACCEPT
+    iptables -C FORWARD -d "$VPN_SUBNET" -i "$WAN_IF" -m conntrack \
+        --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || \
+        iptables -I FORWARD 1 -d "$VPN_SUBNET" -i "$WAN_IF" -m conntrack \
+            --ctstate RELATED,ESTABLISHED -j ACCEPT
+    iptables -t nat -C POSTROUTING -s "$VPN_SUBNET" -o "$WAN_IF" -j MASQUERADE 2>/dev/null || \
+        iptables -t nat -A POSTROUTING -s "$VPN_SUBNET" -o "$WAN_IF" -j MASQUERADE
 else
-    iptables -C FORWARD -i eth+ -o lo -s 10.10.10.0/24 -j ACCEPT 2>/dev/null || \
-        iptables -I FORWARD 1 -i eth+ -o lo -s 10.10.10.0/24 -j ACCEPT
-    iptables -t nat -C POSTROUTING -s 10.10.10.0/24 -j MASQUERADE 2>/dev/null || \
-        iptables -t nat -A POSTROUTING -s 10.10.10.0/24 -j MASQUERADE
+    warn "no default route found - NAT/forwarding rules are not interface-scoped"
+    iptables -C FORWARD -s "$VPN_SUBNET" -j ACCEPT 2>/dev/null || \
+        iptables -I FORWARD 1 -s "$VPN_SUBNET" -j ACCEPT
+    iptables -C FORWARD -d "$VPN_SUBNET" -m conntrack \
+        --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || \
+        iptables -I FORWARD 1 -d "$VPN_SUBNET" -m conntrack \
+            --ctstate RELATED,ESTABLISHED -j ACCEPT
+    iptables -t nat -C POSTROUTING -s "$VPN_SUBNET" -j MASQUERADE 2>/dev/null || \
+        iptables -t nat -A POSTROUTING -s "$VPN_SUBNET" -j MASQUERADE
 fi
 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
     ufw allow 500/udp > /dev/null 2>&1 || true
     ufw allow 4500/udp > /dev/null 2>&1 || true
+    ufw route allow from "$VPN_SUBNET" > /dev/null 2>&1 || true
+fi
+# Persist, or the rules vanish on the next reboot and clients connect with no
+# internet — the project's most confusing failure mode. iptables-persistent is
+# installed above, so netfilter-persistent is normally present here.
+if command -v netfilter-persistent > /dev/null 2>&1; then
+    netfilter-persistent save > /dev/null 2>&1 && info "firewall rules persisted" || \
+        warn "netfilter-persistent save failed - rules will be lost on reboot"
+elif command -v iptables-save > /dev/null 2>&1; then
+    mkdir -p /etc/iptables 2>/dev/null || true
+    iptables-save > /etc/iptables/rules.v4 2>/dev/null && \
+        info "firewall rules saved to /etc/iptables/rules.v4" || \
+        warn "could not persist firewall rules - they will be lost on reboot"
+else
+    warn "could NOT persist firewall rules - they will be lost on reboot"
 fi
 
 # Start strongSwan

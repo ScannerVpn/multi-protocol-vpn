@@ -2,6 +2,7 @@ package vpn.core
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+<<<<<<< HEAD
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -39,11 +40,36 @@ sealed class RealPingResult {
  *  - wireguard / amnezia: WireGuard tunnel service via wireguard.exe /
  *    amneziawg.exe /installtunnelservice (one UAC); the client app is
  *    auto-downloaded and silently installed when missing.
+=======
+import kotlinx.coroutines.withContext
+import java.io.File
+
+/**
+ * Windows VPN connection dispatch — the session-state owner and protocol
+ * router. Responsibilities are split across files:
+ *
+ *  - [VpnTypes]        shared result types (VpnStatus / VpnResult / RealPingResult);
+ *  - [VpnStatusProbe]  tunnel/status detection (adapter + ipconfig/rasdial parsing);
+ *  - [VpnPing]         realping latency tests, pingMs, safeHost, port scans;
+ *  - [OpenVpn]         OpenVPN binary, .ovpn sanitizer, SYSTEM task lifecycle;
+ *  - [VpnScripts]      elevated PowerShell script builders and runner.
+ *
+ * Protocols:
+ *  - ikev2: native Windows client via rasdial; fast path dials the existing
+ *    profile (no UAC), elevated fallback cleans stale certs and re-imports;
+ *  - wireguard / amnezia: userspace wireproxy proxy, optionally wrapped in
+ *    the sing-box TUN engine for full-system / per-app routing;
+ *  - vless / trojan / shadowsocks: xray local proxy (same TUN option);
+ *  - hysteria2: sing-box local proxy (same TUN option);
+ *  - openvpn: openvpn.exe as SYSTEM via a one-off scheduled task.
+ *
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
  * Connection state is read from ipconfig/rasdial output (Java cannot see
  * RAS adapters) collected by hidden processes (see [HiddenRun]).
  */
 object VpnService {
 
+<<<<<<< HEAD
     /** The IKEv2 virtual pool handed out by setup-ikev2.sh (rightsourceip). */
     private const val IKEV2_PREFIX = "10.10.10."
 
@@ -56,6 +82,8 @@ object VpnService {
     /** The sing-box TUN adapter address (see SingBox.tunInbound). */
     private const val TUN_PREFIX = "172.19."
 
+=======
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     private const val TUN_DECLINED_MSG =
         "TUN/split-tunnel mode needs administrator rights (the UAC prompt was declined " +
             "or timed out). Retry and accept the prompt, or switch the mode on the " +
@@ -84,10 +112,13 @@ object VpnService {
     /** CA subjects this app ever issued; used to find and remove its certs. */
     private val CA_SUBJECTS = listOf("CN=Freebuff IKEv2 CA", "CN=VPN Root CA")
 
+<<<<<<< HEAD
     private val httpClient: HttpClient by lazy {
         HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build()
     }
 
+=======
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     fun profileName(configName: String): String =
         "VPN-" + configName.replace(Regex("[^a-zA-Z0-9]"), "-")
 
@@ -113,6 +144,7 @@ object VpnService {
     fun protocolLabel(config: VpnConfig): String = Links.label(config.protocol, config.awgVersion)
 
     // ------------------------------------------------------------------
+<<<<<<< HEAD
     // Status / ping
     // ------------------------------------------------------------------
 
@@ -139,6 +171,11 @@ object VpnService {
             Xray.isRunning() || SingBox.isRunning() || WireProxy.isRunning()
     }
 
+=======
+    // Session state
+    // ------------------------------------------------------------------
+
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     /**
      * True while an OpenVPN connect that verified as up is still considered
      * active in this app run. tunnelConnected() only recognizes the four
@@ -168,6 +205,27 @@ object VpnService {
     @Volatile
     private var sessionTunMode: Boolean? = null
 
+<<<<<<< HEAD
+=======
+    // ------------------------------------------------------------------
+    // Status / ping (delegates — implementation in VpnStatusProbe / VpnPing)
+    // ------------------------------------------------------------------
+
+    /** Ground-truth connected check for any supported protocol. */
+    suspend fun isVpnUp(): Boolean = withContext(Dispatchers.IO) {
+        VpnStatusProbe.tunnelConnected() ||
+            // Imported .ovpn configs can hand out subnets outside the four
+            // hardcoded prefixes tunnelConnected() knows — while THIS session
+            // connected such a tunnel, the session flag is the truth source.
+            openvpnSessionActive ||
+            // RAS/IKEv2 adapters are often invisible to Java AND their ipconfig
+            // section can be missed by locale-specific parsing — rasdial output
+            // is the authoritative answer for dial-up profiles.
+            VpnStatusProbe.connectedIkev2Profile() != null ||
+            Xray.isRunning() || SingBox.isRunning() || WireProxy.isRunning()
+    }
+
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     /** Which latency strategy applies to a config (pure decision). */
     internal enum class LatencyEngine {
         /** Start a temp xray core and push a real HTTP request through it. */
@@ -224,9 +282,15 @@ object VpnService {
             // Route purely by classification; [sshPort] no longer feeds any
             // estimate (kept in the signature for API stability only).
             when (classifyLatencyEngine(config)) {
+<<<<<<< HEAD
                 LatencyEngine.XRAY -> quickXrayPing(link!!)
                 LatencyEngine.SINGBOX -> quickHysteriaPing(config)
                 LatencyEngine.WIREPROXY -> quickWireguardPing(config)
+=======
+                LatencyEngine.XRAY -> VpnPing.quickXrayPing(link!!)
+                LatencyEngine.SINGBOX -> VpnPing.quickHysteriaPing(config)
+                LatencyEngine.WIREPROXY -> VpnPing.quickWireguardPing(config)
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 // vless/trojan/ss rows whose stored link no longer parses,
                 // ikev2/openvpn and anything without a pre-connect verifier:
                 // NO number, NO port fishing, ever again.
@@ -241,6 +305,7 @@ object VpnService {
             else -> null
         }
 
+<<<<<<< HEAD
     /**
      * Serializes ALL realping tests across the protocol families: they share
      * the same fixed local proxy base port (xray SOCKS = sing-box mixed =
@@ -607,6 +672,20 @@ object VpnService {
         if (h.contains(':') && h.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' || it == ':' || it == '.' }) return h
         return null
     }
+=======
+    /** Delegates kept on the facade for tests and future callers. */
+    suspend fun scanPorts(host: String, ports: List<Int>, timeoutMs: Int = 3000): Int? =
+        VpnPing.scanPorts(host, ports, timeoutMs)
+
+    suspend fun pingMs(host: String): Int? = VpnPing.pingMs(host)
+
+    internal fun localeAwareDouble(text: String): Double? = VpnPing.localeAwareDouble(text)
+
+    internal fun safeHost(host: String?): String? = VpnPing.safeHost(host)
+
+    internal fun hasLiveTunnelAddress(ipconfigText: String): Boolean =
+        VpnStatusProbe.hasLiveTunnelAddress(ipconfigText)
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 
     // ------------------------------------------------------------------
     // Connect / disconnect (protocol dispatch)
@@ -646,6 +725,10 @@ object VpnService {
             }
         }
         connectionActive = result.ok
+<<<<<<< HEAD
+=======
+        VpnPing.setSessionLive(result.ok)
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         result
     }
 
@@ -655,8 +738,13 @@ object VpnService {
         isWireGuard(config) -> WireProxy.isRunning() && WireProxy.verifyTraffic(6000)
         isSingBox(config) -> SingBox.isRunning() &&
             (SingBox.verifyTraffic(6000) || SingBox.verifyDirectTraffic(6000))
+<<<<<<< HEAD
         config.protocol == "openvpn" -> tunnelConnected() || openvpnInitialized()
         else -> tunnelConnected() || connectedIkev2Profile() != null
+=======
+        config.protocol == "openvpn" -> VpnStatusProbe.tunnelConnected() || OpenVpn.openvpnInitialized()
+        else -> VpnStatusProbe.tunnelConnected() || VpnStatusProbe.connectedIkev2Profile() != null
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     }
 
     private fun recoveredMessage(config: VpnConfig): String = when {
@@ -688,7 +776,11 @@ object VpnService {
                 Proxy.restoreState()
             }
             config.protocol == "openvpn" -> {
+<<<<<<< HEAD
                 stopOpenvpn()
+=======
+                OpenVpn.stop()
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 openvpnSessionActive = false
             }
             else -> {
@@ -701,7 +793,11 @@ object VpnService {
         // Tunnel protocols: drop any live IKEv2 tunnel so the Disconnect
         // button never leaves a connection up (proxies can coexist).
         if (!isProxyMode(config)) {
+<<<<<<< HEAD
             connectedIkev2Profile()?.let { live ->
+=======
+            VpnStatusProbe.connectedIkev2Profile()?.let { live ->
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 HiddenRun.runAndWait(listOf("rasdial", live, "/disconnect"), timeoutMs = 30_000)
             }
         }
@@ -711,6 +807,10 @@ object VpnService {
             tries++
         }
         connectionActive = false
+<<<<<<< HEAD
+=======
+        VpnPing.setSessionLive(false)
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         sessionTunMode = null
         Unit
     }
@@ -736,6 +836,10 @@ object VpnService {
             }
         }
         connectionActive = false
+<<<<<<< HEAD
+=======
+        VpnPing.setSessionLive(false)
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         openvpnSessionActive = false
         sessionTunMode = null
         Unit
@@ -749,18 +853,30 @@ object VpnService {
      */
     fun killAllCores() {
         connectionActive = false
+<<<<<<< HEAD
+=======
+        VpnPing.setSessionLive(false)
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         openvpnSessionActive = false
         sessionTunMode = null
         runCatching { Xray.kill() }
         runCatching { SingBox.kill() }
         runCatching { WireProxy.kill() }
+<<<<<<< HEAD
         if (ovpnMarker.exists()) runCatching { stopOpenvpnDetached() }
+=======
+        if (OpenVpn.marker.exists()) runCatching { OpenVpn.stopDetached() }
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         // Sweep stale multivpn_* leftovers (scripts, results, downloads) that
         // earlier runs — including crashed ones — left behind in %TEMP%.
         sweepStaleTempFiles()
     }
 
+<<<<<<< HEAD
     /** Deletes multivpn_* / xray_*.zip temp files older than a day. */
+=======
+    /** Deletes multivpn_* temp files older than a day. */
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     private fun sweepStaleTempFiles() {
         runCatching {
             val tmp = File(System.getProperty("java.io.tmpdir"))
@@ -783,7 +899,11 @@ object VpnService {
         runCatching {
             val script = File.createTempFile("multivpn_corekill_", ".ps1")
             val resultFile = File(System.getProperty("java.io.tmpdir"), "multivpn_corekill.txt")
+<<<<<<< HEAD
             script.writeText(buildKillProcessScript(resultFile.absolutePath, singBoxImageName()))
+=======
+            script.writeText(VpnScripts.buildKillProcessScript(resultFile.absolutePath, singBoxImageName()))
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             HiddenRun.startDetached(
                 listOf(
                     "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
@@ -905,7 +1025,11 @@ object VpnService {
             // adapter never materialized and NOTHING was routed at all
             // (process rules need the adapter first), which users saw as
             // "connected but nothing comes through".
+<<<<<<< HEAD
             if (!tunnelConnected()) {
+=======
+            if (!VpnStatusProbe.tunnelConnected()) {
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 AppLog.e("SingBox", "${config.protocol}: split session without a tunnel adapter")
                 SingBox.kill()
                 killTunCore()
@@ -1035,7 +1159,11 @@ object VpnService {
             }
             // SPLIT/TUN session: require the adapter to actually exist, else
             // the per-app rules route nothing while we claim success.
+<<<<<<< HEAD
             if (split != null && !tunnelConnected()) {
+=======
+            if (split != null && !VpnStatusProbe.tunnelConnected()) {
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 AppLog.e("WireProxy", "split session without a tunnel adapter")
                 SingBox.kill()
                 killTunCore()
@@ -1105,7 +1233,11 @@ object VpnService {
 
     /** Kills a TUN-mode sing-box core, which runs elevated (one UAC prompt). */
     private suspend fun killTunCore() {
+<<<<<<< HEAD
         runElevatedScript(60) { f -> buildKillProcessScript(f, singBoxImageName()) }
+=======
+        VpnScripts.runElevatedScript(60) { f -> VpnScripts.buildKillProcessScript(f, singBoxImageName()) }
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         SingBox.kill()
     }
 
@@ -1128,7 +1260,13 @@ object VpnService {
      */
     suspend fun cleanupProfiles(profileNames: List<String>, allVpnProfiles: Boolean) =
         withContext(Dispatchers.IO) {
+<<<<<<< HEAD
             runElevatedScript(120) { f -> buildCleanupScript(f, profileNames, allVpnProfiles) }
+=======
+            VpnScripts.runElevatedScript(120) { f ->
+                VpnScripts.buildCleanupScript(f, profileNames, allVpnProfiles, CA_SUBJECTS)
+            }
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         }
 
     private suspend fun connectIkev2(config: VpnConfig): VpnResult {
@@ -1141,7 +1279,11 @@ object VpnService {
         HiddenRun.runAndWaitCancellable(listOf("rasdial", name), timeoutMs = 35_000)
         var tries = 0
         while (tries < 3) {
+<<<<<<< HEAD
             if (tunnelConnected()) {
+=======
+            if (VpnStatusProbe.tunnelConnected()) {
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 AppLog.i("VPN", "Connected via fast path (no UAC)")
                 return VpnResult(true, "Connected")
             }
@@ -1149,8 +1291,13 @@ object VpnService {
             tries++
         }
 
+<<<<<<< HEAD
         val result = runElevatedScript(240) { resultFile ->
             buildIkev2ConnectScript(
+=======
+        val result = VpnScripts.runElevatedScript(240) { resultFile ->
+            VpnScripts.buildIkev2ConnectScript(
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 resultFile,
                 name = name,
                 server = config.serverIp,
@@ -1158,6 +1305,10 @@ object VpnService {
                 p12Path = config.p12Path,
                 p12Pass = config.p12Pass?.takeIf { it.isNotBlank() }
                     ?: SshService.CLIENT_P12_PASSWORD,
+<<<<<<< HEAD
+=======
+                caSubjects = CA_SUBJECTS,
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             )
         }
         if (result.ok) AppLog.i("VPN", "IKEv2 connected via elevated flow")
@@ -1188,8 +1339,17 @@ object VpnService {
             val pid = HiddenRun.startDetached(
                 listOf(exe.absolutePath, "run", "-c", conf.absolutePath),
                 workingDir = exe.parentFile,
+<<<<<<< HEAD
             ) ?: return@repeat
             if (pid > 0) Xray.trackPid(pid)
+=======
+            ) ?: run {
+                // Process creation failed outright — no point polling a port.
+                AppLog.e("Xray", "could not start xray.exe (process creation failed)")
+                return@repeat
+            }
+            Xray.trackPid(pid)
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             var tries = 0
             while (tries < 15) {
                 if (Xray.isRunning()) { portOpen = true; return@repeat }
@@ -1279,7 +1439,11 @@ object VpnService {
             // path: without a live tunnel adapter the per-app rules route
             // NOTHING, and reporting "Connected" produced the user-visible
             // "connected but nothing comes through" blackout.
+<<<<<<< HEAD
             if (!tunnelConnected()) {
+=======
+            if (!VpnStatusProbe.tunnelConnected()) {
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 AppLog.e("Xray", "${parsed.protocol}: split session without a tunnel adapter")
                 SingBox.kill()
                 killTunCore()
@@ -1340,6 +1504,7 @@ object VpnService {
     }
 
     // ------------------------------------------------------------------
+<<<<<<< HEAD
     // OpenVPN
     // ------------------------------------------------------------------
 
@@ -1954,3 +2119,28 @@ $removeProfiles
 """.trimIndent()).dollarize()
     }
 }
+=======
+    // OpenVPN (implementation in OpenVpn; session flag lives here)
+    // ------------------------------------------------------------------
+
+    private suspend fun connectOpenvpn(config: VpnConfig): VpnResult {
+        val result = OpenVpn.connect(config)
+        if (result.ok) openvpnSessionActive = true
+        return result
+    }
+
+    // Delegates kept on the facade for tests and future callers.
+    internal fun openvpnInitialized(): Boolean = OpenVpn.openvpnInitialized()
+
+    internal fun sanitizeOvpn(conf: File, target: File? = null): File =
+        OpenVpn.sanitizeOvpn(conf, target)
+
+    internal fun versionKey(fileName: String): List<Int> = OpenVpn.versionKey(fileName)
+
+    internal fun versionKeyLong(fileName: String): Long = OpenVpn.versionKeyLong(fileName)
+
+    /** Public helper for first-run download. */
+    suspend fun downloadOpenvpnBinary(): Boolean = OpenVpn.downloadBinary()
+}
+
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
