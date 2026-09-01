@@ -19,6 +19,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+<<<<<<< HEAD
+=======
+import androidx.compose.material.icons.filled.Bolt
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.ContentCopy
@@ -76,8 +80,49 @@ fun ConfigsScreen() {
     val isEmpty = AppState.configs.isEmpty() &&
         AppState.servers.isEmpty() && AppState.subscriptions.isEmpty()
 
+<<<<<<< HEAD
     Column(
         Modifier.fillMaxSize().wrapContentWidth(Alignment.CenterHorizontally).widthIn(max = 880.dp).padding(horizontal = 20.dp),
+=======
+    // ---- search / protocol filter / latency sort --------------------------
+    // The list can hold hundreds of subscription rows; without a search the
+    // tab degrades into scrolling. The filter applies to ALL sections; while
+    // it is active folders auto-expand so matches are visible immediately.
+    var query by remember { mutableStateOf("") }
+    var protocolFilter by remember { mutableStateOf<String?>(null) }
+    var sortByLatency by remember { mutableStateOf(false) }
+
+    fun matches(c: VpnConfig): Boolean {
+        val q = query.trim()
+        val okQuery = q.isEmpty() ||
+            c.name.contains(q, ignoreCase = true) ||
+            c.serverIp.contains(q, ignoreCase = true)
+        val okProto = protocolFilter == null || c.protocol == protocolFilter
+        return okQuery && okProto
+    }
+
+    fun byLatency(list: List<VpnConfig>): List<VpnConfig> =
+        if (!sortByLatency) list else list.sortedWith(
+            compareBy(
+                // measured, fastest first; failures/dead last; unmeasured in between
+                { c -> AppState.latency[c.id] ?: Int.MAX_VALUE },
+                { c -> if (c.id in AppState.latencyFailed) 1 else 0 },
+            ),
+        )
+
+    val filteredMyServers = myServers.filter(::matches)
+    val filteredSubs = subsConfigs.filter(::matches)
+    val filteredManual = manual.filter(::matches)
+    val filtering = query.isNotBlank() || protocolFilter != null
+
+    val layout = LocalLayout.current
+    Column(
+        Modifier
+            .fillMaxSize()
+            .wrapContentWidth(Alignment.CenterHorizontally)
+            .widthIn(max = 880.dp)
+            .padding(horizontal = layout.screenPadding),
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     ) {
         Spacer(Modifier.height(20.dp))
         ScreenHeader(
@@ -86,6 +131,16 @@ fun ConfigsScreen() {
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 AppButton(
+<<<<<<< HEAD
+=======
+                    if (sortByLatency) "Fastest ✓" else "Fastest",
+                    { sortByLatency = !sortByLatency },
+                    icon = Icons.Filled.Bolt,
+                    compact = true,
+                    enabled = !AppState.connectedOrBusy,
+                )
+                AppButton(
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                     "Ping all",
                     { AppState.pingAllConfigs() },
                     icon = Icons.Filled.Speed,
@@ -103,6 +158,20 @@ fun ConfigsScreen() {
                 )
             }
         }
+<<<<<<< HEAD
+=======
+        Spacer(Modifier.height(10.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            AppTextField(query, { query = it }, "Search name or IP", modifier = Modifier.weight(1f))
+            AppTextField(
+                protocolFilter ?: "",
+                { protocolFilter = it.trim().lowercase().ifEmpty { null } },
+                "protocol",
+                modifier = Modifier.width(110.dp),
+            )
+        }
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         Spacer(Modifier.height(14.dp))
 
         LazyColumn(
@@ -121,10 +190,17 @@ fun ConfigsScreen() {
                 item { SectionTitle("My Servers") }
                 val claimed = mutableSetOf<String>()
                 AppState.servers.forEachIndexed { sIdx, server ->
+<<<<<<< HEAD
                     val cfgs = myServers.filter { c ->
                         (c.serverId == server.id) ||
                             (c.serverId == null && c.serverIp == server.ip)
                     }
+=======
+                    val cfgs = byLatency(filteredMyServers.filter { c ->
+                        (c.serverId == server.id) ||
+                            (c.serverId == null && c.serverIp == server.ip)
+                    })
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                     cfgs.forEach { claimed.add(it.id) }
                     item(server.id) {
                         StaggerIn(sIdx) {
@@ -134,7 +210,11 @@ fun ConfigsScreen() {
                                 subtitle = "${server.ip} · " +
                                     if (cfgs.isEmpty()) "no configs yet" else "${cfgs.size} config(s)",
                                 count = cfgs.size,
+<<<<<<< HEAD
                                 expanded = expanded["srv:${server.id}"] ?: false,
+=======
+                                expanded = (expanded["srv:${server.id}"] ?: false) || (filtering && cfgs.isNotEmpty()),
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                                 onToggle = { toggle("srv:${server.id}") },
                             ) {
                                 cfgs.forEach { cfg -> ConfigCard(cfg) }
@@ -142,7 +222,11 @@ fun ConfigsScreen() {
                         }
                     }
                 }
+<<<<<<< HEAD
                 val orphans = myServers.filter { it.id !in claimed }
+=======
+                val orphans = byLatency(filteredMyServers.filter { it.id !in claimed })
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 if (orphans.isNotEmpty()) {
                     item("orphans") {
                         Folder(
@@ -150,7 +234,11 @@ fun ConfigsScreen() {
                             title = "Unsorted",
                             subtitle = "${orphans.size} config(s)",
                             count = orphans.size,
+<<<<<<< HEAD
                             expanded = expanded["orphans"] ?: false,
+=======
+                            expanded = (expanded["orphans"] ?: false) || filtering,
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                             onToggle = { toggle("orphans") },
                             leadingIcon = Icons.Filled.FolderOpen,
                         ) {
@@ -160,10 +248,18 @@ fun ConfigsScreen() {
                 }
 
                 // ---------------------------------------------- subscriptions
+<<<<<<< HEAD
                 if (AppState.subscriptions.isNotEmpty() || subsConfigs.isNotEmpty()) {
                     item { SectionTitle("Subscriptions") }
                     AppState.subscriptions.forEach { sub ->
                         val cfgs = subsConfigs.filter { it.source == "subscription:${sub.id}" }
+=======
+                if (AppState.subscriptions.isNotEmpty() || filteredSubs.isNotEmpty()) {
+                    item { SectionTitle("Subscriptions") }
+                    AppState.subscriptions.forEach { sub ->
+                        val cfgs = byLatency(filteredSubs.filter { it.source == "subscription:${sub.id}" })
+                        if (filtering && cfgs.isEmpty()) return@forEach
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                         item(sub.id) {
                             var confirmDelete by remember { mutableStateOf(false) }
                             Folder(
@@ -234,10 +330,26 @@ fun ConfigsScreen() {
                 }
 
                 // ---------------------------------------------------- manual
+<<<<<<< HEAD
                 if (manual.isNotEmpty()) {
                     item { SectionTitle("Imported") }
                     items(manual.size, key = { manual[it].id }) { i ->
                         StaggerIn(i) { ConfigCard(manual[i]) }
+=======
+                if (filteredManual.isNotEmpty()) {
+                    item { SectionTitle("Imported") }
+                    items(filteredManual.size, key = { filteredManual[it].id }) { i ->
+                        StaggerIn(i) { ConfigCard(filteredManual[i]) }
+                    }
+                }
+                // Search produced nothing anywhere — say so instead of a bare list.
+                if (filtering && filteredMyServers.isEmpty() && filteredSubs.isEmpty() && filteredManual.isEmpty()) {
+                    item("no-match") {
+                        EmptyState(
+                            Icons.Filled.Layers,
+                            "No config matches the current search/filter.",
+                        )
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                     }
                 }
             }
@@ -316,12 +428,28 @@ private fun ConfigCard(config: VpnConfig) {
             if (config.id in AppState.pinging) {
                 Text("…", color = C.TextSecondary, fontSize = 14.sp, modifier = Modifier.padding(end = 6.dp))
             } else {
+<<<<<<< HEAD
                 LatencyPill(
                     AppState.latency[config.id],
                     config.id in AppState.latencyFailed,
                     config.id in AppState.pinging,
                     Modifier.padding(end = 4.dp),
                 )
+=======
+                val cached = AppState.latencyCached[config.id]
+                if (AppState.latency[config.id] == null && cached != null) {
+                    // Persisted value from a previous run: shown GREY with a
+                    // stale marker — never rendered like a fresh measurement.
+                    CachedLatencyPill(cached.ms, cached.at, Modifier.padding(end = 4.dp))
+                } else {
+                    LatencyPill(
+                        AppState.latency[config.id],
+                        config.id in AppState.latencyFailed,
+                        config.id in AppState.pinging,
+                        Modifier.padding(end = 4.dp),
+                    )
+                }
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             }
         }
         Spacer(Modifier.height(10.dp))
@@ -557,7 +685,25 @@ private fun AddConfigDialog(onDismiss: () -> Unit) {
     var ca by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("ikev2") }
     var conf by remember { mutableStateOf("") }
+<<<<<<< HEAD
     var link by remember { mutableStateOf("") }
+=======
+    // Smart paste: a share link sitting in the clipboard when the dialog
+    // opens pre-fills the link field (the overwhelmingly common flow —
+    // user copies a link from a bot/site, opens Add, pastes). Only a string
+    // that STARTS with a known scheme pre-fills; anything else is ignored.
+    var link by remember {
+        mutableStateOf(
+            runCatching {
+                java.awt.Toolkit.getDefaultToolkit().systemClipboard
+                    .getContents(null)?.getTransferData(java.awt.datatransfer.DataFlavor.stringFlavor)
+                    ?.toString().orEmpty().trim()
+            }.getOrDefault("")
+                .takeIf { clp -> clp.lineSequence().firstOrNull().orEmpty().let { l -> l.startsWith("vless://") || l.startsWith("trojan://") || l.startsWith("ss://") || l.startsWith("hy2://") || l.startsWith("hysteria2://") } }
+                .orEmpty()
+        )
+    }
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     var subUrl by remember { mutableStateOf("") }
     var subName by remember { mutableStateOf("") }
     var importing by remember { mutableStateOf(false) }

@@ -458,6 +458,38 @@ fun SegmentedChip(text: String, selected: Boolean, modifier: Modifier = Modifier
     }
 }
 
+<<<<<<< HEAD
+=======
+/**
+ * Stale-marked latency from the persisted cache: same numeric content as
+ * [LatencyPill] but neutral grey + a small "stale" suffix, so a number from
+ * a previous RUN can never be mistaken for a fresh measurement. Older than
+ * [vpn.core.PingCache.STALE_MS] shows just "stale" without a number.
+ */
+@Composable
+fun CachedLatencyPill(ms: Int, cachedAt: Long, modifier: Modifier = Modifier) {
+    val stale = System.currentTimeMillis() - cachedAt > vpn.core.PingCache.STALE_MS
+    Pill(if (stale) "stale" else "$ms ms · cached", C.TextSecondary, C.Glass, modifier)
+}
+
+/**
+ * ICMP pill for the SERVERS tab only: raw ICMP reachability of the VPS is a
+ * DIAGNOSTIC, not a protocol latency — showing it in the same visual shape as
+ * the end-to-end traffic pill gave one shape two meanings (3.6.13 audit P3-3).
+ * Neutral steel colour, "ICMP" prefix, never animated traffic-pill colours.
+ */
+@Composable
+fun IcmpPill(ms: Int?, failed: Boolean, pinging: Boolean, modifier: Modifier = Modifier) {
+    // While pinging, don't show anything (pill is hidden until first result)
+    if (pinging) return
+    if (ms != null) {
+        Pill("ICMP $ms ms", C.TextSecondary, C.Glass, modifier)
+    } else if (failed) {
+        Pill("ICMP —", C.TextFaint, C.Glass, modifier)
+    }
+}
+
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 /** Latency pill: green <150ms, amber <400ms, red otherwise — animated colors. */
 @Composable
 fun LatencyPill(ms: Int?, failed: Boolean, pinging: Boolean, modifier: Modifier = Modifier) {

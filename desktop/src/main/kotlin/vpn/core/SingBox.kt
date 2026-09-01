@@ -35,7 +35,11 @@ object SingBox {
 
     private val dir: File get() = File(Storage.dataDir, "bin/singbox").apply { mkdirs() }
 
+<<<<<<< HEAD
     private val exeCandidates = listOf("HiddifyCli.exe", "sing-box.exe")
+=======
+    private val exeCandidates = CoreManifest.SINGBOX_EXES
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 
     fun exe(): File? = exeCandidates.map { File(dir, it) }.firstOrNull { it.exists() }
 
@@ -47,6 +51,7 @@ object SingBox {
      * Obtains the core: first from bundled resources, or download if allowed/forced.
      * The bundle must contain HiddifyCli.exe, hiddify-core.dll, libcronet.dll.
      */
+<<<<<<< HEAD
     /** All files the core needs next to it (wintun.dll is required for TUN). */
     private val coreFiles = listOf("HiddifyCli.exe", "hiddify-core.dll", "libcronet.dll", "wintun.dll")
 
@@ -54,6 +59,14 @@ object SingBox {
     private fun coreComplete(): Boolean = exe()?.let { core ->
         coreFiles.all { File(dir, it).exists() }
     } ?: false
+=======
+    /** All files the core needs next to it — see [CoreManifest]. */
+    private val coreFiles = CoreManifest.SINGBOX_FILES
+
+    /** True when every core file is present next to the exe. */
+    private fun coreComplete(): Boolean =
+        exe() != null && CoreManifest.allPresent(dir, coreFiles)
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 
     suspend fun ensureCore(allowDownload: Boolean = true, forceDownload: Boolean = false): File? = withContext(Dispatchers.IO) {
         if (forceDownload) {
@@ -62,7 +75,11 @@ object SingBox {
         // Always (re-)extract the bundled files: a partially downloaded core
         // (e.g. exe present but wintun.dll missing) must be repaired even
         // when the exe already exists.
+<<<<<<< HEAD
         val copied = Resources.extractAll("/bin/singbox", coreFiles, dir)
+=======
+        val copied = Resources.extractAll(CoreManifest.SINGBOX_RES, coreFiles, dir)
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         if (copied > 0) AppLog.i("SingBox", "Extracted $copied files from resources")
         if (coreComplete()) return@withContext exe()
 
@@ -482,6 +499,7 @@ $route
 
     fun kill() {
         val sys = System.getenv("SystemRoot") ?: "C:\\Windows"
+<<<<<<< HEAD
         // Prefer the tracked PID: kills exactly OUR core, never another
         // app's xray/sing-box the user may be running separately.
         lastPid.takeIf { it > 0 }?.let { pid ->
@@ -501,12 +519,35 @@ $route
                 )
             }
         }
+=======
+        val pid = lastPid
+        lastPid = 0
+        killCommands(pid, sys).forEach { HiddenRun.runAndWait(it, timeoutMs = 10_000) }
+    }
+
+    /** Pure decision, same contract as [Xray.killCommands]. */
+    internal fun killCommands(pid: Int, sys: String): List<List<String>> {
+        val exe = "$sys\\System32\\taskkill.exe"
+        if (pid > 0) return listOf(listOf(exe, "/PID", pid.toString(), "/T", "/F"))
+        return exeCandidates.map { listOf(exe, "/IM", it, "/F") }
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     }
 
     /** PID of the core we started most recently (0 = unknown). */
     @Volatile
     private var lastPid: Int = 0
 
+<<<<<<< HEAD
+=======
+    /**
+     * Read-only view for [TrafficStats] (0 = no tracked process).
+     * NOTE: a TUN-mode core started via [startElevated] runs in a different
+     * process tree, so this is 0 there — which is correct, because that session
+     * has a tunnel adapter and TrafficStats reads the adapter instead.
+     */
+    fun trackedPid(): Int = lastPid
+
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     /** Starts the core with [json]; returns true when the proxy port opens. */
     suspend fun start(json: String): Boolean = withContext(Dispatchers.IO) {
         val core = exe() ?: return@withContext false
@@ -519,8 +560,18 @@ $route
         }
         repeat(2) {
             kill()
+<<<<<<< HEAD
             val pid = HiddenRun.startDetached(args, workingDir = dir) ?: return@repeat
             if (pid > 0) lastPid = pid
+=======
+            // A null pid means CreateProcessW itself failed: retry immediately
+            // instead of polling a port for 8s that nothing will ever open.
+            val pid = HiddenRun.startDetached(args, workingDir = dir) ?: run {
+                AppLog.e("SingBox", "could not start ${core.name} (process creation failed)")
+                return@repeat
+            }
+            lastPid = pid
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             var tries = 0
             while (tries < 20) {
                 if (isRunning()) return@withContext true
@@ -537,6 +588,7 @@ $route
      * a port even when the upstream handshake never completes (e.g. a DPI
      * dropping WireGuard packets), so a real request is the only proof.
      * Tries the proxy-mode port first, then the TUN probe port.
+<<<<<<< HEAD
      */
     suspend fun verifyTraffic(timeoutMs: Int = 9000): Boolean = withContext(Dispatchers.IO) {
         verifyViaProxy(ProxyPorts.socks, timeoutMs) || verifyViaProxy(ProxyPorts.tunProbe, timeoutMs)
@@ -557,11 +609,21 @@ $route
         code in 200..399
     }.getOrDefault(false)
 
+=======
+     * See [TrafficProbe]: HTTPS-first, several providers, portal-proof.
+     */
+    suspend fun verifyTraffic(timeoutMs: Int = 9000): Boolean = withContext(Dispatchers.IO) {
+        TrafficProbe.throughProxy(ProxyPorts.socks, timeoutMs) ||
+            TrafficProbe.throughProxy(ProxyPorts.tunProbe, timeoutMs)
+    }
+
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     /**
      * TUN-mode verification: with auto_route the request must go through the
      * tunnel without any proxy setting, so a direct request is the proof.
      */
     suspend fun verifyDirectTraffic(timeoutMs: Int = 12000): Boolean = withContext(Dispatchers.IO) {
+<<<<<<< HEAD
         runCatching {
             val conn = java.net.URL("http://cp.cloudflare.com/generate_204").openConnection()
                 as java.net.HttpURLConnection
@@ -572,6 +634,9 @@ $route
             conn.disconnect()
             code in 200..399
         }.getOrDefault(false)
+=======
+        TrafficProbe.direct(timeoutMs)
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     }
 
     /**

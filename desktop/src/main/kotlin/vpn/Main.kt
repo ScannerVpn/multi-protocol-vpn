@@ -15,6 +15,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+<<<<<<< HEAD
+=======
+import androidx.compose.foundation.layout.BoxWithConstraints
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -62,11 +66,22 @@ import vpn.core.AppLog
 import vpn.theme.C
 import vpn.theme.MultiVpnTheme
 import vpn.ui.AppState
+<<<<<<< HEAD
+=======
+import vpn.ui.AppTitleBar
+import vpn.ui.LayoutMode
+import vpn.ui.LocalLayout
+import vpn.ui.ProvideLayout
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 import vpn.ui.AuroraBackground
 import vpn.ui.ConfigsScreen
 import vpn.ui.HomeScreen
 import vpn.ui.ServersScreen
 import vpn.ui.SettingsScreen
+<<<<<<< HEAD
+=======
+import vpn.ui.WindowResize
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 import javax.swing.JOptionPane
 import javax.swing.SwingUtilities
 import kotlin.system.exitProcess
@@ -115,6 +130,7 @@ fun main() {
         CompositionLocalProvider(
             LocalWindowExceptionHandlerFactory provides loggingExceptionHandlerFactory,
         ) {
+<<<<<<< HEAD
         Window(
             onCloseRequest = {
                 // Closing the window must fully quit the app: kill the proxy
@@ -127,6 +143,81 @@ fun main() {
             state = rememberWindowState(width = 1280.dp, height = 800.dp),
         ) {
             window.minimumSize = Dimension(980, 640)
+=======
+        val windowState = rememberWindowState(width = 430.dp, height = 780.dp)
+        val closeToTray = vpn.ui.TraySettings.closeToTray
+        val quit: () -> Unit = {
+            // Closing the window must fully quit the app: kill the proxy
+            // cores and clear the system proxy so nothing is left running
+            // in the background, then exit the process for real.
+            vpn.ui.TrayIconManager.remove()
+            AppState.shutdown()
+            exitApplication()
+        }
+        // Minimize-to-tray close: with closeToTray on, the X button (and the
+        // in-app titlebar close) only HIDES the window — the tray icon's
+        // "Open" / double-click restores it, "Quit" really exits.
+        val requestClose: () -> Unit = {
+            if (closeToTray) {
+                windowState.isMinimized = true // hide without killing the process
+                // On Windows an undecorated window has no taskbar-presence
+                // toggle via Compose; hiding via a frame call is the reliable
+                // route (the window still exists, tray restores it).
+                runCatching { java.awt.Window.getWindows().firstOrNull()?.isVisible = false }
+            } else {
+                quit()
+            }
+        }
+        Window(
+            onCloseRequest = { requestClose() },
+            title = "MultiVPN — Multi-Protocol Client",
+            state = windowState,
+            // The OS title bar was the one strip that ignored the app's theme
+            // (light grey Windows chrome on a dark navy app) and it repeated the
+            // app name the sidebar already shows. The window is undecorated and
+            // [AppTitleBar] draws minimise / maximise / close inside the app.
+            //
+            // Undecorated ALSO removes the OS resize border, so resizable stays
+            // true and the frame keeps its own grips: without transparent=true
+            // Compose keeps a native resizable frame under the undecorated
+            // surface, which is exactly what we want (drag-to-resize still
+            // works, no rounded-corner artefacts).
+            undecorated = true,
+            resizable = true,
+        ) {
+            // 380x620 is the phone-shaped floor the COMPACT layout is designed
+            // for; the old 980x640 minimum was what forced the desktop-only
+            // layout in the first place — the window could not be made small
+            // enough to need anything else.
+            window.minimumSize = Dimension(380, 620)
+            // The AWT frame's own background shows through the non-client inset
+            // that an undecorated+resizable window keeps (measured: 7px at the
+            // top, client origin sits at window+7). Its default is a LIGHT
+            // system colour, which is the white hairline visible above the
+            // title bar. Paint it the same navy as the title bar so the seam
+            // disappears whether DWM composites it or PrintWindow captures it.
+            window.background = java.awt.Color(0x07, 0x0D, 0x19)
+            runCatching { window.contentPane.background = java.awt.Color(0x07, 0x0D, 0x19) }
+            // undecorated=true also strips WS_THICKFRAME, i.e. the OS resize
+            // border — `resizable = true` alone does NOT bring it back. Put the
+            // style bit back so edge/corner dragging and Aero snap keep working
+            // (verified: style 0x960B0000 had WS_THICKFRAME clear), and hide the
+            // Windows 11 DWM border line while we are there.
+            LaunchedEffect(Unit) { WindowResize.enableFor(window) }
+            // Tray icon: installed once; reflects connection state via AppState.
+            LaunchedEffect(Unit) {
+                vpn.ui.TrayIconManager.install(
+                    onShow = {
+                        window.isVisible = true
+                        window.toFront()
+                    },
+                    onQuit = quit,
+                )
+            }
+            LaunchedEffect(AppState.vpnStatus) {
+                vpn.ui.TrayIconManager.updateStatus(AppState.vpnStatus, AppState.activeConfig?.name)
+            }
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             // When a second monitor is attached, open the window there (handy
             // while testing on a separate display).
             runCatching {
@@ -136,7 +227,20 @@ fun main() {
                     window.setLocation(bounds.x + 50, bounds.y + 50)
                 }
             }
+<<<<<<< HEAD
             MultiVpnTheme { App() }
+=======
+            MultiVpnTheme {
+                Column(Modifier.fillMaxSize()) {
+                    AppTitleBar(
+                        state = windowState,
+                        title = "MultiVPN — Multi-Protocol Client",
+                        onClose = quit,
+                    )
+                    App()
+                }
+            }
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         }
         }
     }
@@ -148,11 +252,22 @@ fun main() {
 
 private data class NavItem(val label: String, val icon: ImageVector)
 
+<<<<<<< HEAD
+=======
+private val NAV_ITEMS = listOf(
+    NavItem("Dashboard", Icons.Filled.Home),
+    NavItem("Servers", Icons.Filled.Dns),
+    NavItem("Configs", Icons.Filled.Layers),
+    NavItem("Settings", Icons.Filled.Tune),
+)
+
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 @Composable
 fun App() {
     LaunchedEffect(Unit) { AppState.load() }
     var tab by remember { mutableStateOf(0) }
 
+<<<<<<< HEAD
     Box(Modifier.fillMaxSize()) {
         AuroraBackground(Modifier.fillMaxSize())
 
@@ -183,6 +298,102 @@ fun App() {
                         else -> SettingsScreen()
                     }
                 }
+=======
+    // ONE place measures the window; everything downstream reads LocalLayout.
+    // BoxWithConstraints gives the real content width, which is what matters —
+    // the window rect includes a 7px non-client inset per side.
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val widthDp = maxWidth.value
+        ProvideLayout(widthDp) {
+            val layout = LocalLayout.current
+            Box(Modifier.fillMaxSize()) {
+                AuroraBackground(Modifier.fillMaxSize())
+
+                val screens: @Composable () -> Unit = {
+                    AnimatedContent(
+                        targetState = tab,
+                        transitionSpec = {
+                            val forward = targetState > initialState
+                            val spec = tween<IntOffset>(320)
+                            (fadeIn(tween(260)) +
+                                slideInHorizontally(spec) { full -> if (forward) full / 5 else -full / 5 } +
+                                scaleIn(initialScale = 0.985f, animationSpec = tween(320))) togetherWith
+                                (fadeOut(tween(150)) +
+                                    slideOutHorizontally(tween(200)) { full -> if (forward) -full / 7 else full / 7 })
+                        },
+                        label = "screen",
+                    ) { t ->
+                        when (t) {
+                            0 -> HomeScreen()
+                            1 -> ServersScreen()
+                            2 -> ConfigsScreen()
+                            else -> SettingsScreen()
+                        }
+                    }
+                }
+
+                if (layout.compact) {
+                    // Phone layout: a 212dp rail would eat a third of the width,
+                    // so navigation moves to a bottom bar and the screen gets the
+                    // whole width.
+                    Column(Modifier.fillMaxSize()) {
+                        Box(Modifier.weight(1f).fillMaxWidth()) { screens() }
+                        BottomNav(tab, onSelect = { tab = it })
+                    }
+                } else {
+                    // Row + weight(1f) is load-bearing: screens used to be direct
+                    // children of a window-wide Box while the sidebar (a later
+                    // child) drew OVER them, hiding the left part of every page.
+                    // Now the sidebar owns its column and each screen only
+                    // receives what remains.
+                    Row(Modifier.fillMaxSize()) {
+                        Sidebar(tab, onSelect = { tab = it })
+                        Box(Modifier.weight(1f).fillMaxHeight()) { screens() }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Compact-mode navigation. A bottom bar rather than a hamburger drawer: four
+ * destinations is exactly the range a bar handles well, and it keeps every tab
+ * one tap away instead of two.
+ */
+@Composable
+private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
+    Surface(
+        color = Color(0xFF0B1120),
+        border = BorderStroke(1.dp, C.Border),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+            NAV_ITEMS.forEachIndexed { i, item ->
+                val isSelected = i == selected
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onSelect(i) }
+                        .padding(vertical = 7.dp),
+                ) {
+                    Icon(
+                        item.icon,
+                        item.label,
+                        tint = if (isSelected) C.Accent else C.TextSecondary,
+                        modifier = Modifier.size(19.dp),
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        item.label,
+                        fontSize = 9.5.sp,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                        color = if (isSelected) C.TextPrimary else C.TextSecondary,
+                    )
+                }
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             }
         }
     }
@@ -190,6 +401,7 @@ fun App() {
 
 @Composable
 private fun Sidebar(selected: Int, onSelect: (Int) -> Unit) {
+<<<<<<< HEAD
     val items = listOf(
         NavItem("Dashboard", Icons.Filled.Home),
         NavItem("Servers", Icons.Filled.Dns),
@@ -202,6 +414,23 @@ private fun Sidebar(selected: Int, onSelect: (Int) -> Unit) {
         modifier = Modifier.fillMaxHeight().width(212.dp),
     ) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 20.dp).fillMaxHeight()) {
+=======
+    val layout = LocalLayout.current
+    val items = NAV_ITEMS
+    Surface(
+        color = Color(0xFF0B1120),
+        border = BorderStroke(1.dp, C.Border),
+        modifier = Modifier.fillMaxHeight().width(layout.sidebarWidth),
+    ) {
+        Column(
+            Modifier
+                .padding(
+                    horizontal = if (layout.mode == LayoutMode.MEDIUM) 10.dp else 14.dp,
+                    vertical = if (layout.mode == LayoutMode.MEDIUM) 14.dp else 20.dp,
+                )
+                .fillMaxHeight(),
+        ) {
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             // Logo
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 8.dp)) {
                 Box(
@@ -306,7 +535,11 @@ private fun Sidebar(selected: Int, onSelect: (Int) -> Unit) {
                     }
                     Spacer(Modifier.height(7.dp))
                     Text("Multi-Protocol Client", fontSize = 9.5.sp, color = C.TextFaint)
+<<<<<<< HEAD
                     Text("v3.6.11 · x86_64", fontSize = 9.5.sp, color = C.TextFaint)
+=======
+                    Text(vpn.BuildInfo.LABEL, fontSize = 9.5.sp, color = C.TextFaint)
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 }
             }
         }

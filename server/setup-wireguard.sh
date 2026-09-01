@@ -16,7 +16,16 @@
 #   2    + S3/S4, I1-I5 signature packets (CPS)
 #   3    + HeaderProtectionKey, ContentPaddingAddition, timing ranges
 #   3.1  + RandomTrailers, DisableCookies
+# set -e alone let a FAILING command inside a pipeline pass silently: the
+# pipeline's status is its LAST command's, so `read_conf | grep ... | awk`
+# reported success even when read_conf died, and the script carried on with an
+# empty value (writing a half-built config). -o pipefail makes the pipeline
+# fail with its first failing stage; every place where an empty result is a
+# legitimate outcome ends in `|| true` explicitly.
+# (-u is deliberately NOT enabled: several optional variables are read before
+# they are conditionally assigned, and this script cannot be re-tested here.)
 set -e
+set -o pipefail
 
 SERVER_ADDR="${1:?usage: setup-wireguard.sh <ip> [standard|amnezia] [awg-version]}"
 MODE="${2:-standard}"
@@ -80,6 +89,68 @@ mkdir -p "$CLIENT_OUT"; chmod 700 "$CLIENT_OUT"
 # "iptables -C -p udp ..." always errors, so every provision run used to
 # append another duplicate INPUT rule.
 ipt_ensure() { iptables -C INPUT "$@" 2>/dev/null || iptables -I INPUT 1 "$@"; }
+
+# ---------------------------------------------------------------------------
+# Rule persistence.
+#
+# NOTHING here used to survive a reboot: the NAT/MASQUERADE and INPUT rules
+# were added to the live table only, so after the first VPS restart clients
+# still connected (the handshake works) but had NO internet — the single most
+# confusing failure mode this project produced. Persist explicitly.
+#
+# Order of preference: netfilter-persistent (Debian/Ubuntu, the package the
+# ikev2 script already installs), then iptables-save into the file that
+# package reads, then iptables-services (RHEL family). Never fatal: a server
+# whose distro has none of them still works until reboot, and says so.
+# ---------------------------------------------------------------------------
+persist_iptables() {
+    if command -v netfilter-persistent > /dev/null 2>&1; then
+        netfilter-persistent save > /dev/null 2>&1 && {
+            info "firewall rules persisted (netfilter-persistent)"; return 0; }
+    fi
+    if command -v iptables-save > /dev/null 2>&1; then
+        mkdir -p /etc/iptables 2>/dev/null || true
+        if iptables-save > /etc/iptables/rules.v4 2>/dev/null; then
+            info "firewall rules saved to /etc/iptables/rules.v4"
+            # Without the package, that file is never re-applied at boot.
+            command -v netfilter-persistent > /dev/null 2>&1 || \
+                warn "install iptables-persistent so /etc/iptables/rules.v4 is restored at boot"
+            return 0
+        fi
+    fi
+    if command -v service > /dev/null 2>&1 && service iptables save > /dev/null 2>&1; then
+        info "firewall rules persisted (iptables service)"
+        return 0
+    fi
+    warn "could NOT persist firewall rules - they will be lost on reboot"
+    warn "install iptables-persistent (Debian/Ubuntu) and re-run to fix that"
+    return 0
+}
+
+# Scoped forwarding for a VPN subnet: allow subnet -> WAN and the established
+# way back, without touching the global FORWARD policy (that would weaken
+# Docker/container isolation). Idempotent.
+#
+# Docker sets FORWARD's policy to DROP, so on ANY host running containers the
+# NAT rule alone forwarded nothing — clients connected and had no internet.
+allow_forward() { # allow_forward <subnet-cidr> <wan-if or empty>
+    local subnet="$1" wan="$2"
+    if [ -n "$wan" ]; then
+        iptables -C FORWARD -s "$subnet" -o "$wan" -j ACCEPT 2>/dev/null || \
+            iptables -I FORWARD 1 -s "$subnet" -o "$wan" -j ACCEPT
+        iptables -C FORWARD -d "$subnet" -i "$wan" -m conntrack \
+            --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || \
+            iptables -I FORWARD 1 -d "$subnet" -i "$wan" -m conntrack \
+                --ctstate RELATED,ESTABLISHED -j ACCEPT
+    else
+        iptables -C FORWARD -s "$subnet" -j ACCEPT 2>/dev/null || \
+            iptables -I FORWARD 1 -s "$subnet" -j ACCEPT
+        iptables -C FORWARD -d "$subnet" -m conntrack \
+            --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || \
+            iptables -I FORWARD 1 -d "$subnet" -m conntrack \
+                --ctstate RELATED,ESTABLISHED -j ACCEPT
+    fi
+}
 
 # ---------------------------------------------------------------- detection
 # Requested flavor decides the search order: amnezia mode prefers an
@@ -183,11 +254,19 @@ else
 net.ipv4.ip_forward = 1
 SYSCTL
     sysctl --system > /dev/null 2>&1 || true
+    # BBR congestion control (best-effort; see setup-ikev2.sh).
+    if modprobe tcp_bbr 2>/dev/null && sysctl -w net.core.default_qdisc=fq > /dev/null 2>&1 && \
+       sysctl -w net.ipv4.tcp_congestion_control=bbr > /dev/null 2>&1; then
+        printf 'net.core.default_qdisc = fq\nnet.ipv4.tcp_congestion_control = bbr\n' >> /etc/sysctl.d/99-multivpn-wg.conf
+        info "BBR congestion control enabled"
+    else
+        info "BBR unavailable on this kernel - keeping default congestion control"
+    fi
 
     info "Generating server keys..."
     umask 077
     SERVER_PRIV="$(run_tool genkey)"
-    SERVER_PUB="$(echo "$SERVER_PRIV" | run_tool pubkey)"
+    SERVER_PUB="$(printf '%s' "$SERVER_PRIV" | run_tool pubkey)"
     {
         echo "[Interface]"
         echo "Address = 10.2.0.1/24"
@@ -205,7 +284,7 @@ PORT="$(read_conf | grep -m1 -oE '^ListenPort[[:space:]]*=[[:space:]]*[0-9]+' | 
 
 # NAT + firewall (idempotent, both host and fresh paths)
 if [ -z "$DOCKER_AWG" ]; then
-    WAN_IF="$(ip route show default 2>/dev/null | awk '{print $5; exit}')"
+    WAN_IF="$(ip route show default 2>/dev/null | awk '{print $5; exit}' || true)"
     if [ -n "$WAN_IF" ]; then
         iptables -t nat -C POSTROUTING -s ${SUBNET_PREFIX}0/24 -o "$WAN_IF" -j MASQUERADE 2>/dev/null || \
             iptables -t nat -A POSTROUTING -s ${SUBNET_PREFIX}0/24 -o "$WAN_IF" -j MASQUERADE
@@ -213,15 +292,29 @@ if [ -z "$DOCKER_AWG" ]; then
         iptables -t nat -C POSTROUTING -s ${SUBNET_PREFIX}0/24 -j MASQUERADE 2>/dev/null || \
             iptables -t nat -A POSTROUTING -s ${SUBNET_PREFIX}0/24 -j MASQUERADE
     fi
+    # NAT alone is not enough on a host with Docker (FORWARD policy DROP):
+    # the client connects, the handshake completes, and nothing routes.
+    allow_forward "${SUBNET_PREFIX}0/24" "$WAN_IF"
     ipt_ensure -p udp --dport "$PORT" -j ACCEPT
     if command -v ufw > /dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
         ufw allow "$PORT/udp" > /dev/null 2>&1 || true
+        ufw route allow proto udp from "${SUBNET_PREFIX}0/24" > /dev/null 2>&1 || true
     fi
+    persist_iptables
 fi
 
 # ------------------------------------------------- next client IP + peer
-LAST="$(read_conf | grep -oE "${SUBNET_PREFIX}[0-9]+" | awk -F. '{print $4}' | sort -n | tail -1)"
+# An empty match is legitimate here (a fresh conf has no peer yet), and with
+# `set -o pipefail` a non-matching grep would abort the whole script — hence
+# the explicit `|| true`.
+LAST="$(read_conf | grep -oE "${SUBNET_PREFIX}[0-9]+" | awk -F. '{print $4}' | sort -n | tail -1 || true)"
 N=$(( ${LAST:-1} + 1 ))
+# /24 pool: .1 is the server and .255 is broadcast. Without this the 254th
+# client got an invalid address (x.x.x.255, then x.x.x.256) and a config that
+# silently could not route.
+if [ "$N" -gt 254 ]; then
+    error "the ${SUBNET_PREFIX}0/24 pool is full ($((N - 1)) peers). Remove unused [Peer] blocks from the server config, or widen the subnet."
+fi
 CLIENT_IP="${SUBNET_PREFIX}${N}"
 info "Client IP will be $CLIENT_IP"
 
@@ -241,14 +334,31 @@ if [ -n "$DOCKER_AWG" ]; then
 else
     CLIENT_PRIV="$(run_tool genkey)"
     CLIENT_PUB="$(printf '%s' "$CLIENT_PRIV" | run_tool pubkey)"
-    CLIENT_PSK=""
-    PEER_TXT="$(printf '\n[Peer]\n# multivpn-client-%s\nPublicKey = %s\nAllowedIPs = %s/32\n' \
-        "$N" "$CLIENT_PUB" "$CLIENT_IP")"
+    # A pre-shared key adds a symmetric layer on top of the Noise handshake
+    # (post-quantum hedge, and it makes an unauthenticated peer's packets
+    # undecryptable). The docker path always generated one; the host path left
+    # it empty for no reason, so host installs were strictly weaker.
+    CLIENT_PSK="$(run_tool genpsk 2>/dev/null || true)"
+    if [ -n "$CLIENT_PSK" ]; then
+        PEER_TXT="$(printf '\n[Peer]\n# multivpn-client-%s\nPublicKey = %s\nPresharedKey = %s\nAllowedIPs = %s/32\n' \
+            "$N" "$CLIENT_PUB" "$CLIENT_PSK" "$CLIENT_IP")"
+    else
+        warn "$TOOL genpsk unavailable - peer created without a pre-shared key"
+        PEER_TXT="$(printf '\n[Peer]\n# multivpn-client-%s\nPublicKey = %s\nAllowedIPs = %s/32\n' \
+            "$N" "$CLIENT_PUB" "$CLIENT_IP")"
+    fi
     append_peer "$PEER_TXT"
     if run_tool show "$IFACE" > /dev/null 2>&1; then
-        printf '[Peer]\nPublicKey = %s\nAllowedIPs = %s/32\n' "$CLIENT_PUB" "$CLIENT_IP" > /tmp/multivpn_peer
-        run_tool addconf "$IFACE" /tmp/multivpn_peer && info "Peer added to the running interface."
-        rm -f /tmp/multivpn_peer
+        PEER_TMP="$(mktemp /tmp/multivpn_peer.XXXXXX)"
+        if [ -n "$CLIENT_PSK" ]; then
+            printf '[Peer]\nPublicKey = %s\nPresharedKey = %s\nAllowedIPs = %s/32\n' \
+                "$CLIENT_PUB" "$CLIENT_PSK" "$CLIENT_IP" > "$PEER_TMP"
+        else
+            printf '[Peer]\nPublicKey = %s\nAllowedIPs = %s/32\n' \
+                "$CLIENT_PUB" "$CLIENT_IP" > "$PEER_TMP"
+        fi
+        run_tool addconf "$IFACE" "$PEER_TMP" && info "Peer added to the running interface."
+        rm -f "$PEER_TMP"
     else
         "$QUICK" up "$IFACE" && info "Interface $IFACE started."
         systemctl enable "wg-quick@${IFACE}" > /dev/null 2>&1 || true

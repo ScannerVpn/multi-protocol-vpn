@@ -15,6 +15,9 @@
 # fresh installs are redirected to VLESS+Reality with a warning).
 
 set -e
+# A failing pipeline stage used to pass silently (set -e only checks the LAST
+# command). Places where an empty result is legitimate end in `|| true`.
+set -o pipefail
 
 SERVER_ADDR="${1:?usage: setup-xray.sh <ip> [vless|trojan|shadowsocks] [scan]}"
 # Bare IPv6 literals produce unparseable links (vless://u@2001:db8::1:443);
@@ -33,6 +36,26 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[+]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
 error() { echo -e "${RED}[-]${NC} $1"; exit 1; }
+
+# The INPUT rules added below are lost on the next reboot unless persisted —
+# the port would silently close and the client could no longer connect.
+persist_iptables() {
+    if command -v netfilter-persistent > /dev/null 2>&1; then
+        netfilter-persistent save > /dev/null 2>&1 && {
+            info "firewall rules persisted (netfilter-persistent)"; return 0; }
+    fi
+    if command -v iptables-save > /dev/null 2>&1; then
+        mkdir -p /etc/iptables 2>/dev/null || true
+        if iptables-save > /etc/iptables/rules.v4 2>/dev/null; then
+            info "firewall rules saved to /etc/iptables/rules.v4"
+            command -v netfilter-persistent > /dev/null 2>&1 || \
+                warn "install iptables-persistent so /etc/iptables/rules.v4 is restored at boot"
+            return 0
+        fi
+    fi
+    warn "could NOT persist firewall rules - they will be lost on reboot"
+    return 0
+}
 
 [[ $EUID -ne 0 ]] && error "Run as root: sudo bash $0"
 
@@ -234,23 +257,120 @@ fi
 
 info "Installing Xray core (official installer)..."
 command -v curl > /dev/null 2>&1 || apt-get install -y -qq curl > /dev/null 2>&1 || true
-bash -c "$(curl -L -s https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install > /dev/null 2>&1 || \
-    error "Xray install failed (is github reachable from the server?)"
+# The upstream installer is fetched from a PINNED COMMIT and checked against a
+# pinned SHA256 before it runs.
+#
+# `bash -c "$(curl -L -s .../raw/main/install-release.sh)"` — the previous
+# version — executes whatever the branch head contains AT THIS MOMENT, as root.
+# A single malicious push to XTLS/Xray-install (or a MITM on the redirect) was
+# remote root on every server this script ever provisioned, with no audit trail.
+# The Xray-install repo publishes NO git tags, so a commit SHA is the only
+# immutable reference available; the content hash is belt-and-braces.
+#
+# TO UPGRADE: review the diff between the pinned commit and the new one, then
+# update BOTH constants in the same reviewed commit.
+XRAY_INSTALL_COMMIT="e741a4f56d368afbb9e5be3361b40c4552d3710d"
+XRAY_INSTALL_SHA256="7f70c95f6b418da8b4f4883343d602964915e28748993870fd554383afdbe555"
+XRAY_INSTALL_URL="https://raw.githubusercontent.com/XTLS/Xray-install/${XRAY_INSTALL_COMMIT}/install-release.sh"
+XRAY_INSTALLER="$(mktemp /tmp/xray-install.XXXXXX.sh)"
+# --proto '=https' --tlsv1.2 refuse a protocol downgrade; -f fails on an HTTP
+# error page instead of handing it to bash.
+curl -fsSL --proto '=https' --tlsv1.2 --max-time 60 "$XRAY_INSTALL_URL" -o "$XRAY_INSTALLER" || \
+    error "could not download the pinned Xray installer (commit ${XRAY_INSTALL_COMMIT:0:12})"
+[ -s "$XRAY_INSTALLER" ] || error "downloaded Xray installer is empty"
+if command -v sha256sum > /dev/null 2>&1; then
+    GOT="$(sha256sum "$XRAY_INSTALLER" | cut -d' ' -f1)"
+elif command -v openssl > /dev/null 2>&1; then
+    GOT="$(openssl dgst -sha256 -r "$XRAY_INSTALLER" | cut -d' ' -f1)"
+else
+    GOT=""
+    warn "no sha256sum/openssl - cannot verify the installer's hash"
+fi
+if [ -n "$GOT" ] && [ "$GOT" != "$XRAY_INSTALL_SHA256" ]; then
+    rm -f "$XRAY_INSTALLER"
+    error "Xray installer SHA256 mismatch (expected $XRAY_INSTALL_SHA256, got $GOT) - refusing to run it as root"
+fi
+# Structural sanity check for the no-hash-tool case: the real installer defines
+# these functions; a captive-portal HTML page or a truncated download does not.
+grep -qE '^\s*install_software\s*\(\)' "$XRAY_INSTALLER" || \
+    error "downloaded file does not look like the Xray installer - refusing to run it as root"
+bash "$XRAY_INSTALLER" @ install > /dev/null 2>&1 || \
+    { rm -f "$XRAY_INSTALLER"; error "Xray install failed (is github reachable from the server?)"; }
+rm -f "$XRAY_INSTALLER"
 XRAY_BIN=/usr/local/bin/xray
 [ -x "$XRAY_BIN" ] || error "xray binary not found after install"
 
-PORT="$(( (RANDOM % 30000) + 10000 ))"
+# BBR congestion control: measurably faster tunnels on lossy/filtered
+# paths. Best-effort - an old kernel without bbr keeps cubic.
+if modprobe tcp_bbr 2>/dev/null && sysctl -w net.core.default_qdisc=fq > /dev/null 2>&1 && \
+   sysctl -w net.ipv4.tcp_congestion_control=bbr > /dev/null 2>&1; then
+    printf 'net.core.default_qdisc = fq\nnet.ipv4.tcp_congestion_control = bbr\n' > /etc/sysctl.d/99-multivpn-xray.conf
+    sysctl --system > /dev/null 2>&1 || true
+    info "BBR congestion control enabled"
+else
+    info "BBR unavailable on this kernel - keeping default congestion control"
+fi
+
+# A random high port that is NOT already in use. The previous version took the
+# first random number, so it could land on an occupied port and xray then
+# failed to bind (the script reported success and nothing listened).
+pick_free_port() {
+    local p tries=0
+    while [ "$tries" -lt 40 ]; do
+        p="$(( (RANDOM % 30000) + 10000 ))"
+        if command -v ss > /dev/null 2>&1; then
+            ss -Hltnu "sport = :$p" 2>/dev/null | grep -q . || { echo "$p"; return 0; }
+        elif command -v netstat > /dev/null 2>&1; then
+            netstat -tuln 2>/dev/null | grep -qE "[:.]$p[[:space:]]" || { echo "$p"; return 0; }
+        else
+            echo "$p"; return 0
+        fi
+        tries=$((tries + 1))
+    done
+    echo "$(( (RANDOM % 30000) + 10000 ))"
+}
+PORT="$(pick_free_port)"
 UUID="$("$XRAY_BIN" uuid)"
-PASS="$(head -c 16 /dev/urandom | base64 | tr -d '=+/' | head -c 20)"
+# No trailing `head -c` in the pipeline: with `set -o pipefail` a truncating
+# head closes the pipe early and a large enough producer dies with SIGPIPE
+# (exit 141), which would abort the whole script. Verified: the old 24-byte
+# form happens to fit the pipe buffer, but the pattern is a trap — cut the
+# string in the shell instead, where nothing can be killed.
+PASS_RAW="$(head -c 24 /dev/urandom | base64 | tr -d '=+/
+')"
+PASS="${PASS_RAW:0:24}"
 mkdir -p /usr/local/etc/xray
 umask 077
 
 if [ "$VARIANT" = "vless" ]; then
     KEYOUT="$("$XRAY_BIN" x25519)"
-    PRIV="$(echo "$KEYOUT" | grep -oE 'Private key: .*' | cut -d' ' -f3)"
-    PBK="$(echo "$KEYOUT" | grep -oE 'Public key: .*' | cut -d' ' -f3)"
-    [ -z "$PRIV" ] || [ -z "$PBK" ] && error "x25519 key generation failed"
-    SNI="www.microsoft.com"
+    PRIV="$(printf '%s' "$KEYOUT" | grep -oE 'Private key: .*' | cut -d' ' -f3 || true)"
+    PBK="$(printf '%s' "$KEYOUT" | grep -oE 'Public key: .*' | cut -d' ' -f3 || true)"
+    # `[ -z A ] || [ -z B ] && error` is a precedence trap: when A is non-empty
+    # the || short-circuits into the && and error runs anyway on some shells.
+    # Test them explicitly.
+    if [ -z "$PRIV" ] || [ -z "$PBK" ]; then error "x25519 key generation failed"; fi
+    # Reality SNI: a HARDCODED www.microsoft.com made every server this script
+    # ever provisioned share one fingerprint — trivially enumerable by a censor
+    # ("all traffic claiming microsoft.com on a random high port"). Pick one at
+    # random from a set of high-traffic TLS 1.3 hosts, and prefer one that the
+    # server can actually reach (Reality proxies the real handshake to it).
+    SNI_CANDIDATES="www.microsoft.com www.apple.com www.cloudflare.com www.bing.com dl.google.com www.icloud.com www.samsung.com aws.amazon.com"
+    SNI=""
+    for cand in $(printf '%s\n' $SNI_CANDIDATES | shuf 2>/dev/null || printf '%s\n' $SNI_CANDIDATES); do
+        if command -v curl > /dev/null 2>&1; then
+            if curl -sS --max-time 6 --proto '=https' --tlsv1.3 -o /dev/null "https://$cand" 2>/dev/null; then
+                SNI="$cand"; break
+            fi
+        else
+            SNI="$cand"; break
+        fi
+    done
+    [ -z "$SNI" ] && SNI="www.microsoft.com"
+    # A non-empty shortId is required by some clients and adds another
+    # per-server variable; "" alone was another shared fingerprint.
+    SHORT_ID="$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    info "Reality front: $SNI (shortId $SHORT_ID)"
     cat > /usr/local/etc/xray/config.json << XEOF
 {
   "log": {"loglevel": "warning"},
@@ -269,7 +389,7 @@ if [ "$VARIANT" = "vless" ]; then
         "dest": "$SNI:443",
         "serverNames": ["$SNI"],
         "privateKey": "$PRIV",
-        "shortIds": [""]
+        "shortIds": ["$SHORT_ID"]
       }
     }
   }],
@@ -282,9 +402,17 @@ XEOF
     if command -v ufw > /dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
         ufw allow "$PORT/tcp" > /dev/null 2>&1 || true
     fi
-    echo "MULTIVPN-LINK: vless://$UUID@$LINK_ADDR:$PORT?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$SNI&fp=chrome&pbk=$PBK&type=tcp&sid=#MultiVPN-VLESS"
+    persist_iptables
+    echo "MULTIVPN-LINK: vless://$UUID@$LINK_ADDR:$PORT?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$SNI&fp=chrome&pbk=$PBK&type=tcp&sid=$SHORT_ID#MultiVPN-VLESS"
     info "VLESS+Reality ready on port $PORT (flow xtls-rprx-vision)."
 elif [ "$VARIANT" = "shadowsocks" ]; then
+    # Shadowsocks-2022 (blake3-aes-256-gcm) instead of the legacy AEAD cipher.
+    # The legacy chacha20-ietf-poly1305 stream has no replay protection and no
+    # per-connection salt binding, which is exactly what active probing
+    # exploits — and the README already advertised "Shadowsocks-2022".
+    # SS-2022 requires a 32-byte base64 PSK, not a passphrase.
+    SS_METHOD="2022-blake3-aes-256-gcm"
+    SS_PSK="$(head -c 32 /dev/urandom | base64 -w0)"
     cat > /usr/local/etc/xray/config.json << XEOF
 {
   "log": {"loglevel": "warning"},
@@ -293,8 +421,8 @@ elif [ "$VARIANT" = "shadowsocks" ]; then
     "port": $PORT,
     "protocol": "shadowsocks",
     "settings": {
-      "method": "chacha20-ietf-poly1305",
-      "password": "$PASS",
+      "method": "$SS_METHOD",
+      "password": "$SS_PSK",
       "network": "tcp,udp"
     }
   }],
@@ -302,15 +430,39 @@ elif [ "$VARIANT" = "shadowsocks" ]; then
 }
 XEOF
     systemctl enable xray > /dev/null 2>&1 || true
-    systemctl restart xray || error "xray failed to start (check journalctl -u xray)"
+    # An xray build too old for SS-2022 refuses to start. Fall back to the
+    # legacy AEAD cipher rather than leaving the server dead, and say so.
+    if ! systemctl restart xray 2>/dev/null || ! systemctl is-active --quiet xray; then
+        warn "xray rejected $SS_METHOD (build too old?) - falling back to chacha20-ietf-poly1305"
+        SS_METHOD="chacha20-ietf-poly1305"
+        SS_PSK="$PASS"
+        cat > /usr/local/etc/xray/config.json << XEOF
+{
+  "log": {"loglevel": "warning"},
+  "inbounds": [{
+    "listen": "0.0.0.0",
+    "port": $PORT,
+    "protocol": "shadowsocks",
+    "settings": {
+      "method": "$SS_METHOD",
+      "password": "$SS_PSK",
+      "network": "tcp,udp"
+    }
+  }],
+  "outbounds": [{"protocol": "freedom"}]
+}
+XEOF
+        systemctl restart xray || error "xray failed to start (check journalctl -u xray)"
+    fi
     iptables -C INPUT -p tcp --dport "$PORT" -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p tcp --dport "$PORT" -j ACCEPT
     iptables -C INPUT -p udp --dport "$PORT" -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p udp --dport "$PORT" -j ACCEPT
     if command -v ufw > /dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
         ufw allow "$PORT" > /dev/null 2>&1 || true
     fi
-    B64="$(printf '%s:%s' "chacha20-ietf-poly1305" "$PASS" | base64 -w0)"
+    persist_iptables
+    B64="$(printf '%s:%s' "$SS_METHOD" "$SS_PSK" | base64 -w0)"
     echo "MULTIVPN-LINK: ss://$B64@$LINK_ADDR:$PORT#MultiVPN-SS"
-    info "Shadowsocks ready on port $PORT."
+    info "Shadowsocks ($SS_METHOD) ready on port $PORT."
 else
     error "Unknown variant: $VARIANT (use vless|trojan|shadowsocks)"
 fi

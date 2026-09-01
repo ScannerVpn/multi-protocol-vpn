@@ -23,9 +23,68 @@ import java.io.File
  * NOTE: the command line MUST be marshaled as a WString — jna-platform's
  * char[] mapping corrupts the buffer intermittently, which made commands
  * fail with random "invalid argument" errors.
+<<<<<<< HEAD
  */
 object HiddenRun {
 
+=======
+ *
+ * INJECTABLE (3.6.14): the object delegates to a [ProcessRunner]. Tests can
+ * install a fake via [install] (restored with [restoreDefault]); production
+ * always runs [JnaHiddenRun].
+ */
+object HiddenRun {
+
+    @Volatile
+    private var runner: ProcessRunner = JnaHiddenRun
+
+    /** Swaps the executor (tests only). Returns the previous one. */
+    internal fun install(replacement: ProcessRunner): ProcessRunner {
+        val old = runner
+        runner = replacement
+        return old
+    }
+
+    /** Puts the real JNA implementation back. */
+    internal fun restoreDefault() {
+        runner = JnaHiddenRun
+    }
+
+    fun runAndWait(command: List<String>, timeoutMs: Long): Int? =
+        runner.runAndWait(command, timeoutMs)
+
+    suspend fun runAndWaitCancellable(command: List<String>, timeoutMs: Long): Int? =
+        runner.runAndWaitCancellable(command, timeoutMs)
+
+    fun runRawAndWait(commandLine: String, timeoutMs: Long): Int? =
+        runner.runRawAndWait(commandLine, timeoutMs)
+
+    suspend fun runRawAndWaitCancellable(
+        commandLine: String,
+        timeoutMs: Long,
+        workingDir: File? = null,
+    ): Int? = runner.runRawAndWaitCancellable(commandLine, timeoutMs, workingDir)
+
+    fun startDetached(command: List<String>, workingDir: File? = null): Int? =
+        runner.startDetached(command, workingDir)
+
+    fun startDetachedRaw(commandLine: String, workingDir: File? = null): Int? =
+        runner.startDetachedRaw(commandLine, workingDir)
+
+    /**
+     * Finds the pid of a freshly-spawned child of [parentPid] whose image
+     * name equals [image] (case-insensitive). Delegates to the JNA runner's
+     * Toolhelp snapshot — not part of [ProcessRunner] because tests never
+     * need to fake child discovery.
+     */
+    suspend fun findChildPid(parentPid: Int, image: String, attempts: Int = 15, sleepMs: Long = 100): Int? =
+        JnaHiddenRun.findChildPid(parentPid, image, attempts, sleepMs)
+}
+
+/** The real JNA implementation — every previous HiddenRun body, unchanged. */
+internal object JnaHiddenRun : ProcessRunner {
+
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     private const val CREATE_NO_WINDOW = 0x08000000
     private const val STARTF_USESHOWWINDOW = 0x00000001
     private const val SW_HIDE = 0
@@ -75,7 +134,11 @@ object HiddenRun {
      * @return the process exit code, or null if it could not start or
      *         did not finish in time.
      */
+<<<<<<< HEAD
     fun runAndWait(command: List<String>, timeoutMs: Long): Int? {
+=======
+    override fun runAndWait(command: List<String>, timeoutMs: Long): Int? {
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         val line = command.joinToString(" ") { quoteArg(it) }
         return runRawAndWait(line, timeoutMs)
     }
@@ -91,16 +154,27 @@ object HiddenRun {
      * coroutine cancellation is honoured between them; on cancellation the
      * child process is terminated so no orphaned core survives.
      */
+<<<<<<< HEAD
     suspend fun runAndWaitCancellable(command: List<String>, timeoutMs: Long): Int? {
+=======
+    override suspend fun runAndWaitCancellable(command: List<String>, timeoutMs: Long): Int? {
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         val line = command.joinToString(" ") { quoteArg(it) }
         return runRawAndWaitCancellable(line, timeoutMs)
     }
 
     /** [runAndWaitCancellable] for a raw command line (caller owns quoting). */
+<<<<<<< HEAD
     suspend fun runRawAndWaitCancellable(
         commandLine: String,
         timeoutMs: Long,
         workingDir: File? = null,
+=======
+    override suspend fun runRawAndWaitCancellable(
+        commandLine: String,
+        timeoutMs: Long,
+        workingDir: File?,
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     ): Int? {
         val info = createProcess(commandLine, workingDir) ?: return null
         val deadline = System.currentTimeMillis() + timeoutMs
@@ -160,7 +234,11 @@ object HiddenRun {
      * terminated (TerminateProcess) so abandoned elevated scripts (e.g. a
      * pending UAC dialog) never leave a phantom core running.
      */
+<<<<<<< HEAD
     fun runRawAndWait(commandLine: String, timeoutMs: Long): Int? {
+=======
+    override fun runRawAndWait(commandLine: String, timeoutMs: Long): Int? {
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         val info = createProcess(commandLine) ?: return null
         try {
             val wait = Kernel32.INSTANCE.WaitForSingleObject(info.hProcess, timeoutMs.toInt())
@@ -183,6 +261,7 @@ object HiddenRun {
      * Starts [command] hidden WITHOUT waiting (e.g. the long-running xray
      * proxy process). [workingDir] matters for tools that load side files
      * from their own directory (xray loads geoip.dat from its cwd).
+<<<<<<< HEAD
      * @return the new process id, or -1 when it could not be created.
      */
     fun startDetached(command: List<String>, workingDir: File? = null): Int {
@@ -200,6 +279,30 @@ object HiddenRun {
         Kernel32.INSTANCE.CloseHandle(info.hProcess)
         Kernel32.INSTANCE.CloseHandle(info.hThread)
         return pid
+=======
+     * @return the new process id, or null when it could not be created.
+     *
+     * NULL, not -1: callers wrote `startDetached(...) ?: return@repeat`, which
+     * never fired against a non-null Int, so a failed CreateProcessW made the
+     * caller wait out its full port-polling loop (15 x 400 ms) for a process
+     * that was never started.
+     */
+    override fun startDetached(command: List<String>, workingDir: File?): Int? {
+        val line = command.joinToString(" ") { quoteArg(it) }
+        return startDetachedRaw(line, workingDir)
+    }
+    /**
+     * Same as [startDetached] but the caller owns all quoting — needed for
+     * `cmd.exe /c "... > log"` where the redirect must reach cmd itself.
+     * @return the new process id, or null when it could not be created.
+     */
+    override fun startDetachedRaw(commandLine: String, workingDir: File?): Int? {
+        val info = createProcess(commandLine, workingDir) ?: return null
+        val pid = info.dwProcessId.toInt()
+        Kernel32.INSTANCE.CloseHandle(info.hProcess)
+        Kernel32.INSTANCE.CloseHandle(info.hThread)
+        return pid.takeIf { it > 0 }
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     }
 
     /**

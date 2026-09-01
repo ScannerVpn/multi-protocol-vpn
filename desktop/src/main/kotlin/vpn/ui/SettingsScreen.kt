@@ -20,6 +20,11 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FolderOpen
+<<<<<<< HEAD
+=======
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.SettingsEthernet
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -55,8 +60,19 @@ fun SettingsScreen() {
     var showLog by remember { mutableStateOf(false) }
     var cleanResult by remember { mutableStateOf<String?>(null) }
 
+<<<<<<< HEAD
     Column(
         Modifier.fillMaxSize().wrapContentWidth(Alignment.CenterHorizontally).verticalScroll(rememberScrollState()).widthIn(max = 880.dp).padding(horizontal = 20.dp),
+=======
+    val layout = LocalLayout.current
+    Column(
+        Modifier
+            .fillMaxSize()
+            .wrapContentWidth(Alignment.CenterHorizontally)
+            .verticalScroll(rememberScrollState())
+            .widthIn(max = 880.dp)
+            .padding(horizontal = layout.screenPadding),
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     ) {
         Spacer(Modifier.height(20.dp))
         ScreenHeader("Settings", "App behaviour and maintenance")
@@ -74,6 +90,17 @@ fun SettingsScreen() {
             }
             Spacer(Modifier.height(4.dp))
             ToggleRow(
+<<<<<<< HEAD
+=======
+                "Close button hides to tray",
+                "The X button keeps the app running in the notification area",
+                TraySettings.closeToTray,
+            ) {
+                TraySettings.closeToTray = it
+            }
+            Spacer(Modifier.height(4.dp))
+            ToggleRow(
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 "DNS leak protection",
                 "Force DNS through the tunnel (1.1.1.1 / 8.8.8.8) — applies on next connect",
                 AppState.settings.dnsLeakProtection,
@@ -123,6 +150,23 @@ fun SettingsScreen() {
                     cleanResult = "Cleanup finished"
                 }
             }
+<<<<<<< HEAD
+=======
+            Spacer(Modifier.height(4.dp))
+            // Emergency escape hatch: a crashed session (or a %TEMP% cleanup
+            // that ate our saved state) can leave Windows pointing at a dead
+            // local proxy, which takes the WHOLE machine offline. The app heals
+            // this at startup, but the user needs a button that works right now
+            // and without a restart.
+            ActionRow(
+                Icons.Filled.SettingsEthernet,
+                "Reset system proxy",
+                "Turn the Windows proxy OFF — use when the internet is dead after a crash",
+            ) {
+                cleanResult = null
+                AppState.resetSystemProxy { cleanResult = it }
+            }
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
             cleanResult?.let {
                 Spacer(Modifier.height(6.dp))
                 Text(it, color = C.Success, fontSize = 11.5.sp)
@@ -130,6 +174,15 @@ fun SettingsScreen() {
         }
 
         Spacer(Modifier.height(16.dp))
+<<<<<<< HEAD
+=======
+        SectionTitle("Backup")
+        GlassCard {
+            BackupRows()
+        }
+
+        Spacer(Modifier.height(16.dp))
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         SectionTitle("About")
         GlassCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -137,7 +190,15 @@ fun SettingsScreen() {
                 Spacer(Modifier.width(14.dp))
                 Column {
                     Text("MultiVPN", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = C.TextPrimary)
+<<<<<<< HEAD
                     Text("Version 3.6.3 · Compose Multiplatform", fontSize = 11.5.sp, color = C.TextSecondary)
+=======
+                    Text(
+                        "Version ${vpn.BuildInfo.VERSION} · Compose Multiplatform",
+                        fontSize = 11.5.sp,
+                        color = C.TextSecondary,
+                    )
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                     Spacer(Modifier.height(3.dp))
                     Text(
                         "IKEv2 · WireGuard · AmneziaWG · OpenVPN · Hysteria2 · VLESS · Trojan · Shadowsocks",
@@ -159,7 +220,18 @@ fun SettingsScreen() {
 private fun AppLogDialog(onDismiss: () -> Unit) {
     // Read the log once per dialog opening: without remember{} every
     // recomposition re-read the whole file from disk.
+<<<<<<< HEAD
     val text = remember { AppLog.tail().ifEmpty { "Log is empty." } }
+=======
+    val full = remember { AppLog.tail().ifEmpty { "Log is empty." } }
+    var filter by remember { mutableStateOf(false) }
+    val text = if (filter) {
+        val lines = full.lineSequence().filter { " ERROR/" in it }.toList()
+        if (lines.isEmpty()) "No errors in the current log window." else lines.joinToString("\n")
+    } else {
+        full
+    }
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {},
@@ -167,6 +239,17 @@ private fun AppLogDialog(onDismiss: () -> Unit) {
         title = { Text("App log", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
         text = {
             Column {
+<<<<<<< HEAD
+=======
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // Error-only view: the raw file interleaves INFO chatter
+                    // from every module; triaging a broken connect starts at
+                    // the ERROR/ lines, not the whole 400-line tail.
+                    AppTextButton("All", { filter = false }, color = if (!filter) C.Accent else C.TextSecondary)
+                    AppTextButton("Errors only", { filter = true }, color = if (filter) C.Error else C.TextSecondary)
+                    Spacer(Modifier.weight(1f))
+                }
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
                 Surface(
                     color = Color(0xFF080C16),
                     shape = RoundedCornerShape(13.dp),
@@ -209,6 +292,97 @@ private fun AppLogDialog(onDismiss: () -> Unit) {
 }
 
 @Composable
+<<<<<<< HEAD
+=======
+private fun BackupRows() {
+    var passphrase by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+    var busy by remember { mutableStateOf(false) }
+
+    Column(Modifier.fillMaxWidth()) {
+        AppTextField(
+            passphrase,
+            { passphrase = it },
+            "Passphrase (min 8 chars)",
+            password = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AppButton("Export backup…", {
+                val target = pickSaveFile("multivpn-backup.mvpnbin")
+                if (target == null) {
+                    message = false to "No file chosen."
+                } else {
+                    busy = true
+                    AppState.scope.launch {
+                        val res = vpn.core.Backup.export(
+                            java.io.File(target),
+                            passphrase.toCharArray(),
+                            AppState.servers,
+                            AppState.configs,
+                            AppState.subscriptions,
+                            AppState.settings,
+                            AppState.activeConfigId,
+                        )
+                        message = res.ok to res.message
+                        busy = false
+                    }
+                }
+            }, icon = Icons.Filled.Save, compact = true, enabled = !busy)
+            AppButton("Restore…", {
+                val src = pickOpenFile()
+                if (src == null) {
+                    message = false to "No file chosen."
+                } else {
+                    busy = true
+                    AppState.scope.launch {
+                        val res = vpn.core.Backup.import(java.io.File(src), passphrase.toCharArray())
+                        message = res.ok to res.message
+                        busy = false
+                    }
+                }
+            }, icon = Icons.Filled.FolderOpen, compact = true, enabled = !busy)
+        }
+        message?.let { (ok, msg) ->
+            Spacer(Modifier.height(8.dp))
+            Text(msg, fontSize = 11.5.sp, color = if (ok) C.Success else C.Error)
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Portable + encrypted (AES-256-GCM). The passphrase is required on restore — " +
+                "there is no recovery without it.",
+            color = C.TextFaint,
+            fontSize = 10.5.sp,
+        )
+    }
+}
+
+/** Save dialog for the backup archive; null when cancelled. */
+private fun pickSaveFile(suggested: String): String? {
+    val dialog = object : java.awt.Frame() {}
+    val fd = java.awt.FileDialog(dialog, "Save backup", java.awt.FileDialog.SAVE)
+    fd.file = suggested
+    fd.isVisible = true
+    val dir = fd.directory
+    val file = fd.file
+    dialog.dispose()
+    return if (dir != null && file != null) dir + file else null
+}
+
+/** Open dialog for restoring a backup; null when cancelled. */
+private fun pickOpenFile(): String? {
+    val dialog = object : java.awt.Frame() {}
+    val fd = java.awt.FileDialog(dialog, "Open backup", java.awt.FileDialog.LOAD)
+    fd.isVisible = true
+    val dir = fd.directory
+    val file = fd.file
+    dialog.dispose()
+    return if (dir != null && file != null) dir + file else null
+}
+
+@Composable
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 private fun ProxyPortRow() {
     val saved = AppState.settings.proxyPort
     var text by remember(saved) { mutableStateOf(saved.toString()) }

@@ -12,6 +12,13 @@ concurrency:
   group: windows-build-${{ github.ref }}
   cancel-in-progress: true
 
+<<<<<<< HEAD
+=======
+# Least privilege: this workflow only reads the repo and uploads an artifact.
+permissions:
+  contents: read
+
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 jobs:
   build:
     name: Package Windows EXE / MSI
@@ -21,6 +28,7 @@ jobs:
       run:
         shell: bash
     steps:
+<<<<<<< HEAD
       - uses: actions/checkout@v4
 
       - name: Set up JDK 17
@@ -52,12 +60,85 @@ jobs:
         working-directory: desktop
         shell: pwsh
         run: ./fetch-cores.ps1 -SaveHashes
+=======
+      # Actions are pinned to a commit SHA, not a moving tag: a compromised or
+      # retagged action would otherwise run with access to this build.
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@7a6d8a8234af8eb26422e24e3006232cccaa061b # v4.6.0
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Go (for the AWG-patched wireproxy)
+        uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
+        with:
+          go-version: '1.23'
+
+      # Invariant HANDOFF 5.24/5.x: the AWG 3.x patch must be applied via stdin.
+      # The patch file is UTF-8 + LF (enforced in .gitattributes): a UTF-16 copy
+      # makes `git apply` report "No valid patches in input" and exit 128, which
+      # used to fail this step outright.
+      #
+      # The pinned commit (desktop/wireproxy-source.pin) supports AWG 3.x
+      # NATIVELY, so no patch is applied — the symbol check below is what proves
+      # the built binary can actually talk to AWG 3.x servers, whichever way the
+      # support got there.
+      - name: Build patched wireproxy.exe (AmneziaWG 3.x)
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          PIN="$(tr -d ' \r\n' < "${GITHUB_WORKSPACE}/desktop/wireproxy-source.pin")"
+          echo "pinned wireproxy-awg commit: $PIN"
+          git clone https://github.com/artem-russkikh/wireproxy-awg awgp
+          cd awgp
+          git checkout --quiet "$PIN"
+          git rev-parse HEAD > "${GITHUB_WORKSPACE}/wireproxy-source-commit.txt"
+          if grep -q "HeaderProtectionKey" awg_config.go; then
+            echo "source supports AWG 3.x natively - no patch needed"
+          else
+            echo "applying the AWG 3.x patch"
+            git apply --whitespace=nowarn < "${GITHUB_WORKSPACE}/desktop/wireproxy-awg-awg31.patch"
+          fi
+          go mod tidy
+          mkdir -p "${GITHUB_WORKSPACE}/desktop/src/main/resources/bin/wireproxy"
+          GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" \
+            -o "${GITHUB_WORKSPACE}/desktop/src/main/resources/bin/wireproxy/wireproxy.exe" \
+            ./cmd/wireproxy
+          # Prove AWG 3.x really landed: these symbols exist only in a build
+          # that can handshake with AmneziaWG 3.0/3.1. Without this an incapable
+          # exe ships silently and fails every AWG 3.x server with no error.
+          EXE="${GITHUB_WORKSPACE}/desktop/src/main/resources/bin/wireproxy/wireproxy.exe"
+          for sym in HeaderProtectionKey RandomTrailers DisableCookies; do
+            grep -q "$sym" "$EXE" \
+              || { echo "::error::wireproxy.exe lacks $sym - AWG 3.x support did not make it into the binary"; exit 1; }
+          done
+          echo "AWG 3.x symbols verified"
+
+      # -RequireHashes makes a missing/unpinned core-hashes.json entry FATAL.
+      # Without it the script only warned, so a build could ship completely
+      # unverified third-party binaries — one of which (openvpn.exe) is later
+      # executed as SYSTEM on every user's machine.
+      - name: Fetch remaining cores (xray / sing-box / openvpn)
+        working-directory: desktop
+        shell: pwsh
+        run: ./fetch-cores.ps1 -RequireHashes
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
 
       - name: Run tests (must stay green)
         working-directory: desktop
         run: ./gradlew.bat --no-daemon test
 
       # Portable app image + both installers (windows-latest ships WiX 3.x).
+<<<<<<< HEAD
+=======
+      # These tasks only exist because build.gradle.kts declares
+      # targetFormats(AppImage, Msi, Exe) — with AppImage alone Gradle rejects
+      # them with "Task 'packageMsi' not found".
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
       - name: Package
         working-directory: desktop
         run: ./gradlew.bat --no-daemon packageDistributionForCurrentOS packageMsi packageExe
@@ -72,10 +153,25 @@ jobs:
             -DestinationPath "$stage/MultiVPN-portable-win64.zip" -Force
           Copy-Item 'desktop/build/compose/binaries/main/exe/*.exe' $stage -ErrorAction SilentlyContinue
           Copy-Item 'desktop/build/compose/binaries/main/msi/*.msi' $stage -ErrorAction SilentlyContinue
+<<<<<<< HEAD
           Get-ChildItem $stage | Format-Table Name, Length
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
+=======
+          if (Test-Path 'wireproxy-source-commit.txt') {
+            Copy-Item 'wireproxy-source-commit.txt' $stage
+          }
+          # Publish SHA256 of every artifact so a download can be verified
+          # against this build's log.
+          Get-ChildItem $stage -File |
+            ForEach-Object { "{0}  {1}" -f (Get-FileHash -Algorithm SHA256 $_.FullName).Hash, $_.Name } |
+            Tee-Object -FilePath "$stage/SHA256SUMS.txt"
+          Get-ChildItem $stage | Format-Table Name, Length
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
+>>>>>>> 3069b7d (feat: v3.6.14 — tray, watchdog, search, ping cache, backup, BBR, injectable HiddenRun)
         with:
           name: MultiVPN-Windows-x64
           path: stage/*
