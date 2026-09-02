@@ -56,9 +56,9 @@ internal object VpnPing {
     private val realPingGate = Mutex()
 
     /** How many xray racers may run at once. Bounded so a 200-config list
-     * cannot spawn 200 cores; 8 keeps the whole 53-config list well under
-     * two waves. */
-    internal const val PARALLEL = 8
+     * cannot spawn 200 cores; 16 (<= the 24 scratch slots) keeps a full
+     * subscription page under ~2 waves even when every endpoint is dead. */
+    internal const val PARALLEL = 16
 
     /**
      * The ACTUAL concurrency gate for xray racers — [PARALLEL]-wide. Before
@@ -66,20 +66,44 @@ internal object VpnPing {
      * only real ceiling was the 24-slot scratch pool, so a list longer than
      * 24 rows saw its tail claim null → Skipped → the row's previous latency
      * WIPED by AppState. Queuing here keeps the pool permanently non-empty
-     * (8 permits <= 24 slots) and caps simultaneous temp cores at 8.
+     * (16 permits <= 24 slots) and caps simultaneous temp cores at 16.
      */
     private val racerGate = Semaphore(PARALLEL)
 
+    /**
+     * Permits for the CONFIRMATION pass (see [quickXrayPing]'s `confirm`).
+     *
+     * A first-pass failure is retested here almost alone, because measurement
+     * under a 16-wide wave is what produced most "failures" in the first place:
+     * 16 temp cores x 4 raced HTTPS probes = up to 64 simultaneous TLS
+     * handshakes on one uplink. Measured on the user's 57-config list (2 Sep
+     * 2026): 16-wide reported 4-8 timeouts, and EVERY one of those rows
+     * answered in 373-817 ms when retested alone. Four rows failed both ways —
+     * those are the genuinely dead ones.
+     */
+    internal const val CONFIRM_PARALLEL = 2
+    private val confirmGate = Semaphore(CONFIRM_PARALLEL)
+
     /** Closed-port fail-fast budget. A blocked port usually refuses in ms;
      * an silently-dropped one waits this long — much better than 5 s. */
-    internal const val TCP_PRECHECK_MS = 2000
+    internal const val TCP_PRECHECK_MS = 1500
 
     /** Per-test budgets. A healthy server answers in <1.5 s through its
-     * tunnel; anything slower is clinically dead for the list view. */
-    internal const val PING_TIMEOUT_MS = 4000
+     * tunnel; 2.5 s is generous headroom while keeping dead endpoints from
+     * dominating a Ping-all run. */
+    internal const val PING_TIMEOUT_MS = 2500
 
-    /** How long a temp core gets to open its local proxy port. */
-    internal const val CORE_WAIT_MS = 3000
+    /**
+     * Budget for the confirmation pass. Measured cold latencies of healthy
+     * servers on the user's list reach ~1.35 s, and the confirmation runs
+     * nearly alone, so 5 s is comfortably above anything a live server needs
+     * while still bounding the four genuinely dead rows.
+     */
+    internal const val CONFIRM_TIMEOUT_MS = 5000
+
+    /** How long a temp core gets to open its local proxy port. Cores are
+     * polled every 100 ms, so this only bounds a core that never comes up. */
+    internal const val CORE_WAIT_MS = 2000
 
     /** True while a VPN session is live or being established. */
     @Volatile
@@ -255,26 +279,101 @@ internal object VpnPing {
      * Budget is [TCP_PRECHECK_MS] (was 5000) — a silently-dropped port is
      * exactly the case that needs the short budget, and the real traffic
      * test that follows stays the sole source of any millisecond number.
+     *
+     * NOTE (3.6.16): a negative here is NOT final on the fast pass. Under a
+     * 16-wide wave the local stack is itself a bottleneck — rows whose precheck
+     * "failed" during a wave completed a TCP handshake in ~20 ms when retested
+     * alone. Distinguishing RST from timeout does not help either: on a filtered
+     * network the middlebox injects RSTs probabilistically, so a refusal is not
+     * reliably definitive. Hence [quickXrayPing] retests every failure once.
      */
-    private fun tcpLatency(host: String, port: Int): Int? = try {
-        val start = System.nanoTime()
+    private fun tcpReachable(host: String, port: Int): Boolean = try {
         Socket().use { s ->
             s.connect(InetSocketAddress(host, port), TCP_PRECHECK_MS)
         }
-        ((System.nanoTime() - start) / 1_000_000).toInt()
+        true
     } catch (_: Exception) {
-        null
+        false
     }
 
     // ------------------------------------------------------------------
     // Realping per protocol family
     // ------------------------------------------------------------------
 
-    /** Real-traffic "realping" for vless/trojan/ss: start xray with this one
-     * link on a PRIVATE scratch port pair, push an HTTP request through it,
-     * kill. Runs in parallel with the other racers, gated by [racerGate]
-     * (PARALLEL-wide) — no shared-port gate. */
-    suspend fun quickXrayPing(parsed: ProxyLink): RealPingResult = racerGate.withPermit {
+    /**
+     * Real-traffic "realping" for vless/trojan/ss.
+     *
+     * TWO PASSES (3.6.16). The fast pass starts xray with this one link on a
+     * PRIVATE scratch port pair and pushes an HTTP request through it, up to
+     * [PARALLEL] rows at a time. A row that FAILS there is then retested once
+     * through [confirmXrayPing], which runs nearly alone with a larger budget.
+     *
+     * Why the second pass exists: the failures of a wide wave are mostly the
+     * wave's own fault. Measured on the user's 57-config list, 16-wide reported
+     * 4-8 red "timeout" rows, and every one of them answered in 373-817 ms when
+     * retested alone; at 4-wide the same list reported only 4 failures — the
+     * genuinely dead ones. Widening the budget instead does NOT fix it (4000 ms
+     * and 6000 ms recovered one row and cost 3 s of wall clock), because the
+     * bottleneck is 64 concurrent TLS handshakes on one uplink, not the server.
+     * Confirming only the failures keeps the fast wave (~9 s for 57 rows) and
+     * still refuses to paint a working config red.
+     */
+    suspend fun quickXrayPing(parsed: ProxyLink): RealPingResult {
+        val first = xrayPingOnce(parsed, racerGate, PING_TIMEOUT_MS)
+        // Only a real, measured failure earns a retest. Skipped means "we never
+        // tested" (session live, core missing, pool empty) and must stay silent.
+        if (first !is RealPingResult.Failed) return first
+        return confirmXrayPing(parsed)
+    }
+
+    /**
+     * Second chance for a row that failed the wide wave.
+     *
+     * It first WAITS for the wave to drain ([awaitWaveIdle]) — retesting while
+     * 16 sibling racers still hold the uplink would reproduce exactly the
+     * contention that caused the failure — then runs behind the narrow
+     * [confirmGate] with [CONFIRM_TIMEOUT_MS]. Its result is final: a config
+     * that cannot answer with the uplink nearly to itself really does not
+     * carry traffic.
+     */
+    private suspend fun confirmXrayPing(parsed: ProxyLink): RealPingResult {
+        awaitWaveIdle()
+        return xrayPingOnce(parsed, confirmGate, CONFIRM_TIMEOUT_MS)
+    }
+
+    /**
+     * Waits (bounded) until no fast-pass racer holds a permit.
+     *
+     * Bounded because a huge list keeps launching rows for a long time and a
+     * confirmation must not hang forever; on expiry the retest runs anyway —
+     * a slightly contended retest with a 5 s budget is still far better than
+     * reporting a false "timeout". Polling a semaphore's permit count is
+     * enough here: precision does not matter, only "is the storm over".
+     */
+    private suspend fun awaitWaveIdle() {
+        var waited = 0
+        while (waited < WAVE_IDLE_WAIT_MS && racerGate.availablePermits < PARALLEL) {
+            delay(WAVE_IDLE_POLL_MS)
+            waited += WAVE_IDLE_POLL_MS.toInt()
+        }
+    }
+
+    /** Longest a confirmation waits for the fast wave to finish. */
+    internal const val WAVE_IDLE_WAIT_MS = 45_000
+
+    private const val WAVE_IDLE_POLL_MS = 250L
+
+    /**
+     * ONE realping attempt: temp core on a claimed scratch pair, real HTTP
+     * through it, kill. [gate] bounds concurrency ([racerGate] for the fast
+     * wave, [confirmGate] for the confirmation), [timeoutMs] is the traffic
+     * budget.
+     */
+    private suspend fun xrayPingOnce(
+        parsed: ProxyLink,
+        gate: Semaphore,
+        timeoutMs: Int,
+    ): RealPingResult = gate.withPermit {
         // Session guard WITHOUT queueing: a ping arriving while a session is
         // live or starting must return instantly, not stack behind it. Kept
         // OUTSIDE the semaphore (with the Skipped-early guards) so a
@@ -288,8 +387,10 @@ internal object VpnPing {
         // Fail fast: if even the TCP handshake to the endpoint fails, no
         // amount of core spinning will make traffic pass. TCP-based
         // transports only — UDP-native links must not be screened here.
+        // A failure here is retested by the confirmation pass (see
+        // [tcpReachable] for why a wave's negative is not trustworthy).
         if (isTcpBasedTransport(parsed.network) &&
-            tcpLatency(parsed.address, parsed.port) == null
+            !tcpReachable(parsed.address, parsed.port)
         ) {
             return@withPermit RealPingResult.Failed
         }
@@ -322,7 +423,7 @@ internal object VpnPing {
             // `error("unreachable")` — Kotlin discarded the value and threw on
             // EVERY successful xray ping, so vless/trojan/ss rows could never
             // show a number (app.log: "latency infra error: unreachable").
-            val ms = TrafficProbe.latencyThroughProxy(ports.second, PING_TIMEOUT_MS)
+            val ms = TrafficProbe.latencyThroughProxy(ports.second, timeoutMs)
             return@withPermit if (ms != null) RealPingResult.Ok(ms) else RealPingResult.Failed
         } catch (_: Exception) {
             return@withPermit RealPingResult.Failed

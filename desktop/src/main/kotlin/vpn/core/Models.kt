@@ -125,11 +125,19 @@ data class AppSettings(
     /** Base port of the local proxies (see ProxyPorts). 1024..49091. */
     var proxyPort: Int = ProxyPorts.DEFAULT,
     /**
-     * X button hides to the tray instead of quitting. Persisted here because
-     * [vpn.ui.TraySettings] is only an in-memory Compose mirror — before
-     * 3.6.15 the toggle silently reset to off on every launch.
+     * X button hides to the tray instead of quitting. LEGACY (pre-3.6.16):
+     * superseded by [closeAction], kept so an existing settings.json keeps
+     * its meaning through one migration (see [Storage.loadSettings]).
      */
     var closeToTray: Boolean = false,
+    /**
+     * What the X button does — one of [CloseActions] ("ask" | "tray" | "exit").
+     *
+     * Nullable on purpose: null means "never migrated", which is how
+     * [CloseBehavior.migrate] tells a fresh install from a user who had
+     * explicitly turned the old boolean on.
+     */
+    var closeAction: String? = null,
 )
 
 /**

@@ -487,16 +487,26 @@ fun IcmpPill(ms: Int?, failed: Boolean, pinging: Boolean, modifier: Modifier = M
     }
 }
 
-/** Latency pill: green <150ms, amber <400ms, red otherwise — animated colors. */
+/**
+ * Latency pill for a REAL end-to-end measurement.
+ *
+ * Colour comes from [vpn.core.LatencyGrade] — the single definition shared with
+ * the dashboard's [vpn.ui.PingChip]. The bands were retuned in 3.6.16 against
+ * measurements from the user's own list (healthy servers: 390-780 ms warmed,
+ * up to ~1.3 s cold); on the previous 150/400 scale every usable config, the
+ * connected one included, rendered red, so the colour carried no information.
+ */
 @Composable
 fun LatencyPill(ms: Int?, failed: Boolean, pinging: Boolean, modifier: Modifier = Modifier) {
     // While pinging, don't show anything (pill is hidden until first result)
     if (pinging) return
 
     val target = when {
-        ms != null && ms < 150 -> C.Success to C.SuccessDim
-        ms != null && ms < 400 -> C.Warning to C.WarningDim
-        ms != null -> C.Error to C.ErrorDim
+        ms != null -> when (vpn.core.LatencyGrade.of(ms)) {
+            vpn.core.LatencyGrade.Grade.GOOD -> C.Success to C.SuccessDim
+            vpn.core.LatencyGrade.Grade.FAIR -> C.Warning to C.WarningDim
+            vpn.core.LatencyGrade.Grade.POOR -> C.Error to C.ErrorDim
+        }
         failed -> C.Error to C.ErrorDim
         else -> C.Success to C.SuccessDim
     }

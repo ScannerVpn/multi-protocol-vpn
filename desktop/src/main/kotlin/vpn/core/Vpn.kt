@@ -129,7 +129,15 @@ object VpnService {
             // section can be missed by locale-specific parsing — rasdial output
             // is the authoritative answer for dial-up profiles.
             VpnStatusProbe.connectedIkev2Profile() != null ||
-            Xray.isRunning() || SingBox.isRunning() || WireProxy.isRunning()
+            // The proxy ports mean something ONLY while a session of OURS owns
+            // the cores. At cold start ANY listener on the local proxy ports
+            // used to read as "a tunnel is up": v2rayN's default SOCKS port is
+            // 10808 — exactly our default base port — so users running another
+            // proxy client saw this app paint itself CONNECTED the moment it
+            // opened, before it had done anything. connectionActive is false
+            // until connect() succeeds for a session we started.
+            (connectionActive &&
+                (Xray.isRunning() || SingBox.isRunning() || WireProxy.isRunning()))
     }
 
     /** Which latency strategy applies to a config (pure decision). */

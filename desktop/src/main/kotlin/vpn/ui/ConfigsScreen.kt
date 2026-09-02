@@ -196,6 +196,16 @@ fun ConfigsScreen() {
                                 count = cfgs.size,
                                 expanded = (expanded["srv:${server.id}"] ?: false) || (filtering && cfgs.isNotEmpty()),
                                 onToggle = { toggle("srv:${server.id}") },
+                                trailing = {
+                                    if (cfgs.isNotEmpty()) {
+                                        IconAction(
+                                            Icons.Filled.Speed,
+                                            "Ping this server's configs",
+                                            { AppState.pingConfigs(cfgs) },
+                                            tint = C.Accent,
+                                        )
+                                    }
+                                },
                             ) {
                                 cfgs.forEach { cfg -> ConfigCard(cfg) }
                             }
@@ -213,6 +223,14 @@ fun ConfigsScreen() {
                             expanded = (expanded["orphans"] ?: false) || filtering,
                             onToggle = { toggle("orphans") },
                             leadingIcon = Icons.Filled.FolderOpen,
+                            trailing = {
+                                IconAction(
+                                    Icons.Filled.Speed,
+                                    "Ping unsorted configs",
+                                    { AppState.pingConfigs(orphans) },
+                                    tint = C.Accent,
+                                )
+                            },
                         ) {
                             orphans.forEach { cfg -> ConfigCard(cfg) }
                         }
@@ -237,6 +255,15 @@ fun ConfigsScreen() {
                                 leadingIcon = Icons.Filled.RssFeed,
                                 trailing = {
                                     Row {
+                                        if (cfgs.isNotEmpty()) {
+                                            IconAction(
+                                                Icons.Filled.Speed,
+                                                "Ping this subscription's configs",
+                                                { AppState.pingConfigs(cfgs) },
+                                                tint = C.Accent,
+                                            )
+                                            Spacer(Modifier.width(4.dp))
+                                        }
                                         IconAction(
                                             Icons.Filled.CloudSync,
                                             "Refresh subscription",

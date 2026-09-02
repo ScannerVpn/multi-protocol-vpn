@@ -73,23 +73,15 @@ fun SettingsScreen() {
         SectionTitle("Connection")
         GlassCard {
             ToggleRow(
-                "Auto-connect on launch",
-                "Connect to the active config when the app starts",
+                "Auto-reconnect after a drop",
+                "If a connected session drops unexpectedly, reconnect it in the background. The app NEVER connects by itself at launch",
                 AppState.settings.autoConnect,
             ) {
                 AppState.settings = AppState.settings.copy(autoConnect = it)
                 Storage.saveSettings(AppState.settings)
             }
             Spacer(Modifier.height(4.dp))
-            ToggleRow(
-                "Close button hides to tray",
-                "The X button keeps the app running in the notification area",
-                TraySettings.closeToTray,
-            ) {
-                TraySettings.closeToTray = it
-                AppState.settings = AppState.settings.copy(closeToTray = it)
-                Storage.saveSettings(AppState.settings)
-            }
+            CloseActionRow()
             Spacer(Modifier.height(4.dp))
             ToggleRow(
                 "DNS leak protection",
@@ -171,7 +163,7 @@ fun SettingsScreen() {
         SectionTitle("About")
         GlassCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconTile(Icons.Filled.Shield, size = 46, gradient = true)
+                BrandMark(46.dp)
                 Spacer(Modifier.width(14.dp))
                 Column {
                     Text("MultiVPN", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = C.TextPrimary)
@@ -404,6 +396,67 @@ private fun ProxyPortRow() {
             color = C.TextFaint,
             fontSize = 10.sp,
         )
+    }
+}
+
+/**
+ * Three-state picker for the X button (3.6.16), replacing the old
+ * "Close button hides to tray" switch.
+ *
+ * A switch could not express the default the app actually wants — ASK — and a
+ * VPN client that silently picks either branch is wrong half the time: hiding
+ * hides a live tunnel the user meant to stop, quitting drops one they meant to
+ * keep. Segmented chips because the three options are mutually exclusive and
+ * short; the effective behaviour is spelled out underneath so the setting is
+ * self-explanatory without opening the dialog.
+ */
+@Composable
+private fun CloseActionRow() {
+    val current = TraySettings.closeAction
+    Column(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Close button (X)",
+                    color = C.TextPrimary,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    when (current) {
+                        vpn.core.CloseActions.TRAY ->
+                            "Hides to the notification area; quit from the tray menu"
+                        vpn.core.CloseActions.EXIT ->
+                            "Quits immediately: tunnel down, cores stopped"
+                        else -> "Asks every time whether to minimize or quit"
+                    },
+                    color = C.TextSecondary,
+                    fontSize = 11.sp,
+                )
+            }
+        }
+        Spacer(Modifier.height(7.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            SegmentedChip("Ask", current == vpn.core.CloseActions.ASK) {
+                AppState.setCloseAction(vpn.core.CloseActions.ASK)
+            }
+            SegmentedChip("Minimize", current == vpn.core.CloseActions.TRAY) {
+                AppState.setCloseAction(vpn.core.CloseActions.TRAY)
+            }
+            SegmentedChip("Quit", current == vpn.core.CloseActions.EXIT) {
+                AppState.setCloseAction(vpn.core.CloseActions.EXIT)
+            }
+        }
+        if (current == vpn.core.CloseActions.TRAY && !TraySettings.trayAvailable) {
+            // Honesty: without a tray icon a hidden window is unreachable, so
+            // CloseBehavior.outcomeFor degrades this choice to a real quit.
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "This system has no notification area available, so the X button will quit instead.",
+                color = C.Warning,
+                fontSize = 10.5.sp,
+            )
+        }
     }
 }
 

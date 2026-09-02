@@ -223,15 +223,47 @@ $outbound,
 
     private fun xrayComplete(): Boolean = CoreManifest.allPresent(xrayDir, xrayFiles)
 
+    /**
+     * How many times this RUN has extracted the bundled xray files.
+     *
+     * The realping path calls [ensureXrayBinary] once per config, so an
+     * unconditional extract recopied 65 MB per row and raced the temp cores
+     * that were starting from the very same xray.exe — see
+     * [CoreManifest.shouldExtract] for the measured failure. Guarded by
+     * [extractLock] so 16 concurrent racers perform ONE extraction between
+     * them instead of 16 interleaved ones.
+     */
+    private val extractAttempts = java.util.concurrent.atomic.AtomicInteger(0)
+    private val extractLock = Any()
+
+    /** Test seam: forget this run's extraction so the next call extracts again. */
+    internal fun resetExtractionState() = extractAttempts.set(0)
+
+    /**
+     * Extracts the bundle at most [CoreManifest.MAX_EXTRACT_ATTEMPTS] times
+     * per run, and only while the core is still incomplete after the first.
+     */
+    private fun extractBundleOnce() {
+        if (!CoreManifest.shouldExtract(extractAttempts.get(), xrayComplete())) return
+        synchronized(extractLock) {
+            // Re-check inside the lock: a racer that waited here may find the
+            // work already done, and copying over a core another racer just
+            // launched is exactly what broke the spawn.
+            if (!CoreManifest.shouldExtract(extractAttempts.get(), xrayComplete())) return
+            extractAttempts.incrementAndGet()
+            val copied = Resources.extractAll(CoreManifest.XRAY_RES, xrayFiles, xrayDir)
+            if (copied > 0) AppLog.i("Xray", "Extracted $copied/${xrayFiles.size} files from resources")
+        }
+    }
+
     /** Obtains the xray binary. */
     suspend fun ensureXrayBinary(allowDownload: Boolean = true, forceDownload: Boolean = false): File? = withContext(Dispatchers.IO) {
         if (forceDownload) {
             return@withContext downloadXrayBinary()
         }
-        // Always (re-)extract bundled files so a partial download (exe without
-        // geoip.dat/geosite.dat) is repaired even when the exe already exists.
-        val copied = Resources.extractAll(CoreManifest.XRAY_RES, xrayFiles, xrayDir)
-        if (copied > 0) AppLog.i("Xray", "Extracted $copied/${xrayFiles.size} files from resources")
+        // Repairs a partial download (exe without geoip.dat/geosite.dat) on the
+        // first call of the run; NOT on every ping (see extractBundleOnce).
+        extractBundleOnce()
         if (xrayComplete()) return@withContext exe()
 
         if (allowDownload) {

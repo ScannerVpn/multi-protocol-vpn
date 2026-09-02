@@ -12,9 +12,11 @@ import java.awt.MenuItem
 import java.awt.PopupMenu
 import java.awt.SystemTray
 import java.awt.TrayIcon
+import java.awt.Image
 import java.awt.image.BufferedImage
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import javax.imageio.ImageIO
 import javax.swing.SwingUtilities
 
 /**
@@ -42,6 +44,7 @@ object TrayIconManager {
         quitApp = onQuit
         if (!SystemTray.isSupported()) {
             AppLog.i("Tray", "system tray not supported on this platform")
+            TraySettings.trayAvailable = false
             return
         }
         if (icon != null) return
@@ -66,7 +69,7 @@ object TrayIconManager {
                 add(quitItem)
             }
 
-            val trayIcon = TrayIcon(renderIcon(0xFF22D3EE.toInt()), "MultiVPN", popup)
+            val trayIcon = TrayIcon(loadBrandIcon() ?: renderIcon(0xFF22D3EE.toInt()), "MultiVPN", popup)
             trayIcon.isImageAutoSize = true
             trayIcon.addMouseListener(object : MouseAdapter() {
                 override fun mouseClicked(e: MouseEvent) {
@@ -77,10 +80,15 @@ object TrayIconManager {
             })
             SystemTray.getSystemTray().add(trayIcon)
             icon = trayIcon
+            // Only NOW may a close request hide the window: before this line
+            // there is nothing to restore it from (see CloseBehavior).
+            TraySettings.trayAvailable = true
             AppLog.i("Tray", "tray icon installed")
         } catch (e: AWTException) {
+            TraySettings.trayAvailable = false
             AppLog.e("Tray", "could not install tray icon: ${e.message}")
         } catch (e: Exception) {
+            TraySettings.trayAvailable = false
             AppLog.e("Tray", "tray install failed: ${e.message}")
         }
     }
@@ -88,7 +96,7 @@ object TrayIconManager {
     /** Reflects the connection state in the icon colour + tooltip. */
     fun updateStatus(status: VpnStatus, configName: String?) {
         val trayIcon = icon ?: return
-        val (color, label) = when (status) {
+        val (_, label) = when (status) {
             VpnStatus.CONNECTED -> 0xFF34D399.toInt() to "Connected${configName?.let { " — $it" } ?: ""}"
             VpnStatus.CONNECTING, VpnStatus.DISCONNECTING ->
                 0xFFFBBF24.toInt() to "Working…"
@@ -97,7 +105,9 @@ object TrayIconManager {
         }
         SwingUtilities.invokeLater {
             runCatching {
-                trayIcon.image = renderIcon(color)
+                // Keep the approved Shield-M artwork in every state. Status is
+                // communicated by the tooltip; replacing the image here used
+                // to turn the tray icon back into the old plain M.
                 trayIcon.setToolTip("MultiVPN — $label")
             }
         }
@@ -107,9 +117,17 @@ object TrayIconManager {
     fun remove() {
         icon?.let { runCatching { SystemTray.getSystemTray().remove(it) } }
         icon = null
+        TraySettings.trayAvailable = false
     }
 
-    /** Draws the tray glyph: a rounded "M" on transparent background. */
+    /** Loads the approved Shield-M brand icon for the tray. */
+    private fun loadBrandIcon(): Image? {
+        val resource = TrayIconManager::class.java.getResourceAsStream("/multivpn-shield-m.png")
+            ?: return null
+        return resource.use { ImageIO.read(it) }
+    }
+
+    /** Draws a tiny fallback tray glyph if the packaged asset is unavailable. */
     private fun renderIcon(argb: Int): BufferedImage {
         val size = 16
         val img = BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB)

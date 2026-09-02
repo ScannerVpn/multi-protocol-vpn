@@ -89,21 +89,8 @@ fun WindowScope.AppTitleBar(
                     },
             ) {
                 Spacer(Modifier.width(14.dp))
-                // Small brand mark so the bar is not an empty strip.
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(18.dp)
-                        .clip(RoundedCornerShape(5.dp))
-                        .background(C.Accent),
-                ) {
-                    Text(
-                        "M",
-                        color = C.OnAccent,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 10.sp,
-                    )
-                }
+                // Approved Shield-M brand mark.
+                BrandMark(18.dp, modifier = Modifier.clip(RoundedCornerShape(5.dp)))
                 Spacer(Modifier.width(9.dp))
                 Text(
                     title,

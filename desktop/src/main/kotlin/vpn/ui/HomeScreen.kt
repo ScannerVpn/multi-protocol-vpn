@@ -261,11 +261,13 @@ private fun PingChip(latency: Int?, failed: Boolean, pinging: Boolean) {
         pinging -> "…" to C.TextFaint
         failed -> "fail" to C.Error
         latency == null -> "—" to C.TextFaint
-        // Same thresholds as LatencyPill (150/400): one number, one colour
-        // meaning app-wide (3.6.13 audit P3-4).
-        latency < 150 -> "${latency}ms" to C.Success
-        latency < 400 -> "${latency}ms" to C.Warning
-        else -> "${latency}ms" to C.Error
+        // ONE definition of the bands, shared with LatencyPill — see
+        // vpn.core.LatencyGrade (3.6.13 audit P3-4, retuned in 3.6.16).
+        else -> "${latency}ms" to when (vpn.core.LatencyGrade.of(latency)) {
+            vpn.core.LatencyGrade.Grade.GOOD -> C.Success
+            vpn.core.LatencyGrade.Grade.FAIR -> C.Warning
+            vpn.core.LatencyGrade.Grade.POOR -> C.Error
+        }
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(
@@ -291,81 +293,28 @@ private fun DashboardHeader(
     onOpenApps: () -> Unit,
 ) {
     val layout = LocalLayout.current
-    val status = AppState.vpnStatus
     val cfg = AppState.activeConfig
-    val subtitle = when (status) {
-        VpnStatus.CONNECTED ->
-            "Connected via ${cfg?.let { Links.label(it.protocol, it.awgVersion) } ?: "—"}" +
-                " · ${cfg?.serverIp ?: "—"} · your traffic is protected"
-        VpnStatus.CONNECTING -> "Establishing secure tunnel…"
-        VpnStatus.DISCONNECTING -> "Closing connection…"
-        VpnStatus.ERROR -> "Connection failed — details below"
-        VpnStatus.DISCONNECTED -> "Not connected — pick a config, then press the power button"
-    }
 
-    if (layout.compact) {
-        // The title and three chips cannot share one row at phone width: the
-        // Row squeezed the "Dashboard" text to a few pixels and Compose wrapped
-        // it to ONE LETTER PER LINE down the left edge (seen in a 430dp
-        // capture). Title above, chips on their own row below.
-        Column(Modifier.fillMaxWidth()) {
-            Text("Dashboard", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = C.TextPrimary)
-            Spacer(Modifier.height(2.dp))
-            Text(
-                subtitle,
-                fontSize = 11.sp,
-                color = C.TextSecondary,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(10.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                HeaderChip(
-                    icon = Icons.Filled.Public,
-                    text = cfg?.name ?: "Choose config",
-                    highlight = cfg != null,
-                    onClick = onOpenPicker,
-                    modifier = Modifier.weight(1f),
-                )
-                HeaderChip(icon = Icons.Filled.Tune, text = "Mode", onClick = onOpenMode)
-                HeaderChip(
-                    icon = Icons.Filled.Apps,
-                    text = "${AppState.settings.splitApps.size}",
-                    highlight = AppState.settings.splitMode != SplitModes.OFF,
-                    onClick = onOpenApps,
-                )
-            }
-        }
-    } else {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.weight(1f)) {
-                Text("Dashboard", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = C.TextPrimary)
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    subtitle,
-                    fontSize = 12.sp,
-                    color = C.TextSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            HeaderChip(
-                icon = Icons.Filled.Public,
-                text = cfg?.name ?: "Choose config",
-                highlight = cfg != null,
-                onClick = onOpenPicker,
-            )
-            Spacer(Modifier.width(10.dp))
-            HeaderChip(icon = Icons.Filled.Tune, text = "Mode", onClick = onOpenMode)
-            Spacer(Modifier.width(10.dp))
-            HeaderChip(
-                icon = Icons.Filled.Apps,
-                text = "Apps (${AppState.settings.splitApps.size})",
-                highlight = AppState.settings.splitMode != SplitModes.OFF,
-                onClick = onOpenApps,
-            )
-        }
+    // Happ-style chrome: the screen's identity IS the orb below — a big
+    // "Dashboard" heading and a status sentence pushed it down and repeated
+    // what the status word under the ring already says. Only the three
+    // functional chips remain, on their own row.
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        HeaderChip(
+            icon = Icons.Filled.Public,
+            text = cfg?.name ?: "Choose config",
+            highlight = cfg != null,
+            onClick = onOpenPicker,
+            modifier = Modifier.weight(1f),
+        )
+        HeaderChip(icon = Icons.Filled.Tune, text = "Mode", onClick = onOpenMode)
+        HeaderChip(
+            icon = Icons.Filled.Apps,
+            text = if (layout.compact) "${AppState.settings.splitApps.size}"
+            else "Apps (${AppState.settings.splitApps.size})",
+            highlight = AppState.settings.splitMode != SplitModes.OFF,
+            onClick = onOpenApps,
+        )
     }
 }
 
@@ -416,46 +365,47 @@ private fun ConnectionCard(
     modifier: Modifier = Modifier,
 ) {
     val layout = LocalLayout.current
-    GlassCard(modifier = modifier) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = layout.cardPadding + 4.dp, vertical = layout.cardPadding + 4.dp),
-        ) {
-            ConnectionRing(status = status, onToggle = onToggle)
-            Spacer(Modifier.height(if (layout.compact) 10.dp else 14.dp))
-            val (word, wordColor) = when (status) {
-                VpnStatus.CONNECTED -> "SECURED" to C.Success
-                VpnStatus.CONNECTING -> "CONNECTING…" to C.Warning
-                VpnStatus.DISCONNECTING -> "CLOSING…" to C.Warning
-                VpnStatus.ERROR -> "CONNECTION FAILED" to C.Error
-                VpnStatus.DISCONNECTED -> "OFFLINE" to C.TextSecondary
-            }
-            Text(word, color = wordColor, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
-            Spacer(Modifier.height(5.dp))
-            if (status == VpnStatus.CONNECTED && AppState.sessionStartedAt > 0L) {
-                SessionTimer(startedAt = AppState.sessionStartedAt)
-            } else {
-                Text(
-                    when (status) {
-                        VpnStatus.CONNECTING -> "tap to cancel"
-                        VpnStatus.DISCONNECTING -> "tearing down the tunnel"
-                        VpnStatus.ERROR -> "see the error card for details"
-                        else -> "tap the power button to connect"
-                    },
-                    fontSize = 11.sp,
-                    color = C.TextFaint,
-                )
-            }
-            Spacer(Modifier.height(if (layout.compact) 10.dp else 12.dp))
-            // The one line that replaced the three stat cards: same facts, a
-            // third of the vertical space, and it reads as ONE fact — "where
-            // am I connected, how fast" — instead of three separate headlines.
-            SessionFactsRow(config = config, modifier = Modifier.fillMaxWidth())
-            Spacer(Modifier.height(if (layout.compact) 10.dp else 12.dp))
-            LocationRow(config = config, onPick = onPickConfig, modifier = Modifier.weight(1f, fill = false))
+    // Happ layout: the orb floats directly on the background (no card box),
+    // status word and clock under it, then the selected-config card — the
+    // whole hero reads as one centred control, the way Happ's home does.
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = layout.cardPadding),
+    ) {
+        ConnectionRing(status = status, onToggle = onToggle)
+        Spacer(Modifier.height(if (layout.compact) 12.dp else 16.dp))
+        val (word, wordColor) = when (status) {
+            VpnStatus.CONNECTED -> "SECURED" to C.Success
+            VpnStatus.CONNECTING -> "CONNECTING…" to C.Warning
+            VpnStatus.DISCONNECTING -> "CLOSING…" to C.Warning
+            VpnStatus.ERROR -> "CONNECTION FAILED" to C.Error
+            VpnStatus.DISCONNECTED -> "NOT CONNECTED" to C.TextSecondary
         }
+        Text(word, color = wordColor, fontSize = 15.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
+        Spacer(Modifier.height(5.dp))
+        if (status == VpnStatus.CONNECTED && AppState.sessionStartedAt > 0L) {
+            SessionTimer(startedAt = AppState.sessionStartedAt)
+        } else {
+            Text(
+                when (status) {
+                    VpnStatus.CONNECTING -> "tap to cancel"
+                    VpnStatus.DISCONNECTING -> "tearing down the tunnel"
+                    VpnStatus.ERROR -> "see the error card for details"
+                    else -> "tap the button to connect"
+                },
+                fontSize = 11.sp,
+                color = C.TextFaint,
+            )
+        }
+        Spacer(Modifier.height(if (layout.compact) 10.dp else 12.dp))
+        // The one line that replaced the three stat cards: same facts, a
+        // third of the vertical space, and it reads as ONE fact — "where
+        // am I connected, how fast" — instead of three separate headlines.
+        SessionFactsRow(config = config, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(if (layout.compact) 10.dp else 12.dp))
+        LocationRow(config = config, onPick = onPickConfig, modifier = Modifier.fillMaxWidth())
     }
 }
 
@@ -482,6 +432,7 @@ private fun ConnectionRing(status: VpnStatus, onToggle: () -> Unit) {
     // window a 186dp orb plus its card padding pushed everything else below the
     // fold. It shrinks with the layout mode instead.
     val ringSize = LocalLayout.current.ringSize
+    val knobSize = ringSize * 0.72f
     Box(contentAlignment = Alignment.Center, modifier = Modifier.size(ringSize)) {
         when {
             busy -> {
@@ -522,7 +473,7 @@ private fun ConnectionRing(status: VpnStatus, onToggle: () -> Unit) {
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(140.dp)
+                .size(knobSize)
                 .clip(CircleShape)
                 .background(
                     if (connected || busy) {
@@ -873,7 +824,9 @@ private fun HealthCard(state: AppState) {
             },
         )
         InfoRow("DNS", dnsText)
-        if (splitMode != SplitModes.OFF && splitMode != null) {
+        // splitMode is a non-null String (AppSettings), so no null check here —
+        // the old `&& splitMode != null` was dead code the compiler flagged.
+        if (splitMode != SplitModes.OFF) {
             InfoRow(
                 "Split",
                 if (splitMode == SplitModes.INCLUDE)

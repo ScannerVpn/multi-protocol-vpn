@@ -49,12 +49,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.LocalWindowExceptionHandlerFactory
-import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowExceptionHandler
 import androidx.compose.ui.window.WindowExceptionHandlerFactory
 import androidx.compose.ui.window.application
@@ -64,6 +66,7 @@ import vpn.theme.C
 import vpn.theme.MultiVpnTheme
 import vpn.ui.AppState
 import vpn.ui.AppTitleBar
+import vpn.ui.BrandMark
 import vpn.ui.LayoutMode
 import vpn.ui.LocalLayout
 import vpn.ui.ProvideLayout
@@ -122,7 +125,6 @@ fun main() {
             LocalWindowExceptionHandlerFactory provides loggingExceptionHandlerFactory,
         ) {
         val windowState = rememberWindowState(width = 430.dp, height = 780.dp)
-        val closeToTray = vpn.ui.TraySettings.closeToTray
         val quit: () -> Unit = {
             // Closing the window must fully quit the app: kill the proxy
             // cores and clear the system proxy so nothing is left running
@@ -131,19 +133,26 @@ fun main() {
             AppState.shutdown()
             exitApplication()
         }
-        // Minimize-to-tray close: with closeToTray on, the X button (and the
-        // in-app titlebar close) only HIDES the window — the tray icon's
-        // "Open" / double-click restores it, "Quit" really exits.
+        // Close behaviour (3.6.16): the X button asks what to do — hide to the
+        // tray (tunnel keeps running) or quit for real — unless the user ticked
+        // "remember my choice", which persists to AppSettings.closeAction.
         //
-        // Hide ONLY. The first version also set windowState.isMinimized = true,
-        // and because that flag survives the hide, the tray's Open showed a
-        // window that was still minimized — it appeared to do nothing. The
-        // frame itself is captured inside the Window content (it does not
-        // exist yet out here).
+        // Hide ONLY, never `windowState.isMinimized = true`: that flag survives
+        // the hide, so the tray's Open showed a still-minimized window and
+        // appeared to do nothing (3.6.15 bug 3). The frame is captured inside
+        // the Window content — it does not exist out here yet.
         val hideToTray = remember { mutableStateOf<(() -> Unit)?>(null) }
-        val requestClose: () -> Unit = {
+        var askOnClose by remember { mutableStateOf(false) }
+        val applyOutcome: (vpn.core.CloseOutcome) -> Unit = { outcome ->
             val hide = hideToTray.value
-            if (closeToTray && hide != null) hide() else quit()
+            if (outcome == vpn.core.CloseOutcome.HIDE_TO_TRAY && hide != null) hide() else quit()
+        }
+        val requestClose: () -> Unit = {
+            when (vpn.ui.TraySettings.outcome()) {
+                vpn.core.CloseOutcome.ASK -> askOnClose = true
+                vpn.core.CloseOutcome.HIDE_TO_TRAY -> applyOutcome(vpn.core.CloseOutcome.HIDE_TO_TRAY)
+                vpn.core.CloseOutcome.QUIT -> quit()
+            }
         }
         Window(
             onCloseRequest = { requestClose() },
@@ -161,6 +170,7 @@ fun main() {
             // works, no rounded-corner artefacts).
             undecorated = true,
             resizable = true,
+            icon = painterResource("multivpn-shield-m.png"),
         ) {
             // 380x620 is the phone-shaped floor the COMPACT layout is designed
             // for; the old 980x640 minimum was what forced the desktop-only
@@ -173,8 +183,8 @@ fun main() {
             // system colour, which is the white hairline visible above the
             // title bar. Paint it the same navy as the title bar so the seam
             // disappears whether DWM composites it or PrintWindow captures it.
-            window.background = java.awt.Color(0x07, 0x0D, 0x19)
-            runCatching { window.contentPane.background = java.awt.Color(0x07, 0x0D, 0x19) }
+            window.background = java.awt.Color(0x05, 0x07, 0x0E)
+            runCatching { window.contentPane.background = java.awt.Color(0x05, 0x07, 0x0E) }
             // undecorated=true also strips WS_THICKFRAME, i.e. the OS resize
             // border — `resizable = true` alone does NOT bring it back. Put the
             // style bit back so edge/corner dragging and Aero snap keep working
@@ -217,9 +227,26 @@ fun main() {
                     AppTitleBar(
                         state = windowState,
                         title = "MultiVPN — Multi-Protocol Client",
-                        onClose = quit,
+                        // The in-app X must behave exactly like the OS one.
+                        // Before 3.6.16 it called quit() directly, so the
+                        // titlebar button ignored the tray preference entirely.
+                        onClose = requestClose,
                     )
                     App()
+                }
+                if (askOnClose) {
+                    vpn.ui.CloseChoiceDialog(
+                        appName = "MultiVPN",
+                        tunnelActive = AppState.vpnStatus == vpn.core.VpnStatus.CONNECTED,
+                        onChoice = { outcome, remember ->
+                            askOnClose = false
+                            vpn.core.CloseBehavior.persistedChoice(outcome, remember)?.let {
+                                AppState.setCloseAction(it)
+                            }
+                            applyOutcome(outcome)
+                        },
+                        onDismiss = { askOnClose = false },
+                    )
                 }
             }
         }
@@ -310,7 +337,7 @@ fun App() {
 @Composable
 private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
     Surface(
-        color = Color(0xFF0B1120),
+        color = C.BgMid,
         border = BorderStroke(1.dp, C.Border),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -349,7 +376,7 @@ private fun Sidebar(selected: Int, onSelect: (Int) -> Unit) {
     val layout = LocalLayout.current
     val items = NAV_ITEMS
     Surface(
-        color = Color(0xFF0B1120),
+        color = C.BgMid,
         border = BorderStroke(1.dp, C.Border),
         modifier = Modifier.fillMaxHeight().width(layout.sidebarWidth),
     ) {
@@ -370,7 +397,7 @@ private fun Sidebar(selected: Int, onSelect: (Int) -> Unit) {
                         .clip(RoundedCornerShape(11.dp))
                         .background(Brush.linearGradient(listOf(C.Accent, C.Accent2))),
                 ) {
-                    Text("M", color = C.OnAccent, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                    BrandMark(36.dp)
                 }
                 Spacer(Modifier.width(10.dp))
                 Column {

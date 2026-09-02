@@ -22,6 +22,27 @@ internal object VpnStatusProbe {
     /** The sing-box TUN adapter address (see SingBox.tunInbound). */
     const val TUN_PREFIX = "172.19."
 
+    /**
+     * The adapter name sing-box's TUN inbound uses (SingBox.tunInbound →
+     * interface_name). The 172.19.x prefix ALONE is not evidence of our
+     * tunnel: WSL2, Docker and Hyper-V virtual switches live all over
+     * 172.16.0.0/12 and are UP while the machine boots, which made the app
+     * report "Connected" the moment it opened with no session ever started.
+     * A 172.19.x address counts only on an adapter whose name is ours.
+     */
+    const val TUN_ADAPTER_NAME = "MultiVPN"
+
+    /**
+     * Pure decision: does an IPv4 address on an adapter with this name count
+     * as OUR live tunnel? Shared by the Java NIO fast path and the ipconfig
+     * parser so both probes answer identically.
+     */
+    fun vpnAddressOnAdapter(addr: String?, adapterName: String?): Boolean {
+        if (addr == null || !isVpnAddress(addr)) return false
+        if (!addr.startsWith(TUN_PREFIX)) return true // IKEv2/WG/OpenVPN pools
+        return adapterName?.contains(TUN_ADAPTER_NAME, ignoreCase = true) == true
+    }
+
     private val statusFile: File
         get() = File(System.getProperty("java.io.tmpdir"), "multivpn_status.txt")
 
@@ -41,12 +62,16 @@ internal object VpnStatusProbe {
      */
     fun tunnelConnected(): Boolean {
         // Fast path: an UP interface with a VPN IPv4 (Java sees all adapters,
-        // including disconnected ones — hence the interface.isUp check).
+        // including disconnected ones — hence the interface.isUp check). The
+        // 172.19.x TUN range counts ONLY on our own adapter — WSL2/Docker/
+        // Hyper-V switches sit in the same range and are always up.
         val javaSeesIt = try {
             NetworkInterface.getNetworkInterfaces().asSequence()
                 .filter { it.isUp }
-                .flatMap { it.inetAddresses.asSequence() }
-                .any { it is Inet4Address && isVpnAddress(it.hostAddress) }
+                .flatMap { ni ->
+                    ni.inetAddresses.asSequence().map { addr -> ni to addr }
+                }
+                .any { (ni, addr) -> addr is Inet4Address && vpnAddressOnAdapter(addr.hostAddress, ni.name) }
         } catch (_: Exception) {
             false
         }
@@ -80,12 +105,17 @@ internal object VpnStatusProbe {
     fun hasLiveTunnelAddress(ipconfigText: String): Boolean {
         var mediaDisconnected = false
         var live = false
+        // The heading of the adapter block currently being parsed — 172.19.x
+        // (our TUN range, shared with WSL/Docker/Hyper-V) only counts inside
+        // a block whose adapter is ours.
+        var heading: String? = null
         for (rawLine in ipconfigText.lineSequence()) {
             val line = rawLine.trim()
             if (ADAPTER_SECTION_START.matches(line)) {
                 if (live) return true
                 // New adapter block: reset state.
                 mediaDisconnected = false
+                heading = line
                 continue
             }
             if (line.startsWith("Media State", ignoreCase = true) ||
@@ -97,7 +127,7 @@ internal object VpnStatusProbe {
                 continue
             }
             ADDR_REGEX.findAll(line).forEach { m ->
-                if (isVpnAddress(m.value) && !mediaDisconnected) live = true
+                if (vpnAddressOnAdapter(m.value, heading) && !mediaDisconnected) live = true
             }
         }
         return live
