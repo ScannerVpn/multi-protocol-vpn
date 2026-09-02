@@ -12,6 +12,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -129,6 +130,16 @@ object AppState {
     var latencyCached by mutableStateOf<Map<String, PingCache.Entry>>(emptyMap())
         private set
 
+    /**
+     * configId → warm re-measurement (3.6.17): the SECOND request through the
+     * same temp core, run nearly alone AFTER a Ping-all wave drained. On Ok it
+     * REPLACES the cold number in [latency] (display + sort + PingCache) —
+     * warm numbers are stable between runs (Spearman 0.47 vs 0.18 cold,
+     * PLAN §7), which is exactly what the Fastest sort needs.
+     */
+    var warmLatency by mutableStateOf<Map<String, Int>>(emptyMap())
+        private set
+
     /** Installed apps discovered for the split-tunneling picker. */
     var installedApps by mutableStateOf<List<InstalledApp>>(emptyList())
         private set
@@ -152,45 +163,63 @@ object AppState {
      * are killed process-family-wide, so a ping would tear down the tunnel.
      */
     fun pingConfig(config: VpnConfig) {
-        if (config.id in pinging) return
-        if (connectedOrBusy) return
+        if (!claimMeasure(config)) return
+        scope.launch { measureConfig(config) }
+    }
+
+    /**
+     * Synchronous claim of one row for measurement. The bookkeeping happens
+     * BEFORE launching the coroutine: a rapid double-click on Ping must not
+     * start two measurements of the same row while the first coroutine is
+     * still waiting to be scheduled.
+     */
+    private fun claimMeasure(config: VpnConfig): Boolean {
+        if (config.id in pinging) return false
+        if (connectedOrBusy) return false
         pinging = pinging + config.id
         latencyFailed = latencyFailed - config.id
-        scope.launch {
-            try {
-                val sshPort = servers.firstOrNull { it.ip == config.serverIp }?.sshPort
-                when (val rp = runCatching {
-                    VpnService.configLatencyResult(config, sshPort)
-                }.getOrElse { e ->
-                    // An exception is an infrastructure failure (thread pool
-                    // rejected, socket stack blew up, OOM, ...), NOT proof the
-                    // endpoint is dead. Mapping it to Failed painted the row
-                    // red "timeout" on a bug; Skipped keeps the honesty
-                    // contract — silent row, no fake number either way.
-                    AppLog.e("Ping", "latency infra error: ${e.message}")
-                    RealPingResult.Skipped
-                }) {
-                    is RealPingResult.Ok -> {
-                        latency = latency + (config.id to rp.ms)
-                        latencyFailed = latencyFailed - config.id
-                        PingCache.put(config.id, rp.ms)
-                        latencyCached = latencyCached - config.id
-                    }
-                    RealPingResult.Failed -> {
-                        latency = latency - config.id
-                        latencyFailed = latencyFailed + config.id
-                        PingCache.remove(config.id)
-                        latencyCached = latencyCached - config.id
-                    }
-                    RealPingResult.Skipped -> {
-                        // Untestable is not dead: stay silent (and forget old numbers).
-                        latency = latency - config.id
-                        latencyFailed = latencyFailed - config.id
-                    }
+        return true
+    }
+
+    /** The actual measurement; the caller claimed the row via [claimMeasure]. */
+    private suspend fun measureConfig(config: VpnConfig) {
+        try {
+            val sshPort = servers.firstOrNull { it.ip == config.serverIp }?.sshPort
+            when (val rp = runCatching {
+                VpnService.configLatencyResult(config, sshPort)
+            }.getOrElse { e ->
+                // An exception is an infrastructure failure (thread pool
+                // rejected, socket stack blew up, OOM, ...), NOT proof the
+                // endpoint is dead. Mapping it to Failed painted the row
+                // red "timeout" on a bug; Skipped keeps the honesty
+                // contract — silent row, no fake number either way.
+                AppLog.e("Ping", "latency infra error: ${e.message}")
+                RealPingResult.Skipped
+            }) {
+                is RealPingResult.Ok -> {
+                    latency = latency + (config.id to rp.ms)
+                    latencyFailed = latencyFailed - config.id
+                    // A fresh cold number supersedes any older warm one.
+                    warmLatency = warmLatency - config.id
+                    PingCache.put(config.id, rp.ms)
+                    latencyCached = latencyCached - config.id
                 }
-            } finally {
-                pinging = pinging - config.id
+                RealPingResult.Failed -> {
+                    latency = latency - config.id
+                    latencyFailed = latencyFailed + config.id
+                    warmLatency = warmLatency - config.id
+                    PingCache.remove(config.id)
+                    latencyCached = latencyCached - config.id
+                }
+                RealPingResult.Skipped -> {
+                    // Untestable is not dead: stay silent (and forget old numbers).
+                    latency = latency - config.id
+                    latencyFailed = latencyFailed - config.id
+                    warmLatency = warmLatency - config.id
+                }
             }
+        } finally {
+            pinging = pinging - config.id
         }
     }
 
@@ -202,20 +231,82 @@ object AppState {
      * ports. Launching all configs at once is therefore SAFE and FAST — the
      * pool inside VpnPing caps the real concurrency, and the UI fills in as
      * results land instead of after a global queue drains.
+     *
+     * After the wave drains, the fastest rows get ONE warm re-measurement
+     * (see [warmConfirmFastest]) so the Fastest sort keys on stable numbers.
      */
     fun pingAllConfigs() {
         if (connectedOrBusy) return
-        pingConfigs(configs)
+        launchWave(configs, warmConfirm = true)
     }
 
     /**
      * Measures latency for ONE group only (a server's folder, one
      * subscription, the unsorted pile) — the user asked for per-folder pings
      * because Ping-all on a big list takes minutes. Same engine, fewer rows.
+     * No warm pass: that belongs to the full Ping-all flow.
      */
     fun pingConfigs(list: List<VpnConfig>) {
         if (connectedOrBusy) return
-        list.forEach { pingConfig(it) }
+        launchWave(list, warmConfirm = false)
+    }
+
+    /** The running Ping-all/folder wave; cancels the previous one. */
+    private var pingWaveJob: Job? = null
+
+    /** How many of the fastest rows get a warm re-measurement after a wave. */
+    internal const val WARM_CONFIRM_TOP_N = 10
+
+    private fun launchWave(list: List<VpnConfig>, warmConfirm: Boolean) {
+        pingWaveJob?.cancel()
+        pingWaveJob = scope.launch {
+            val jobs = list.map { cfg -> launch {
+                if (claimMeasure(cfg)) measureConfig(cfg)
+            } }
+            jobs.joinAll()
+            if (warmConfirm) warmConfirmFastest(list)
+        }
+    }
+
+    /**
+     * After a Ping-all wave, re-measure the fastest rows once through the
+     * SAME temp-core traffic test, but with the first request discarded as a
+     * warm-up ([VpnService.warmLatencyResult] → VpnPing.warmXrayPing).
+     *
+     * Why: cold numbers measured under a 16-wide wave shuffle between runs
+     * (Spearman 0.18 on the user's 57-config list, PLAN §7) — sorting on them
+     * is sorting on noise. The warm pass runs nearly alone behind VpnPing's
+     * confirm gate and produces the stable number (0.47) that Fastest should
+     * key on. Only rows with a fresh Ok number qualify. A warm Failed or
+     * Skipped changes NOTHING: the cold number already proved the row alive,
+     * and a refinement pass must never paint a working config red.
+     */
+    private suspend fun warmConfirmFastest(list: List<VpnConfig>) {
+        if (connectedOrBusy) return
+        val candidates = list
+            .filter { it.id in latency && it.id !in latencyFailed }
+            .sortedBy { latency[it.id] }
+            .take(WARM_CONFIRM_TOP_N)
+        if (candidates.isEmpty()) return
+        candidates.forEach { cfg ->
+            scope.launch {
+                when (val rp = runCatching {
+                    VpnService.warmLatencyResult(cfg)
+                }.getOrElse { e ->
+                    AppLog.e("Ping", "warm infra error: ${e.message}")
+                    RealPingResult.Skipped
+                }) {
+                    is RealPingResult.Ok -> {
+                        latency = latency + (cfg.id to rp.ms)
+                        warmLatency = warmLatency + (cfg.id to rp.ms)
+                        latencyFailed = latencyFailed - cfg.id
+                        latencyCached = latencyCached - cfg.id
+                        PingCache.put(cfg.id, rp.ms)
+                    }
+                    else -> {}
+                }
+            }
+        }
     }
 
     private var pollJob: Job? = null
@@ -753,6 +844,7 @@ object AppState {
         }
         saveConfigs()
         latency = latency - config.id
+        warmLatency = warmLatency - config.id
         AppLog.i("Configs", "Updated link of ${config.name}")
         return true
     }
@@ -925,6 +1017,7 @@ object AppState {
             latency = latency - oldIds
             latencyFailed = latencyFailed - oldIds
             latencyCached = latencyCached - oldIds
+            warmLatency = warmLatency - oldIds
             saveSubscriptions()
             saveConfigs()
             AppLog.i("Subs", "Refreshed ${sub.name}: ${newConfigs.size} config(s)")

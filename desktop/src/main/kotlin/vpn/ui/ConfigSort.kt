@@ -14,7 +14,13 @@ import vpn.core.VpnConfig
  * order the list too, but always BEHIND equally-fast fresh ones, and stale
  * cache (>[PingCache.STALE_MS]) ranks behind fresh cache.
  *
- * Order: fresh measurement → cached → stale cached → never measured → failed.
+ * 3.6.17: a WARM re-measurement ([AppState.warmLatency]) outranks the cold
+ * number it replaced. Cold numbers are measured under a 16-wide wave and
+ * shuffle between runs (Spearman 0.18, PLAN §7); the warm pass retests the
+ * fastest rows nearly alone and is the stable number (0.47) the sort should
+ * key on. Tiers are unchanged: warm and fresh share the FRESH tier.
+ *
+ * Order: warm → fresh measurement → cached → stale cached → never measured → failed.
  */
 object ConfigSort {
 
@@ -32,11 +38,14 @@ object ConfigSort {
         cached: Map<String, PingCache.Entry>,
         failed: Set<String>,
         now: Long = System.currentTimeMillis(),
+        warm: Map<String, Int> = emptyMap(),
     ): Pair<Int, Int> {
-        fresh[configId]?.let { return TIER_FRESH to it }
-        // A row the user just saw fail is dead last even if a cache entry
-        // survives from when it worked — the newer fact wins.
+        // A row the user just saw fail is dead last — the newer fact wins
+        // over ANY older number (cache, warm, or a stale fresh entry).
         if (configId in failed) return TIER_FAILED to Int.MAX_VALUE
+        // The stable warm number wins over the noisy cold one it replaced.
+        warm[configId]?.let { return TIER_FRESH to it }
+        fresh[configId]?.let { return TIER_FRESH to it }
         val entry = cached[configId]
         if (entry != null) {
             val tier = if (PingCache.isStale(entry, now)) TIER_STALE else TIER_CACHED
@@ -51,11 +60,12 @@ object ConfigSort {
         cached: Map<String, PingCache.Entry>,
         failed: Set<String>,
         now: Long = System.currentTimeMillis(),
+        warm: Map<String, Int> = emptyMap(),
     ): List<VpnConfig> =
         list.sortedWith(
             compareBy(
-                { c -> sortKey(c.id, fresh, cached, failed, now).first },
-                { c -> sortKey(c.id, fresh, cached, failed, now).second },
+                { c -> sortKey(c.id, fresh, cached, failed, now, warm).first },
+                { c -> sortKey(c.id, fresh, cached, failed, now, warm).second },
                 // Stable, predictable tail: same-latency rows keep name order
                 // instead of shuffling between recompositions.
                 { c -> c.name.lowercase() },

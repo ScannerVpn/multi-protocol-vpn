@@ -100,11 +100,14 @@ fun ConfigsScreen() {
         } else {
             // Cached numbers participate too — see [ConfigSort]. Sorting on the
             // fresh map alone made "Fastest" a no-op right after a restart.
+            // Warm re-measurements (3.6.17) outrank the cold numbers they
+            // replaced — they are the stable ones between runs.
             ConfigSort.byLatency(
                 list,
                 fresh = AppState.latency,
                 cached = AppState.latencyCached,
                 failed = AppState.latencyFailed,
+                warm = AppState.warmLatency,
             )
         }
 

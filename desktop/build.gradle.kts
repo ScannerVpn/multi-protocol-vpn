@@ -23,7 +23,7 @@ plugins {
  * said 3.6.11. The generateBuildInfo task below emits vpn.BuildInfo from this
  * value, and every UI string reads it, so drift is now impossible.
  */
-val appVersion = "3.6.16"
+val appVersion = "3.6.17"
 
 group = "com.multivpn"
 version = appVersion
