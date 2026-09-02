@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.AlertDialog
@@ -74,7 +73,10 @@ fun CloseChoiceDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {},
-        dismissButton = { AppTextButton("Cancel", onDismiss, color = C.TextSecondary) },
+        // Cancel lives at the end of the content column (not in
+        // dismissButton): AlertDialog's built-in button bar adds ~3x the
+        // dialog's own spacing above it — the exact gap the 3.6.16 screenshot
+        // review flagged. Here the rhythm is ours to control.
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
@@ -120,7 +122,7 @@ fun CloseChoiceDialog(
                     },
                     onClick = { onChoice(CloseOutcome.HIDE_TO_TRAY, rememberChoice) },
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
                 CloseOptionRow(
                     icon = Icons.Filled.Close,
                     iconTint = C.Error,
@@ -133,7 +135,7 @@ fun CloseChoiceDialog(
                     },
                     onClick = { onChoice(CloseOutcome.QUIT, rememberChoice) },
                 )
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(14.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth(),
@@ -157,10 +159,14 @@ fun CloseChoiceDialog(
                 }
                 Text(
                     "Changeable any time in Settings \u2192 Connection.",
+                    // TextFaint failed the contrast check on the review
+                    // screenshot; one notch up keeps it secondary but readable.
                     fontSize = 10.sp,
-                    color = C.TextFaint,
+                    color = C.TextSecondary,
                     modifier = Modifier.padding(start = 31.dp),
                 )
+                Spacer(Modifier.height(14.dp))
+                AppTextButton("Cancel", onDismiss, color = C.TextSecondary)
             }
         },
         containerColor = C.Surface,
@@ -169,7 +175,7 @@ fun CloseChoiceDialog(
     )
 }
 
-/** One full-width action row: circled icon, label, explanation, chevron. */
+/** One full-width action row: circled icon, label, explanation. */
 @Composable
 private fun CloseOptionRow(
     icon: ImageVector,
@@ -189,7 +195,7 @@ private fun CloseOptionRow(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 11.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
         ) {
             Box(
                 contentAlignment = Alignment.Center,
@@ -208,12 +214,9 @@ private fun CloseOptionRow(
                 Text(subtitle, color = C.TextSecondary, fontSize = 10.5.sp)
             }
             Spacer(Modifier.width(8.dp))
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                null,
-                tint = C.TextFaint,
-                modifier = Modifier.size(17.dp),
-            )
+            // NO trailing chevron: on a full-width action row it reads as
+            // "navigate to a next page", but both rows perform their action
+            // in place — the review called the glyph a lie, so it is gone.
         }
     }
 }
