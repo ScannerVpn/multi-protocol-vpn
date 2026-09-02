@@ -178,6 +178,74 @@ class StorageTest {
     }
 
     // ------------------------------------------------------------------
+    // Lenient subscriptions rescue (3.6.17, §8-5)
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `a trailing comma is rescued and the file rewritten canonically`() {
+        val f = File(Storage.dataDir, "subscriptions.json")
+        val backup = if (f.exists()) f.readText() else null
+        try {
+            f.writeText(
+                """[{"id":"s1","url":"https://example.com/sub","name":"A"},
+                   {"id":"s2","url":"https://example.com/sub2","name":"B"},]""",
+            )
+            val loaded = Storage.loadSubscriptions()
+            assertEquals(listOf("s1", "s2"), loaded.map { it.id })
+            // The rewrite is strict-parseable, so the next load takes the
+            // normal path — the fallback can only run once per corruption.
+            assertEquals(loaded, Storage.loadSubscriptions())
+            assertFalse(
+                f.readText().contains(",]"),
+                "the rescued file must be rewritten in canonical strict form",
+            )
+        } finally {
+            if (backup != null) f.writeText(backup) else f.delete()
+        }
+    }
+
+    @Test
+    fun `a UTF-8 BOM left by PowerShell tooling is rescued too`() {
+        val f = File(Storage.dataDir, "subscriptions.json")
+        val backup = if (f.exists()) f.readText() else null
+        try {
+            f.writeText("﻿[{\"id\":\"s9\",\"url\":\"https://example.com/s\",\"name\":\"S\"}]")
+            val loaded = Storage.loadSubscriptions()
+            assertEquals(listOf("s9"), loaded.map { it.id })
+            assertFalse(f.exists() && f.readText().startsWith("﻿"), "rewritten without the BOM")
+        } finally {
+            if (backup != null) f.writeText(backup) else f.delete()
+        }
+    }
+
+    @Test
+    fun `a comma-bracket sequence inside a string survives the rescue`() {
+        val f = File(Storage.dataDir, "subscriptions.json")
+        val backup = if (f.exists()) f.readText() else null
+        try {
+            // The URL itself contains ",]" — a naive (string-blind) stripper
+            // would mangle it into a different URL.
+            f.writeText("[{\"id\":\"s5\",\"url\":\"https://example.com/?a=1,]\",\"name\":\"N\"},]")
+            val loaded = Storage.loadSubscriptions()
+            assertEquals("https://example.com/?a=1,]", loaded.single().url)
+        } finally {
+            if (backup != null) f.writeText(backup) else f.delete()
+        }
+    }
+
+    @Test
+    fun `stripTrailingCommas only drops separators outside strings`() {
+        assertEquals("[1,2]", Storage.stripTrailingCommas("[1,2,]"))
+        // Only the comma is dropped; whitespace stays (still valid JSON).
+        assertEquals("[1,2 ]", Storage.stripTrailingCommas("[1,2, ]"))
+        // A comma inside a string literal, and after an escaped quote, must survive.
+        assertEquals("""["a,]","b"]""", Storage.stripTrailingCommas("""["a,]","b",]"""))
+        assertEquals("""{"a":"x\",y","b":1}""", Storage.stripTrailingCommas("""{"a":"x\",y","b":1,}"""))
+        // No closing bracket after the comma → nothing to drop, input unchanged.
+        assertEquals("[1,2", Storage.stripTrailingCommas("[1,2"))
+    }
+
+    // ------------------------------------------------------------------
     // Secret handling on the persistence boundary
     // ------------------------------------------------------------------
 

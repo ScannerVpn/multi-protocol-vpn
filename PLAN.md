@@ -234,7 +234,13 @@ hysteria2 → **SINGBOX**؛ wireguard/amnezia → **WIREPROXY**؛ بقیه (ikev
    UI بعد از لغو هیچ‌وقت روی «Cancel» گیر نمیکند.
 3. **پینگ IKEv2/OpenVPN:** فعلاً `Skipped` (صادقانه). اگر عدد لازم شد فقط با پیش‌تست واقعی (rasdial آزمایشی) — نه TCP به 500/4500.
 4. **ارتقای Gradle 8.10.2 → 9.x** (هشدار incompatible فعلی) و پاک‌سازی deprecationها.
-5. **`Subscriptions` با `allowTrailingCommas`:** subscription خراب کاربر `subscriptions.json.corrupt-*` شده (فایل‌ها نگه داشته می‌شوند — data loss نیست)؛ یا پارسر سخت‌گیرانه یا migrate بادوام.
+5. ~~**`Subscriptions` با `allowTrailingCommas`:**~~ ✅ **دور ۹ فیکس شد:** `loadSubscriptions` حالا
+   مسیر نجات دارد — strict اول؛ در شکست، `stripTrailingCommas` (string-aware: کامای داخل رشته و
+   بعد از `\"` جان سالم می‌برد) + حذف BOM، و در صورت موفقیت بازنویسی strict (فال‌بک حداکثر یک بار
+   اجرا میشود). kotlinx.serialization اصلاً آپشن trailing-comma ندارد — به همین دلیل stripper
+   متنی نوشته شد. JSON واقعاً خراب همان مسیر `.corrupt-*` را میرود. ۴ تست جدید در `StorageTest`.
+   ⚠️ فایلهای `.corrupt-*` قبلی خودکار بازیابی نمیشوند — اگر لازم شد دستی به `subscriptions.json`
+   برگردانده شوند (اپ الان их را نجات میداد اگر مسیر همان بود).
 6. **Contributors-scanner گیت‌هاب:** باگ heuristic خود GitHub است؛ راهش `.mailmap` یا support.github.com.
 7. **تزریق `ProcessRunner` به SshService/بدنه‌های connect:** seam ساخته شد و Proxy/SingleInstance مسیرش باز است (3.6.14)؛ بقیه‌ی callers هنوز مستقیم HiddenRun صدا می‌زنند.
 8. **اسکریپت‌های سرور با BBR یک‌بار روی VPS اجرا نشده‌اند** — بلوک BBR از 3.6.14 در کد هست ولی سرورِ فعلی هنوز provision قدیمی دارد.
@@ -271,6 +277,9 @@ watchdog، ordering لیست، ...) قابل تست نیست، **قبل از ت�
 3. **Cancel + پیشرفت Ping-all (بدهی §۸-۲):** دکمهٔ «Ping all» در حین موج → «Cancel (done/total)»
    (`pingAllActive`/`pingProgress`/`cancelPingAll`/`pingAllLabel` خالص). cleanup در `finallyِ`
    کوروتین موج — لغو یا پایان، UI ریست میشود.
+4. **نجات `subscriptions.json` (بدهی §۸-۵):** فال‌بک lenient با `stripTrailingCommas`
+   (string-aware) + حذف BOM؛ موفقیت → بازنویسی strict. `StorageTest` +۴ تست (کاما انتهایی،
+   BOM، کاما داخل رشته، قواعد stripper).
 
 ✅ **دور ۸ (3.6.16) — دیالوگ بستن + دو باگ ریشه‌ای پینگ (۲۶۴ تست / ۰ شکست):**
 
