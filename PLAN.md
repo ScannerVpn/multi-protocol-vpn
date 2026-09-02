@@ -43,9 +43,7 @@
   برنچ `main`، احراز با `gh auth` (اکانت ScannerVpn). CI در `.github/workflows/windows-build.yml` به
   `desktop/core-hashes.json` و `desktop/wireproxy-source.pin` وابسته است — بدون آن‌ها عمداً fail می‌شود.
 - هسته‌ها (~۱۳۰MB) در git نیستند — پس از checkout تازه: `fetch-cores.ps1`.
-- ⚠️ `.gitattributes:14` یک خط نامعتبر دارد (`feat:` به‌عنوان attribute) — git روی هر دستور هشدار
-  چاپ می‌کند ولی کار می‌کند؛ پاک‌کردنش یک خط کار است.
-- ⚠️ کارِ دور ۸ **کامیت نشده** است (`git status` = ۱۹ فایل تغییر‌یافته/جدید).
+- ⚠️ کارِ دور ۸ در کامیت `9c4c9b3` (`feat: v3.6.16`) ثبت و push شده است — working tree تمیز.
 
 ## ۳. نقشه‌ی کد (چه فایلی چه کاری می‌کند)
 
