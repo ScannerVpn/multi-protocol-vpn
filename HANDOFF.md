@@ -10,7 +10,7 @@
 > lessons (start there before changing anything) and section ۸ lists known limitations.
 
 > این سند خودکفاست: هر ایجنت جدید فقط با خواندن همین فایل باید بتواند پروژه را ادامه دهد،
-> بیلد بگیرد، دیباگ کند و چیزی را نشکند. آخرین بروزرسانی: **2026-08-27 — نسخه 3.6.4**.
+> بیلد بگیرد، دیباگ کند و چیزی را نشکند. آخرین بروزرسانی: **2026-09-02 — نسخه 3.6.16**.
 
 ---
 
@@ -33,7 +33,7 @@ cd desktop
 # 1) یک‌بار در هر checkout تازه: هسته‌ها در git نیستند (~۱۳۰MB)
 powershell -ExecutionPolicy Bypass -File .\fetch-cores.ps1
 
-# 2) تست‌ها — ۲۰۸ تست، همه آفلاین، ~۳۰ ثانیه
+# 2) تست‌ها — ۲۶۴ تست، همه آفلاین، ~۵۰ ثانیه
 .\gradlew.bat test
 
 # 3) بیلد دستی (معادل کاری که build.bat می‌کند)
@@ -121,7 +121,7 @@ TUN/اسپلیت هر اتصال یک UAC می‌خواهند (ذات ویندو
    ├─ gradlew.bat / gradle/wrapper/  ← Gradle 8.10.2
    ├─ fetch-cores.ps1                ← **دانلود/بیلد هر چهار هسته (اول این را بزن)**
    ├─ wireproxy-awg-awg31.patch      ← پشتیبانی AmneziaWG 3.0/3.1 برای wireproxy
-   ├─ src/test/kotlin/vpn/core/      ← ۹۲ تست (بخش ۷ توضیح می‌دهد کدام چه چیزی را می‌گیرد)
+   ├─ src/test/kotlin/vpn/core/      ← ۲۶۴ تست (بخش ۷ توضیح می‌دهد کدام چه چیزی را می‌گیرد)
    └─ src/main/
       ├─ resources/                  ← کپیِ همان ۵ اسکریپت server/ (بعد از ادیت همگام نگه دار!)
       │   └─ bin/                    ← هسته‌ها (gitignored — با fetch-cores.ps1 پر می‌شود)
@@ -552,7 +552,7 @@ MSYS_NO_PATHCONV=1 plink -batch -hostkey "<SSH-HOSTKEY-FINGERPRINT>" \
 | Edit (تغییر نام + بازنویسی fragment لینک) | ✅ (تایپ خودکار با کیبورد فارسی سیستم کاربر مخدوش شد — رفتار اپ درست بود) |
 | UI جدید v3.5 (تم ایندیگو/سیان، هدر جمع‌وجور، دکمه Cancel در حالت اتصال، کارت Traffic mode) | ✅ اسکرین‌شات صفحه اصلی |
 | بستن پنجره = خروج کامل (بدون java/wireproxy باقی‌مانده) | ✅ پروسه MultiVPN صفر شد |
-| **تست‌های واحد** | ✅ **۹۲ تست، همه آفلاین، ~۲۵ ثانیه** (`.\gradlew.bat test`) — تنها `AppListReproTest` روی غیرویندوز خودش را skip می‌کند (kernel32) |
+| **تست‌های واحد** | ✅ **۲۶۴ تست، همه آفلاین، ~۵۰ ثانیه** (`.\gradlew.bat test`) — تنها `AppListReproTest` روی غیرویندوز خودش را skip می‌کند (kernel32) |
 
 ### تست‌ها به‌عنوان شبکه ایمنی (چه چیزی را می‌گیرند)
 
@@ -995,7 +995,7 @@ SSH چک کن که سرور همان لحظه در دسترس است.
 2. `git log --oneline` برای تاریخچه.
 3. `desktop\fetch-cores.ps1` را اجرا کن و جدول خلاصه‌اش را چک کن — اگر `resources/bin/`
    خالی باشد اپ بیلد می‌شود ولی با هیچ پروتکلی وصل نمی‌شود و خطای واضحی هم نمی‌دهد.
-4. `.\gradlew.bat test` — باید ۲۰۸ تست سبز باشد. بعد `createDistributable`.
+4. `.\gradlew.bat test` — باید ۲۶۴ تست سبز باشد. بعد `createDistributable`.
 5. `MultiVPN.exe` را اجرا کن؛ Setup → **Hysteria2** باید کانفیگ‌های موجود x-ui را detect
    کند و اتصالش کار کند (بهترین سناریوی smoke-test).
 6. قبل از هر تغییر: `app.log` را ببین (Settings → View app log) — همه‌چیز لاگ می‌شود.
