@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="fa">
+<head>
+<meta charset="UTF-8">
+<title>MultiVPN — banner drafts</title>
+<style>
+  :root{
+    --bg:#05070E; --panel:#0B101E; --indigo:#6D5DFB; --cyan:#2DD4E8;
+    --mint:#7CF5D2; --violet:#8B5CF6; --blue:#4F8CFF;
+    --text:#E7ECF6; --muted:#9BA9C3;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#020309;font-family:"Segoe UI",Tahoma,sans-serif;color:var(--text)}
+  .wrap{width:1200px;margin:0 auto;padding:24px 0 60px}
+  .label{font:600 13px "Segoe UI";color:var(--muted);margin:28px 0 8px;direction:rtl;text-align:right}
+  .banner{width:1200px;height:500px;position:relative;overflow:hidden;background:var(--bg);border-radius:8px}
+  body.single .label{display:none}
+  body.single .banner{display:none;border-radius:0}
+  body.single .banner.show{display:flex}
+
+  /* ---------- shared bits ---------- */
+  .brandrow{display:flex;align-items:center;gap:12px}
+  .brandrow img{width:42px;height:42px;border-radius:10px;box-shadow:0 4px 18px rgba(109,93,251,.45)}
+  .brandrow .name{font-weight:700;font-size:19px;color:#fff;letter-spacing:.2px}
+  .badge{font:700 11px "Segoe UI";letter-spacing:2.5px;color:var(--cyan);border:1px solid rgba(45,212,232,.45);
+         padding:5px 12px;border-radius:999px;background:rgba(45,212,232,.06)}
+  .check{display:flex;align-items:flex-start;gap:10px;font-size:14px;color:var(--text)}
+  .check .dot{flex:none;width:18px;height:18px;border-radius:50%;margin-top:1px;
+    background:linear-gradient(135deg,var(--indigo),var(--cyan));display:flex;align-items:center;justify-content:center}
+  .check .dot svg{width:10px;height:10px;stroke:#fff;stroke-width:3;fill:none}
+  .grad{background:linear-gradient(90deg,var(--violet) 0%,var(--indigo) 45%,var(--cyan) 100%);
+        -webkit-background-clip:text;background-clip:text;color:transparent}
+
+  /* ---------- fake app window ---------- */
+  .win{position:absolute;width:490px;height:318px;background:#0A0F1D;border:1px solid rgba(255,255,255,.09);
+       border-radius:12px;box-shadow:0 30px 80px rgba(0,0,0,.65),0 0 0 1px rgba(109,93,251,.12);overflow:hidden}
+  .win .bar{height:32px;background:#0D1220;display:flex;align-items:center;padding:0 12px;gap:6px;border-bottom:1px solid rgba(255,255,255,.05)}
+  .win .bar i{width:9px;height:9px;border-radius:50%;display:block}
+  .win .bar i:nth-child(1){background:#FF5F57}.win .bar i:nth-child(2){background:#FEBC2E}.win .bar i:nth-child(3){background:#28C840}
+  .win .bar span{flex:1;text-align:center;font-size:10px;color:var(--muted);margin-right:-52px}
+  .win .body{display:flex;height:calc(100% - 32px)}
+  .win .side{width:104px;background:rgba(255,255,255,.02);border-left:1px solid rgba(255,255,255,.04);
+             padding:10px 7px;display:flex;flex-direction:column;gap:4px}
+  .win .side b{font-size:10.5px;font-weight:600;color:var(--text);padding:7px 8px;border-radius:7px;display:block;direction:rtl;text-align:right}
+  .win .side b.on{background:rgba(109,93,251,.28);color:#fff}
+  .win .side b:not(.on){color:var(--muted)}
+  .win .main{flex:1;position:relative;background:
+      radial-gradient(90px 70px at 80% 0%,rgba(139,92,246,.25),transparent 70%),
+      radial-gradient(110px 90px at 10% 100%,rgba(45,212,232,.16),transparent 70%),#070912;
+      display:flex;flex-direction:column;align-items:center;padding-top:16px}
+  .ring{width:104px;height:104px;border-radius:50%;position:relative;
+        background:conic-gradient(var(--indigo),var(--cyan) 65%,rgba(255,255,255,.06) 65%);}
+  .ring::after{content:"";position:absolute;inset:7px;border-radius:50%;background:#070912}
+  .ring .c{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:2}
+  .ring .c em{width:7px;height:7px;border-radius:50%;background:#34D399;box-shadow:0 0 8px #34D399;margin-bottom:5px}
+  .ring .c b{font-size:13px;color:#fff}
+  .ring .c s{font-size:9px;color:var(--muted);text-decoration:none;margin-top:2px}
+  .facts{display:flex;gap:5px;margin-top:12px;direction:rtl}
+  .facts i{font-style:normal;font-size:8.5px;color:var(--muted);background:rgba(255,255,255,.05);
+           border:1px solid rgba(255,255,255,.07);border-radius:5px;padding:3px 7px}
+  .facts i b{color:var(--text);font-weight:600}
+  .card{margin-top:10px;width:86%;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);
+        border-radius:8px;padding:7px 10px;display:flex;align-items:center;gap:8px;direction:rtl}
+  .card em{width:7px;height:7px;border-radius:50%;background:var(--cyan);flex:none}
+  .card b{font-size:9.5px;color:var(--text);font-weight:600;flex:1}
+  .card u{text-decoration:none;font-size:8.5px;color:#34D399;background:rgba(52,211,153,.12);border-radius:5px;padding:2px 6px}
+
+  /* ================= V1 : studio grid ================= */
+  .v1{background:
+      radial-gradient(700px 400px at 88% -10%,rgba(79,140,255,.14),transparent 60%),
+      radial-gradient(600px 400px at -5% 110%,rgba(139,92,246,.12),transparent 60%),
+      var(--bg)}
+  .v1::before{content:"";position:absolute;inset:0;background:
+      repeating-linear-gradient(0deg,rgba(255,255,255,.033) 0 1px,transparent 1px 44px),
+      repeating-linear-gradient(90deg,rgba(255,255,255,.033) 0 1px,transparent 1px 44px)}
+  .v1::after{content:"";position:absolute;inset:0;background:radial-gradient(90% 120% at 30% 40%,transparent 40%,rgba(2,3,9,.75))}
+  .v1 .inner{position:absolute;inset:0;padding:44px 48px;z-index:2}
+  .v1 h1{font-size:56px;font-weight:900;color:#fff;margin-top:34px;letter-spacing:-.5px}
+  .v1 h2{font-size:38px;font-weight:800;margin-top:2px}
+  .v1 p{margin-top:18px;font-size:14.5px;line-height:1.9;color:var(--muted);width:560px}
+  .v1 .checks{margin-top:20px;display:flex;flex-direction:column;gap:11px;width:560px}
+  .v1 .win{right:44px;top:50%;transform:translateY(-50%)}
+
+  /* ================= V2 : aurora rtl ================= */
+  .v2{background:var(--bg)}
+  .v2 .blob{position:absolute;border-radius:50%;filter:blur(70px);opacity:.5}
+  .v2 .b1{width:520px;height:420px;background:var(--violet);left:-140px;top:-160px}
+  .v2 .b2{width:460px;height:380px;background:var(--cyan);right:28%;bottom:-200px;opacity:.32}
+  .v2 .b3{width:380px;height:320px;background:var(--mint);right:-120px;top:-120px;opacity:.22}
+  .v2 .inner{position:absolute;inset:0;padding:44px 52px;z-index:2;direction:rtl}
+  .v2 .brandrow{justify-content:flex-start;flex-direction:row}
+  .v2 h1{font-size:54px;font-weight:900;color:#fff;margin-top:30px}
+  .v2 h2{font-size:36px;font-weight:800;margin-top:2px}
+  .v2 p{margin-top:14px;font-size:14px;line-height:1.9;color:var(--muted);width:540px}
+  .chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:16px;width:560px}
+  .chips i{font-style:normal;font-size:11.5px;font-weight:600;color:var(--text);
+           background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.09);
+           border-radius:999px;padding:5px 11px;display:flex;align-items:center;gap:6px}
+  .chips i::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--cyan)}
+  /* Full-tunnel protocols: the ones proxy-only clients can't do — bold + lit */
+  .chips i.hot{font-weight:800;color:#fff;border-color:rgba(45,212,232,.6);
+               background:rgba(45,212,232,.13);box-shadow:0 0 14px rgba(45,212,232,.18)}
+  .v2 .checks{margin-top:16px;display:flex;flex-wrap:wrap;gap:11px 24px;width:430px}
+  .v2 .win{left:52px;top:50%;transform:translateY(-50%);box-shadow:0 30px 90px rgba(0,0,0,.7),0 0 60px rgba(109,93,251,.25)}
+
+  /* ================= V3 : terminal ================= */
+  .v3{background:
+      radial-gradient(600px 380px at 90% 0%,rgba(45,212,232,.10),transparent 60%),var(--bg)}
+  .v3::before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(255,255,255,.02) 0 2px,transparent 2px 4px)}
+  .v3 .inner{position:absolute;inset:0;padding:46px 48px;z-index:2}
+  .v3 h1{font-size:48px;font-weight:900;color:#fff;margin-top:30px}
+  .v3 h2{font-size:30px;font-weight:800;margin-top:4px}
+  .v3 p{margin-top:16px;font-size:14px;line-height:1.9;color:var(--muted);width:520px}
+  .v3 .checks{margin-top:18px;display:flex;flex-direction:column;gap:11px;width:520px}
+  .term{position:absolute;right:44px;top:50%;transform:translateY(-50%);width:520px;height:300px;
+        background:#070B14;border:1px solid rgba(255,255,255,.09);border-radius:12px;overflow:hidden;
+        box-shadow:0 30px 80px rgba(0,0,0,.65)}
+  .term .bar{height:30px;background:#0C111F;display:flex;align-items:center;padding:0 12px;gap:6px;border-bottom:1px solid rgba(255,255,255,.05)}
+  .term .bar i{width:9px;height:9px;border-radius:50%}
+  .term .bar i:nth-child(1){background:#FF5F57}.term .bar i:nth-child(2){background:#FEBC2E}.term .bar i:nth-child(3){background:#28C840}
+  .term .bar span{flex:1;text-align:center;font:10px Consolas;color:var(--muted);margin-right:-52px}
+  .term pre{margin:0;padding:16px 18px;font:12.5px/2 Consolas,"Courier New",monospace;color:#C6D4F0;direction:ltr;text-align:left}
+  .term .p{color:var(--mint)} .term .ok{color:#34D399} .term .dim{color:#5B6B8C} .term .am{color:#FBBF24}
+
+  /* ================= V4 : split poster ================= */
+  .v4{display:flex;background:var(--bg)}
+  .v4 .left{width:44%;height:100%;background:linear-gradient(150deg,var(--indigo) 0%,#4E7BF7 55%,var(--cyan) 100%);
+            position:relative;overflow:hidden}
+  .v4 .left .wm{position:absolute;left:-40px;top:-30px;width:420px;height:420px;opacity:.16}
+  .v4 .left .cap{position:absolute;left:40px;bottom:44px}
+  .v4 .left .cap b{font-size:46px;font-weight:900;color:#fff;display:block;letter-spacing:-.5px}
+  .v4 .left .cap span{font-size:14px;color:rgba(255,255,255,.85);display:block;margin-top:6px}
+  .v4 .right{flex:1;padding:52px 48px;direction:rtl;position:relative}
+  .v4 .pill{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:var(--cyan);
+            border:1px solid rgba(45,212,232,.4);border-radius:999px;padding:6px 14px;background:rgba(45,212,232,.06)}
+  .v4 h1{font-size:46px;font-weight:900;color:#fff;margin-top:20px}
+  .feats{margin-top:26px;display:flex;flex-direction:column;gap:16px}
+  .feats .f{display:flex;gap:14px;align-items:flex-start}
+  .feats .ic{flex:none;width:38px;height:38px;border-radius:10px;background:rgba(109,93,251,.16);
+             border:1px solid rgba(109,93,251,.4);display:flex;align-items:center;justify-content:center}
+  .feats .ic svg{width:18px;height:18px;stroke:var(--cyan);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .feats b{font-size:15px;color:#fff;display:block}
+  .feats span{font-size:12px;color:var(--muted);display:block;margin-top:2px}
+</style>
+</head>
+<body>
+<div class="wrap single-off" id="wrap">
+
+  <div class="label">طرح ۱ — سبک «استودیو» (شبیه بنر مرجع): شبکه‌ی محو، متن چپ، پنجره‌ی اپ راست</div>
+  <div class="banner v1" id="b1">
+    <div class="inner">
+      <div class="brandrow">
+        <img src="/icon/icon-2-shield-m-256.png" alt="">
+        <span class="name">multivpn</span>
+        <span class="badge">MULTI-PROTOCOL · WINDOWS</span>
+      </div>
+      <h1>MultiVPN.</h1>
+      <h2 class="grad">هشت پروتکل. یک برنامه.</h2>
+      <p>MultiVPN خودش VPS را با فقط IP و پسورد SSH راه می‌اندازد؛ نصب، کانفیگ و اتصال همگی
+         داخل خودِ برنامه انجام می‌شود — نه ترمینال، نه اسکریپت دستی، نه ابزار جانبی.</p>
+      <div class="checks">
+        <div class="check"><span class="dot"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 7"/></svg></span>نصب خودکار روی سرور — با یک کلیک و لاگ زنده</div>
+        <div class="check"><span class="dot"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 7"/></svg></span>پینگ واقعی از داخل تونل — نه ICMP دروغین</div>
+        <div class="check"><span class="dot"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 7"/></svg></span>بدون UAC برای اکثر پروتکل‌ها — سبک و سریع</div>
+      </div>
+    </div>
+    <div class="win">
+      <div class="bar"><i></i><i></i><i></i><span>MultiVPN</span></div>
+      <div class="body">
+        <div class="side"><b class="on">خانه</b><b>کانفیگ‌ها</b><b>سرورها</b><b>تنظیمات</b></div>
+        <div class="main">
+          <div class="ring"><span class="c"><em></em><b>وصل شد</b><s>00:12:47</s></span></div>
+          <div class="facts"><i>IP <b>5.20.…</b></i><i>پروتکل <b>Hysteria2</b></i><i>پینگ <b>420 ms</b></i></div>
+          <div class="card"><em></em><b>Hysteria2 ⭐ Tehran-01</b><u>420 ms</u></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="label">طرح ۲ — «شفق» (RTL): هاله‌های نور بنفش/فیروزه‌ای، متن راست، چیپ‌های ۸ پروتکل، پنجره چپ</div>
+  <div class="banner v2" id="b2">
+    <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+    <div class="inner">
+      <div class="brandrow">
+        <img src="/icon/icon-2-shield-m-256.png" alt="">
+        <span class="name">MultiVPN</span>
+        <span class="badge">v3.6.17</span>
+      </div>
+      <h1>هشت پروتکل.</h1>
+      <h2 class="grad">یک برنامه.</h2>
+      <p>نصب خودکار روی VPS یا ایمپورت کانفیگ و اشتراک — از لینک vless/hy2 و آدرس ساب
+         تا فایل ‎.conf و ‎.ovpn؛ همه با اتصالِ یک‌کلیکی.</p>
+      <div class="chips">
+        <i>Hysteria2</i><i>VLESS + Reality</i><i>Trojan</i><i>SS-2022</i><i class="hot">IKEv2</i><i>WireGuard</i><i class="hot">AmneziaWG 3.1</i><i class="hot">OpenVPN</i>
+      </div>
+      <div class="checks">
+        <div class="check"><span class="dot"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 7"/></svg></span>نصب خودکار روی VPS</div>
+        <div class="check"><span class="dot"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 7"/></svg></span>ایمپورت کانفیگ و ساب</div>
+        <div class="check"><span class="dot"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 7"/></svg></span>پینگ واقعی از داخل تونل</div>
+        <div class="check"><span class="dot"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 7"/></svg></span>اسپلیت‌تانلینگ و TUN</div>
+      </div>
+    </div>
+    <div class="win">
+      <div class="bar"><i></i><i></i><i></i><span>MultiVPN</span></div>
+      <div class="body">
+        <div class="side"><b class="on">خانه</b><b>کانفیگ‌ها</b><b>سرورها</b><b>تنظیمات</b></div>
+        <div class="main">
+          <div class="ring"><span class="c"><em></em><b>وصل شد</b><s>00:12:47</s></span></div>
+          <div class="facts"><i>IP <b>5.20.…</b></i><i>پروتکل <b>AmneziaWG 3.1</b></i><i>پینگ <b>380 ms</b></i></div>
+          <div class="card"><em></em><b>AmneziaWG 3.1 · Dubai-02</b><u>380 ms</u></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="label">طرح ۳ — «ترمینال زنده»: حس نصب خودکار، لاگ استریم واقعی، متن چپ و ترمینال راست</div>
+  <div class="banner v3" id="b3">
+    <div class="inner">
+      <div class="brandrow">
+        <img src="/icon/icon-2-shield-m-256.png" alt="">
+        <span class="name">multivpn</span>
+        <span class="badge">SETUP · AUTOMATED</span>
+      </div>
+      <h1>از SSH تا تونل،</h1>
+      <h2 class="grad">خودکار.</h2>
+      <p>فقط IP و پسورد سرور را بده؛ MultiVPN خودش نصب‌های موجود را تشخیص می‌دهد،
+         کانفیگ می‌سازد، وصل می‌شود و ترافیک واقعی را تأیید می‌کند.</p>
+      <div class="checks">
+        <div class="check"><span class="dot"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 7"/></svg></span>تشخیص نصب‌های موجود — x-ui، Amnezia، WireGuard</div>
+        <div class="check"><span class="dot"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 7"/></svg></span>لاگ زنده‌ی نصب، داخل خود برنامه</div>
+        <div class="check"><span class="dot"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 7"/></svg></span>«وصل شد» فقط بعد از تأیید ترافیک واقعی</div>
+      </div>
+    </div>
+    <div class="term">
+      <div class="bar"><i></i><i></i><i></i><span>MultiVPN — live setup</span></div>
+      <pre><span class="p">$</span> ssh root@203.0.113.9
+<span class="dim">[+]</span> existing install detected: <span class="am">x-ui</span>
+<span class="dim">[+]</span> hysteria2 inbound · version 2
+<span class="dim">[+]</span> client config issued
+<span class="ok">[✓]</span> traffic verified — 204 in 480 ms
+<span class="ok">[✓]</span> tunnel up</pre>
+    </div>
+  </div>
+
+  <div class="label">طرح ۴ — «پوستر دو تکه»: پنل گرادیانی با لوگو، فهرست ویژگی‌ها با آیکون</div>
+  <div class="banner v4" id="b4">
+    <div class="left">
+      <svg class="wm" viewBox="0 0 100 100"><path d="M50 4 L88 18 V50 C88 74 70 90 50 96 C30 90 12 74 12 50 V18 Z" fill="#fff"/><text x="50" y="66" font-family="Segoe UI" font-weight="900" font-size="44" fill="#5B4BD5" text-anchor="middle">M</text></svg>
+      <div class="cap"><b>MultiVPN</b><span>برای ویندوز ۱۰ / ۱۱ — بدون نصب جاوا</span></div>
+    </div>
+    <div class="right">
+      <span class="pill">۸ پروتکل · یک برنامه</span>
+      <h1>امن وصل شو.</h1>
+      <div class="feats">
+        <div class="f">
+          <span class="ic"><svg viewBox="0 0 24 24"><path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"/></svg></span>
+          <div><b>نصب خودکار سرور</b><span>فقط IP و پسورد SSH — بقیه‌اش خودکار</span></div>
+        </div>
+        <div class="f">
+          <span class="ic"><svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.5-3.4 7.6-8 9-4.6-1.4-8-4.5-8-9V6l8-3z"/></svg></span>
+          <div><b>بدون UAC برای اکثر پروتکل‌ها</b><span>پروکسی userspace — سبک و سریع</span></div>
+        </div>
+        <div class="f">
+          <span class="ic"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg></span>
+          <div><b>پینگ واقعی از داخل تونل</b><span>تأیید ترافیک واقعی، نه ICMP دروغین</span></div>
+        </div>
+        <div class="f">
+          <span class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M9 4v14"/></svg></span>
+          <div><b>TUN و اسپلیت‌تانلینگ</b><span>انتخاب اپ به اپ با آیکون واقعی</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+<script>
+  const v = new URLSearchParams(location.search).get("v");
+  if (v) {
+    document.getElementById("wrap").classList.add("single");
+    document.body.classList.add("single");
+    document.getElementById("b" + v).classList.add("show");
+    document.body.style.background = "#020309";
+    document.querySelector(".wrap").style.padding = "0";
+  }
+</script>
+</body>
+</html>
