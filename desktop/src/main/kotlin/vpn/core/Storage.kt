@@ -14,6 +14,52 @@ object Storage {
         encodeDefaults = true
     }
 
+    /** One relaxed pass for the subscriptions rescue only. kotlinx.serialization
+     *  has NO trailing-comma option, so [stripTrailingCommas] removes them
+     *  textually first. NEVER used for servers/configs/settings, where a
+     *  relaxed parse could mask corruption of encrypted secrets. */
+    private val lenientJson = Json {
+        ignoreUnknownKeys = true
+    }
+
+    /**
+     * String-aware trailing-comma stripper: drops a `,` only when it is
+     * followed by whitespace and a closing `]`/`}` OUTSIDE a JSON string
+     * literal. Commas inside "…,]" strings and escaped quotes survive.
+     */
+    internal fun stripTrailingCommas(text: String): String {
+        val out = StringBuilder(text.length)
+        var i = 0
+        var inString = false
+        var escaped = false
+        while (i < text.length) {
+            val c = text[i]
+            when {
+                inString -> {
+                    out.append(c)
+                    when {
+                        escaped -> escaped = false
+                        c == '\\' -> escaped = true
+                        c == '"' -> inString = false
+                    }
+                    i++
+                }
+                c == '"' -> { inString = true; out.append(c); i++ }
+                c == ',' -> {
+                    var j = i + 1
+                    while (j < text.length && text[j].isWhitespace()) j++
+                    if (j < text.length && (text[j] == ']' || text[j] == '}')) {
+                        i++ // drop the comma; the whitespace stays untouched
+                    } else {
+                        out.append(c); i++
+                    }
+                }
+                else -> { out.append(c); i++ }
+            }
+        }
+        return out.toString()
+    }
+
     val dataDir: File by lazy {
         // TEST ISOLATION: the Gradle test task pins this property to a scratch
         // dir, so the suite can never touch the developer's real data files
@@ -94,8 +140,41 @@ object Storage {
             VpnConfig.serializer(),
         )
 
-    fun loadSubscriptions(): List<Subscription> =
-        loadList("subscriptions.json", Subscription.serializer()).items
+    /**
+     * Lenient fallback for subscriptions.json (3.6.17, §8-5). The strict
+     * parser quarantined a user's subscription list over a single trailing
+     * comma; subscriptions are machine-edited data, not a secret store, so
+     * one relaxed pass is worth it: trailing commas allowed, and a leading
+     * UTF-8 BOM (PowerShell tooling writes one) stripped. On rescue the file
+     * is REWRITTEN with the canonical strict serializer, so the fallback can
+     * only ever run once per corruption. A genuinely broken file still goes
+     * through the .corrupt-* quarantine — nothing is silently emptied.
+     */
+    fun loadSubscriptions(): List<Subscription> {
+        val f = File(dataDir, "subscriptions.json")
+        if (!f.exists()) return emptyList()
+        val text = try {
+            f.readText()
+        } catch (_: Exception) {
+            return emptyList()
+        }
+        return try {
+            json.decodeFromString(ListSerializer(Subscription.serializer()), text)
+        } catch (_: Exception) {
+            try {
+                val rescued = lenientJson.decodeFromString(
+                    ListSerializer(Subscription.serializer()),
+                    stripTrailingCommas(text).trimStart('\uFEFF'),
+                )
+                AppLog.i("Storage", "subscriptions.json recovered with the lenient parser — rewriting canonically")
+                atomicSaveList("subscriptions.json", rescued, Subscription.serializer())
+                rescued
+            } catch (e: Exception) {
+                quarantine("subscriptions.json", e)
+                emptyList()
+            }
+        }
+    }
 
     /** v3.1 migration: generated configs move into the "my_servers" folder,
      *  re-linked to their server by IP when possible.
@@ -216,16 +295,22 @@ object Storage {
         return try {
             LoadedList(json.decodeFromString(ListSerializer(serializer), f.readText()), true)
         } catch (e: Exception) {
-            // Rename the corrupt file instead of silently returning empty —
-            // otherwise a follow-up migration save would overwrite a
-            // recoverable file with [] and lose every server/config.
-            val corrupt = File(dataDir, "$name.corrupt-${System.currentTimeMillis()}")
-            runCatching {
-                Files.move(f.toPath(), corrupt.toPath(), StandardCopyOption.REPLACE_EXISTING)
-            }
-            AppLog.e("Storage", "Failed to parse $name — kept as ${corrupt.name}: ${e.message}")
+            quarantine(name, e)
             LoadedList(emptyList(), false)
         }
+    }
+
+    /**
+     * Renames an unparseable file instead of silently returning empty —
+     * otherwise a follow-up migration save would overwrite a recoverable
+     * file with [] and lose every server/config.
+     */
+    private fun quarantine(name: String, e: Exception) {
+        val corrupt = File(dataDir, "$name.corrupt-${System.currentTimeMillis()}")
+        runCatching {
+            Files.move(File(dataDir, name).toPath(), corrupt.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
+        AppLog.e("Storage", "Failed to parse $name — kept as ${corrupt.name}: ${e.message}")
     }
 
     /** Atomic write of a single object (temp file + ATOMIC_MOVE). */
