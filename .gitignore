@@ -56,3 +56,7 @@ desktop/src/main/resources/bin/
 .tools/
 .zcode/
 .freebuff/
+
+# Banner drafts: intermediate renders stay local; the source HTML and the
+# final PNG are tracked.
+desktop/banners/drafts/*.png
