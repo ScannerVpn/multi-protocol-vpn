@@ -440,3 +440,26 @@ $env:LIVE_PING_LINKS = "$env:TEMP\mvpn-diag\links.json"   # [{name, protocol, li
   با پارسر واقعی بخوان، نه regex؛ وگرنه بی‌صدا فقط بخشی از رکوردها را می‌بینی (۲ از ۵۷).
 - **آستانه‌ی رنگ/زمان را از حدس نگذار.** ۱۵۰/۴۰۰ برای پینگ منطقی به نظر می‌رسید و در عمل
   همه‌ی کانفیگ‌های سالم را قرمز می‌کرد → قرارداد ۱۲ و §۷ (جدول اندازه‌گیری).
+
+---
+
+## ۹. نسخه اندروید (فاز ۱ — ۲ سپتامبر ۲۰۲۶، نسخه 0.1.0)
+
+پوشه `android/` — Kotlin + Jetpack Compose، minSdk 26 / target 35، AGP 8.7.3 / Gradle 8.14.
+جزئیات کامل: `android/README.md`. وضعیت: **مدیریت کانفیگ کار میکند؛ موتور تونل عمداً غایب و
+صادقانه اعلام میشود** (PlaceholderEngine — هیچ Connected/پینگ جعلی، همان قرارداد §۴).
+
+- **هسته مشترک:** ۵ فایل پرتابل دسکتاپ (`Links/Models/Ports/LatencyGrade/Awg`) کپی بایتبهبایت
+  با پکیج یکسان `vpn.core` در `android/app/src/main/java/vpn/core/`؛ `LinksParityTest` واگرایی
+  را میگیرد. همگرایی به KMP (`shared/commonMain`) = بدهی ساختاری (فاز ۵).
+- **تفاوت عمدی:** `Ports.kt` اندروید خط `Storage.loadSettings()` ندارد (settings هنوز نیست —
+  default 10808، کامنت divergence در فایل). `Store.kt` اندروید معامل storage است (اتمیک +
+  قرنطینه + نجات subscriptions) با `SecretKeeper` بهجای DPAPI (Android Keystore، همان
+  قرارداد prefix/unwrap).
+- **تستها:** ۱۲ تست JVM سبز (پارتن پاریت + Store: اتمیک/قرنطینه/نجات).
+- **بیلد:** منابع از میرورهای aliyun (شبکه کاربر — dl.google.com ناپایدار؛ بند §۲ دسکتاپ)؛
+  از Git Bash حتماً `TMP/TEMP` ویندوزی ست شود وگرنه AAPT2 میمیرد.
+- **تأیید زنده:** بیلد + نصب + اجرا روی ایمولاتور (EmuTest/API 37)؛ ایمپورت ۲ لینک از UI واقعی
+  و ماندگاری بعد از ریاستارت تأیید شد (اسکرین‌شات: `android/docs/screenshot-*.png`).
+- **فاز ۲ (بعدی):** موتور تونل — sing-box libbox AAR پشت `android.net.VpnService`،
+  `verifyTraffic` قبل از «Connected». فاز ۳: پینگ واقعی. فاز ۴: SSH provision.
