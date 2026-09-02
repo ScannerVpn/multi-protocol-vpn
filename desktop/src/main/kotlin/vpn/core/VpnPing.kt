@@ -364,15 +364,33 @@ internal object VpnPing {
     private const val WAVE_IDLE_POLL_MS = 250L
 
     /**
+     * Warm re-measurement for the Fastest sort (3.6.17).
+     *
+     * The cold wave's numbers shuffle between runs (Spearman 0.18 on the
+     * user's 57-config list, PLAN §7) because they were measured under a
+     * 16-wide wave; a SECOND request on the same core is stable (0.47,
+     * std-dev 43 ms vs 151 ms) and is the number Fastest should sort on.
+     * The first request is discarded — it still pays the temp core's
+     * cold-start overhead. Only the XRAY family gets this pass (it is the
+     * parallel, dominant family; the fixed-port families serialize and their
+     * cold number is already stable). Runs behind [confirmGate] because a
+     * warm pass is the same "nearly alone" regime as the confirmation pass.
+     */
+    suspend fun warmXrayPing(parsed: ProxyLink): RealPingResult =
+        xrayPingOnce(parsed, confirmGate, CONFIRM_TIMEOUT_MS, warm = true)
+
+    /**
      * ONE realping attempt: temp core on a claimed scratch pair, real HTTP
      * through it, kill. [gate] bounds concurrency ([racerGate] for the fast
-     * wave, [confirmGate] for the confirmation), [timeoutMs] is the traffic
-     * budget.
+     * wave, [confirmGate] for the confirmation and warm passes), [timeoutMs]
+     * is the traffic budget. With [warm], the first request is a discardable
+     * warm-up and the SECOND request's elapsed time is the number.
      */
     private suspend fun xrayPingOnce(
         parsed: ProxyLink,
         gate: Semaphore,
         timeoutMs: Int,
+        warm: Boolean = false,
     ): RealPingResult = gate.withPermit {
         // Session guard WITHOUT queueing: a ping arriving while a session is
         // live or starting must return instantly, not stack behind it. Kept
@@ -423,8 +441,16 @@ internal object VpnPing {
             // `error("unreachable")` — Kotlin discarded the value and threw on
             // EVERY successful xray ping, so vless/trojan/ss rows could never
             // show a number (app.log: "latency infra error: unreachable").
-            val ms = TrafficProbe.latencyThroughProxy(ports.second, timeoutMs)
-            return@withPermit if (ms != null) RealPingResult.Ok(ms) else RealPingResult.Failed
+            val warmUp = TrafficProbe.latencyThroughProxy(ports.second, timeoutMs)
+            if (!warm) {
+                return@withPermit if (warmUp != null) RealPingResult.Ok(warmUp) else RealPingResult.Failed
+            }
+            // Warm pass: the first request is the warm-up (discarded — it
+            // still carries the temp core's cold start); the second request
+            // is the number Fastest sorts on. A failed warm-up means the
+            // tunnel does not carry traffic at all.
+            val measured = TrafficProbe.latencyThroughProxy(ports.second, timeoutMs)
+            return@withPermit warmOutcome(warmUp, measured)
         } catch (_: Exception) {
             return@withPermit RealPingResult.Failed
         } finally {
@@ -434,6 +460,16 @@ internal object VpnPing {
             releaseScratchPorts(ports)
             conf.delete()
         }
+    }
+
+    /**
+     * Pure verdict of a warm pass: the SECOND request is the answer; the
+     * first (warm-up) is discarded. Either probe failing means the tunnel
+     * does not carry traffic.
+     */
+    internal fun warmOutcome(warmUp: Int?, measured: Int?): RealPingResult = when {
+        warmUp == null || measured == null -> RealPingResult.Failed
+        else -> RealPingResult.Ok(measured)
     }
 
     /** Port probe against an arbitrary local port (the fixed-port variants

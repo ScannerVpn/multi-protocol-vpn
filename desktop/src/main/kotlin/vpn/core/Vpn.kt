@@ -213,6 +213,28 @@ object VpnService {
             else -> null
         }
 
+    /**
+     * Warm re-measurement used ONLY to stabilise the Fastest sort (3.6.17).
+     *
+     * The cold wave's numbers are noisy between runs (Spearman 0.18, PLAN §7);
+     * a SECOND request on the same temp core is stable (0.47) and is what the
+     * sort should trust. Runs nearly alone behind VpnPing's confirm gate, so
+     * it never re-creates the 16-wide contention that made the cold numbers
+     * shuffle. Only the XRAY family gets this pass — it is the parallel,
+     * dominant family; the fixed-port families serialize and their cold
+     * number is already stable. Any other outcome (Failed/Skipped) is NOT
+     * final: the cold number the row already proved stays on screen.
+     */
+    suspend fun warmLatencyResult(config: VpnConfig): RealPingResult =
+        withContext(Dispatchers.IO) {
+            val link = config.xrayLink?.let { Links.parse(it) }
+            when {
+                classifyLatencyEngine(config) == LatencyEngine.XRAY && link != null ->
+                    VpnPing.warmXrayPing(link)
+                else -> RealPingResult.Skipped
+            }
+        }
+
     /** Delegates kept on the facade for tests and future callers. */
     suspend fun scanPorts(host: String, ports: List<Int>, timeoutMs: Int = 3000): Int? =
         VpnPing.scanPorts(host, ports, timeoutMs)

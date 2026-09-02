@@ -5,7 +5,8 @@
 > جزئیات تاریخی: `HANDOFF.md` (درس‌های دیباگ در §۵ آن). آخرین بازبینی کد: `AUDIT-2026-08-31.md`.
 > **قانون دائمی:** بعد از هر دورِ کار، همین فایل را به‌روز کن (وضعیت، قراردادها، باقی‌مانده). گزارش فقط در چت کافی نیست.
 >
-> آخرین به‌روزرسانی: **۲ سپتامبر ۲۰۲۶ — نسخه 3.6.16، دور ۸: دیالوگ انتخابِ بستن (X) + رفع ریشه‌ای باگ پینگ (طوفان استخراج هسته و رقابت شبکه) + آستانه‌های واقعیِ رنگ پینگ.**
+> آخرین به‌روزرسانی: **۲ سپتامبر ۲۰۲۶ — دور ۹ (نسخه 3.6.17) در جریان:** همگام‌سازی اسناد + پاس گرم برای تثبیت مرتب‌سازی «Fastest».
+> (دور ۸ = 3.6.16: دیالوگ انتخابِ بستن (X) + رفع ریشه‌ای باگ پینگ + آستانه‌های واقعیِ رنگ پینگ.)
 
 ---
 
@@ -30,7 +31,7 @@
 
 ## ۲. وضعیت فعلی (تأییدشده با اجرا — ۲ سپتامبر ۲۰۲۶)
 
-- **۲۶۴ تست، ۰ شکست** — `gradlew test` آفلاین ~۵۰ ثانیه (نتایج: `desktop/build/test-results/test`).
+- **۲۷۰ تست، ۰ شکست** — `gradlew test` آفلاین ~۵۰ ثانیه (نتایج: `desktop/build/test-results/test`).
   از این‌ها ۴ تست «زنده» (`assumeTrue`) فقط با env var اجرا می‌شوند و در شمارش عادی SKIPPED‌اند.
 - `createDistributable` سبز؛ EXE: `desktop/build/compose/binaries/main/app/MultiVPN/MultiVPN.exe`.
 - نسخه **3.6.16** — فقط در `desktop/build.gradle.kts` (`val appVersion`)؛ تسک `generateBuildInfo`
@@ -54,7 +55,7 @@ stateهای observable (latency، pinging، vpnStatus، settings، ...) آنجا
 | فایل | مسئولیت کلیدی |
 |---|---|
 | `Vpn.kt` (986L) | **VpnService** — رهبر ارکستر: connect/disconnect/abort per-protocol، owner وضعیت سشن (`connectionActive`، `openvpnSessionActive`، `sessionTunMode`)، classification موتور پینگ (`classifyLatencyEngine`)، reconciliation کانکت‌های ناکام که ترافیک دارند |
-| `VpnPing.kt` (470L) | realping سه‌خانواده (xray/hysteria/wireproxy)، پول پورت scratch، `racerGate` سمیافور PARALLEL=16، **پاسِ دومِ تأیید** (`confirmXrayPing` + `awaitWaveIdle` + `confirmGate` با CONFIRM_PARALLEL=2 و CONFIRM_TIMEOUT_MS=5000 — §۷)، `isTcpBasedTransport` (precheck فقط TCP-محور)، `safeHost` (گارد injection)، `pingMs` (ICMP PowerShell — فقط diagnostic)، بودجه‌های زمانی |
+| `VpnPing.kt` (470L) | realping سه‌خانواده (xray/hysteria/wireproxy)، پول پورت scratch، `racerGate` سمیافور PARALLEL=16، **پاسِ دومِ تأیید** (`confirmXrayPing` + `awaitWaveIdle` + `confirmGate` با CONFIRM_PARALLEL=2 و CONFIRM_TIMEOUT_MS=5000 — §۷)، **پاس گرم** (`warmXrayPing` + `warmOutcome` خالص — درخواست اول دور ریخته، عددِ دوم برمی‌گردد؛ §۷/§۴-۱۴)، `isTcpBasedTransport` (precheck فقط TCP-محور)، `safeHost` (گارد injection)، `pingMs` (ICMP PowerShell — فقط diagnostic)، بودجه‌های زمانی |
 | `LatencyGrade.kt` | **تک‌منبع آستانه‌های رنگ پینگ**: GOOD <600 / FAIR <1000 / POOR. اعداد از اندازه‌گیری واقعیِ لیست کاربر آمده‌اند (§۷)، نه از حدس |
 | `CloseBehavior.kt` | تصمیم‌های خالصِ دکمه X: `CloseActions` (ask/tray/exit)، `CloseOutcome`، `sanitize`، `migrate` (از بولینِ قدیمی `closeToTray`)، `outcomeFor(action, trayAvailable)`، `persistedChoice` — §۱۰ |
 | `TrafficProbe.kt` (152L) | **تنها جای جواب «ترافیک رد می‌شود؟»** — مسابقه‌ی ۴ endpoint (۳ HTTPS + ۱ HTTP fallback)، قضاوت `isRealNoContent` (فقط 204 یا 200-بدون-بدنه؛ redirect=portal) |
@@ -145,6 +146,10 @@ congestion=bbr + persist در sysctl.d؛ کرنل بدون bbr همان cubic م
     اعداد باید با اندازه‌گیری توجیه شوند؛ آستانه‌ای که همه‌ی کانفیگ‌های سالم را قرمز کند بی‌معناست.
 13. **تصمیم‌های دکمه X در `CloseBehavior` (تابع خالص) است، نه در لامبدای Compose** — و
     `AppState.setCloseAction` تک‌نویسنده‌ی آن روی دیسک است.
+14. **پاس گرم فقط بهبود است، نه حکم جدید (3.6.17):** فقط ردیف‌های با عدد تازهٔ `Ok` گرم میشوند؛
+    شکست یا `Skipped` گرم هیچ‌چیز را عوض نمیکند — عدد سردی که خودش ترافیک را ثابت کرده می‌ماند
+    و ردیف هرگز قرمز نمیشود. عدد گرم جایگزین عدد سرد میشود (نه برعکس)؛ re-ping دستیِ سرد،
+    عدد گرمِ قبلی را باطل میکند.
 
 ## ۵. طرح پورت‌ها (همه از `ProxyPorts`, base کاربر-قابل‌تنظیم default 10808)
 
@@ -171,7 +176,7 @@ xray racerها پورت خصوصی می‌گیرند و موازی‌اند.
 در `VpnService.connect` یک **reconciliation** هست: کانکتِ report-failure ولی ترافیک-جاری → به Connected بازآواز می‌شود.
 Cancel/timeout → `abort()` (بدون UAC). disconnect همان چیزی را جمع می‌کند که این سشن ساخته (`sessionTunMode` snapshot).
 
-## ۷. جریان پینگ (v3.6.16 — «سریع، و بدون دروغِ قرمز»)
+## ۷. جریان پینگ (v3.6.17 — «سریع، و بدون دروغِ قرمز» + پاس گرم برای Fastest)
 
 `classifyLatencyEngine` (pure، در `Vpn.kt`): لینکِ parse‌شدنی و protocol≠hysteria2 → **XRAY**؛
 hysteria2 → **SINGBOX**؛ wireguard/amnezia → **WIREPROXY**؛ بقیه (ikev2/openvpn/لینک خراب) → **UNVERIFIABLE=Skipped**.
@@ -184,6 +189,12 @@ hysteria2 → **SINGBOX**؛ wireguard/amnezia → **WIREPROXY**؛ بقیه (ikev
 - **XRAY — پاس دوم (تأیید، فقط برای شکست‌ها):** `Failed` پاس اول → `awaitWaveIdle()` (صبر تا خالی شدن
   `racerGate`، سقف `WAVE_IDLE_WAIT_MS=45s`) → همان تست پشت `confirmGate` (`CONFIRM_PARALLEL=2`) با
   `CONFIRM_TIMEOUT_MS=5000`. نتیجه‌ی این پاس نهایی است. `Skipped` هرگز retest نمی‌شود (اصلاً تست نشده).
+- **XRAY — پاس گرم (بعد از موج Ping-all، فقط برای «Fastest»، 3.6.17):** پس از `joinAll` موج،
+  `WARM_CONFIRM_TOP_N=10` ردیفِ fastest (عدد تازه، غیر-failed) یک بار با `warmXrayPing` retest می‌شوند —
+  پشت همان `confirmGate`؛ درخواست اول (هیترآپ) دور ریخته می‌شود و عدد درخواست دوم جایگزین عدد سرد در
+  `latency` + `warmLatency` + `PingCache` می‌شود. دلیل: عدد سرد بین دو اجرا Spearman ۰.۱۸ — مرتب‌سازی
+  «Fastest» روی نویز بود؛ گرم ۰.۴۷. شکست گرم هیچ چیزی را عوض نمی‌کند (§۴-۱۴). `ConfigSort` عدد
+  `warm` را بر `fresh` مقدم می‌کند (tier یکسان FRESH) و `Failed` همیشه از هر عدد قدیمی جلوتر است.
 - **SINGBOX/WIREPROXY:** همان الگوی پاس اول ولی پشت `realPingGate` سریالی (پورت ثابت + kill خانوادگی).
   hysteria2 **هرگز TCP precheck نمی‌گیرد** — QUIC/UDP است و لینک hy2 پارامتر type ندارد
   (پیش‌فرض «tcp» دروغ می‌شد)؛ تست واقعی هسته تنها حکم است.
@@ -210,11 +221,12 @@ hysteria2 → **SINGBOX**؛ wireguard/amnezia → **WIREPROXY**؛ بقیه (ikev
 
 ## ۸. باقی‌مانده (به ترتیب ارزش)
 
-0. **کامیت‌نشده:** کار دور ۸ روی دیسک است ولی در git نیست. `git add` + کامیت + push اولین کار دور بعد.
-1. **«Fastest» با عدد سرد تقریباً تصادفی است** (Spearman ۰.۱۸ بین دو اجرا — §۷). راهش یکی از این‌ها:
-   یا میانه‌ی چند نمونه، یا اندازه‌گیریِ گرم (یک درخواست دورریز، بعد اندازه‌گیری — Spearman ۰.۴۷ و
-   انحراف بین‌اجرایی ۴۳ms به‌جای ۱۵۱ms)، یا نمایش «باند» به‌جای عدد دقیق. الان عدد صادق است ولی
-   مرتب‌سازی روی نویز، مرتب‌سازی نیست.
+0. ~~**کامیت‌نشده:**~~ ✅ کار دور ۸ در کامیت `9c4c9b3` ثبت و push شد.
+1. ~~**«Fastest» با عدد سرد تقریباً تصادفی است**~~ ✅ **دور ۹ فیکس شد — پاس گرم:** پس از موج
+   Ping-all، ۱۰ ردیف fastest با `warmXrayPing` retest میشوند (عدد دوم پایدار، §۷/§۴-۱۴) و
+   `ConfigSort` عدد warm را بر cold مقدم میکند. تابع خالص `warmOutcome` + `WarmPingTest` +
+   دو تست جدید در `ConfigSortTest`. یادداشت: اعتبارسنجی زندهٔ Spearman با `LIVE_PING_TEST=1`
+   روی لیست واقعی هنوز اجرا نشده.
 2. **Cancel برای pingAllConfigs** + progress برای لیست‌های ۲۰۰+ (با پاس دوم، بدترین حالت طولانی‌تر شده).
 3. **پینگ IKEv2/OpenVPN:** فعلاً `Skipped` (صادقانه). اگر عدد لازم شد فقط با پیش‌تست واقعی (rasdial آزمایشی) — نه TCP به 500/4500.
 4. **ارتقای Gradle 8.10.2 → 9.x** (هشدار incompatible فعلی) و پاک‌سازی deprecationها.
@@ -240,6 +252,18 @@ stability, budget_sweep, width_sweep, ui_check.ps1) — قابل بازاجرا 
 watchdog، ordering لیست، ...) قابل تست نیست، **قبل از تحویل به یک تابع خالص بیرون بکش**
 (`AppState.shouldAutoReconnect`, `ConfigSort.byLatency` الگوی درست‌اند). «تست سبز» بدون
 تستِ همان منطق، تأیید نیست.
+
+✅ **دور ۹ (3.6.17) — در جریان (۲۷۰ تست / ۰ شکست):**
+
+1. **همگام‌سازی اسناد:** هدر `HANDOFF.md` (3.6.4 → 3.6.16)، شمارش تست‌ها در HANDOFF/README
+   (۹۲/۲۰۸/۱۸۶ → عدد واقعی)، و حذف یادداشت‌های منسوخ §۲ (کامیت دور ۸ + خط `.gitattributes`
+   که قبلاً رفع شده بود). سند تاریخی `AUDIT-*.md` عمداً دست‌نخورده ماند.
+2. **پاس گرم «Fastest» (بدهی §۸-۱):** `VpnPing.warmXrayPing` (درخواست اول = هیترآپ دور ریخته،
+   عدد دوم = نتیجه؛ پشت `confirmGate`) + `warmOutcome` خالص + `VpnService.warmLatencyResult`
+   (فقط خانواده XRAY) + `AppState.warmConfirmFastest` (top-10 بعد از `joinAll` موج Ping-all) +
+   state `warmLatency` + `ConfigSort(warm=)` (warm بر cold، Failed بر همه). موج پینگ بازسازی شد:
+   `launchWave` + `claimMeasure` (کلیم سنکرون — دوبار-کلیک دیگر دو اندازه‌گیری نمی‌سازد) +
+   `measureConfig` (قابل join برای پاس گرم و Cancel بستهٔ بعد).
 
 ✅ **دور ۸ (3.6.16) — دیالوگ بستن + دو باگ ریشه‌ای پینگ (۲۶۴ تست / ۰ شکست):**
 

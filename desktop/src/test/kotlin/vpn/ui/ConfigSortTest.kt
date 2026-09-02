@@ -128,4 +128,45 @@ class ConfigSortTest {
         )
         assertEquals(listOf("a", "z"), out.map { it.id }, "equal latency must not shuffle")
     }
+
+    /** 3.6.17: the warm pass retests the fastest rows nearly alone; its number
+     * is stable between runs (Spearman 0.47 vs 0.18 cold) and outranks the
+     * noisy cold number it replaced — even when the cold one was faster. */
+    @Test
+    fun `a warm re-measurement outranks the cold number it replaced`() {
+        val now = 1_000_000L
+        val list = listOf(cfg("coldFast"), cfg("warmSlow"))
+        val out = ConfigSort.byLatency(
+            list,
+            fresh = mapOf("coldFast" to 300, "warmSlow" to 900),
+            cached = emptyMap(),
+            failed = emptySet(),
+            now = now,
+            warm = mapOf("warmSlow" to 150),
+        )
+        assertEquals(
+            listOf("warmSlow", "coldFast"),
+            out.map { it.id },
+            "the stable warm number is the sort key, even when the cold one was faster",
+        )
+    }
+
+    @Test
+    fun `warm numbers never outrank a fresh failure`() {
+        val now = 1_000_000L
+        val list = listOf(cfg("dead"), cfg("ok"))
+        val out = ConfigSort.byLatency(
+            list,
+            fresh = mapOf("ok" to 700),
+            cached = emptyMap(),
+            failed = setOf("dead"),
+            now = now,
+            warm = mapOf("dead" to 100),
+        )
+        assertEquals(
+            listOf("ok", "dead"),
+            out.map { it.id },
+            "the newer failure fact wins over an older warm success",
+        )
+    }
 }
