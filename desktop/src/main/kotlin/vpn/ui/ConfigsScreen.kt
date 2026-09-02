@@ -138,13 +138,25 @@ fun ConfigsScreen() {
                     enabled = !AppState.connectedOrBusy,
                 )
                 AppButton(
-                    "Ping all",
-                    { AppState.pingAllConfigs() },
+                    // While a wave runs, the button BECOMES the cancel control
+                    // with live progress (3.6.17) — a second click must never
+                    // stack a second wave on top of the first.
+                    AppState.pingAllLabel(
+                        AppState.pingAllActive,
+                        AppState.pingProgress.first,
+                        AppState.pingProgress.second,
+                    ),
+                    {
+                        if (AppState.pingAllActive) AppState.cancelPingAll()
+                        else AppState.pingAllConfigs()
+                    },
                     icon = Icons.Filled.Speed,
                     compact = true,
                     // Pinging kills/restarts the cores, so it must be
                     // impossible while a connection is live or coming up.
-                    enabled = !AppState.connectedOrBusy,
+                    // Cancelling a running wave stays possible: it is the
+                    // way out, not another ping.
+                    enabled = !AppState.connectedOrBusy || AppState.pingAllActive,
                 )
                 AppButton(
                     "Add",

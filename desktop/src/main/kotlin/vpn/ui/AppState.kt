@@ -140,6 +140,18 @@ object AppState {
     var warmLatency by mutableStateOf<Map<String, Int>>(emptyMap())
         private set
 
+    /**
+     * True while a ping wave (Ping-all or a folder ping, including its warm
+     * pass) is running. The Configs screen turns its "Ping all" button into
+     * "Cancel (done/total)" for exactly this window.
+     */
+    var pingAllActive by mutableStateOf(false)
+        private set
+
+    /** (rows finished, rows in the wave) — 0 to 0 when idle. */
+    var pingProgress by mutableStateOf(0 to 0)
+        private set
+
     /** Installed apps discovered for the split-tunneling picker. */
     var installedApps by mutableStateOf<List<InstalledApp>>(emptyList())
         private set
@@ -257,14 +269,47 @@ object AppState {
     /** How many of the fastest rows get a warm re-measurement after a wave. */
     internal const val WARM_CONFIRM_TOP_N = 10
 
+    /**
+     * The button label for the Configs screen's ping control (pure — testable
+     * without Compose). While a wave runs, the button becomes the cancel
+     * control and shows live progress.
+     */
+    internal fun pingAllLabel(active: Boolean, done: Int, total: Int): String =
+        if (active) "Cancel ($done/$total)" else "Ping all"
+
+    /**
+     * Cancels the running ping wave. Rows stop at their next suspension
+     * point — an in-flight HTTP probe (blocking, 2.5–5 s budget) is not
+     * interruptible, so "cancel" is best-effort within one probe; every core,
+     * scratch port and temp file a row already claimed is released by
+     * VpnPing/measureConfig finally blocks.
+     */
+    fun cancelPingAll() {
+        pingWaveJob?.cancel()
+    }
+
     private fun launchWave(list: List<VpnConfig>, warmConfirm: Boolean) {
         pingWaveJob?.cancel()
         pingWaveJob = scope.launch {
-            val jobs = list.map { cfg -> launch {
-                if (claimMeasure(cfg)) measureConfig(cfg)
-            } }
-            jobs.joinAll()
-            if (warmConfirm) warmConfirmFastest(list)
+            try {
+                val done = java.util.concurrent.atomic.AtomicInteger(0)
+                pingAllActive = true
+                pingProgress = 0 to list.size
+                val jobs = list.map { cfg -> launch {
+                    val claimed = claimMeasure(cfg)
+                    if (claimed) measureConfig(cfg)
+                    // Unclaimed rows (already pinging / connect started) count
+                    // as settled — the progress counter must reach total.
+                    pingProgress = done.incrementAndGet() to list.size
+                } }
+                jobs.joinAll()
+                if (warmConfirm) warmConfirmFastest(list)
+            } finally {
+                // Also runs on cancellation: the UI must never stick on
+                // "Cancel (…)" after the wave is over or cancelled.
+                pingAllActive = false
+                pingProgress = 0 to 0
+            }
         }
     }
 

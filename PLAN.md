@@ -227,7 +227,11 @@ hysteria2 → **SINGBOX**؛ wireguard/amnezia → **WIREPROXY**؛ بقیه (ikev
    `ConfigSort` عدد warm را بر cold مقدم میکند. تابع خالص `warmOutcome` + `WarmPingTest` +
    دو تست جدید در `ConfigSortTest`. یادداشت: اعتبارسنجی زندهٔ Spearman با `LIVE_PING_TEST=1`
    روی لیست واقعی هنوز اجرا نشده.
-2. **Cancel برای pingAllConfigs** + progress برای لیست‌های ۲۰۰+ (با پاس دوم، بدترین حالت طولانی‌تر شده).
+2. ~~**Cancel برای pingAllConfigs** + progress~~ ✅ **دور ۹ فیکس شد:** دکمهٔ «Ping all» هنگام موج
+   به «Cancel (done/total)» تبدیل میشود (`AppState.pingAllActive`/`pingProgress`/`cancelPingAll` +
+   `pingAllLabel` خالص + `PingAllCancelTest`). لغو در نقطهٔ تعلیق بعدی مؤثر است؛ probe در حال اجرا
+   (بلاک‌کننده، بودجه ۲.۵–۵ ثانیه) قطع‌شدنی نیست و در همان موج تمام میشود. cleanup در `finally` —
+   UI بعد از لغو هیچ‌وقت روی «Cancel» گیر نمیکند.
 3. **پینگ IKEv2/OpenVPN:** فعلاً `Skipped` (صادقانه). اگر عدد لازم شد فقط با پیش‌تست واقعی (rasdial آزمایشی) — نه TCP به 500/4500.
 4. **ارتقای Gradle 8.10.2 → 9.x** (هشدار incompatible فعلی) و پاک‌سازی deprecationها.
 5. **`Subscriptions` با `allowTrailingCommas`:** subscription خراب کاربر `subscriptions.json.corrupt-*` شده (فایل‌ها نگه داشته می‌شوند — data loss نیست)؛ یا پارسر سخت‌گیرانه یا migrate بادوام.
@@ -264,6 +268,9 @@ watchdog، ordering لیست، ...) قابل تست نیست، **قبل از ت�
    state `warmLatency` + `ConfigSort(warm=)` (warm بر cold، Failed بر همه). موج پینگ بازسازی شد:
    `launchWave` + `claimMeasure` (کلیم سنکرون — دوبار-کلیک دیگر دو اندازه‌گیری نمی‌سازد) +
    `measureConfig` (قابل join برای پاس گرم و Cancel بستهٔ بعد).
+3. **Cancel + پیشرفت Ping-all (بدهی §۸-۲):** دکمهٔ «Ping all» در حین موج → «Cancel (done/total)»
+   (`pingAllActive`/`pingProgress`/`cancelPingAll`/`pingAllLabel` خالص). cleanup در `finallyِ`
+   کوروتین موج — لغو یا پایان، UI ریست میشود.
 
 ✅ **دور ۸ (3.6.16) — دیالوگ بستن + دو باگ ریشه‌ای پینگ (۲۶۴ تست / ۰ شکست):**
 
