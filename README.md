@@ -124,7 +124,7 @@ for the wireproxy commit pin.
 ```powershell
 $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.19.10-hotspot"
 
-.\gradlew.bat test                  # 264 tests, all offline
+.\gradlew.bat test                  # 278 tests, all offline
 .\gradlew.bat createDistributable   # portable app folder
 .\gradlew.bat packageExe            # single-file installer (~155 MB, needs WiX 3.x)
 .\gradlew.bat koverHtmlReport       # coverage -> build/reports/kover/html
@@ -249,7 +249,7 @@ desktop/                     Compose Multiplatform app
       CoreManifest.kt        THE list of files each core needs
       TrafficProbe.kt        the only place that answers "does traffic flow?"
     ui/                      screens + AppState (single observable store)
-  src/test/kotlin/           264 offline tests
+  src/test/kotlin/           278 offline tests
   src/main/resources/bin/    core binaries (gitignored, fetched in step 2)
 server/                      setup-{ikev2,wireguard,openvpn,xray}.sh
                              canonical setup scripts; copies under
@@ -270,11 +270,11 @@ The staged OpenVPN payload lives in `%ProgramData%\MultiVPN\openvpn-secure`
 ## Tests
 
 ```powershell
-.\gradlew.bat test              # 264 tests, all offline
+.\gradlew.bat test              # 278 tests, all offline
 .\gradlew.bat koverHtmlReport   # coverage -> build\reports\kover\html\index.html
 ```
 
-All 264 tests run offline. Three suites are live probes against a real VPS and
+All 278 tests run offline. Three suites are live probes against a real VPS and
 skip themselves unless opted in via an env var: `LIVE_AWG_TEST`,
 `GRAB_SCAN_TEST`, `PROBE_SERVER`.
 
