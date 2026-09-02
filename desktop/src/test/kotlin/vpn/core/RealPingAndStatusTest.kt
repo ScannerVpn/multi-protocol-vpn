@@ -67,10 +67,14 @@ class RealPingAndStatusTest {
 
     @Test
     fun `wireguard and ikev2 pools are recognised`() {
-        listOf("10.2.0.4", "10.10.10.7", "10.8.0.3", "172.19.0.2").forEach { addr ->
+        // The 172.19.x TUN range counts only on OUR adapter — see
+        // TunnelStatusTest for the WSL/Docker false-positive regression.
+        listOf("10.2.0.4", "10.10.10.7", "10.8.0.3").forEach { addr ->
             val text = "Unknown adapter VPN:\n\n   IPv4 Address. . . : $addr\n"
             assertTrue(VpnService.hasLiveTunnelAddress(text), "pool address $addr not recognised")
         }
+        val tun = "Unknown adapter MultiVPN:\n\n   IPv4 Address. . . : 172.19.0.2\n"
+        assertTrue(VpnService.hasLiveTunnelAddress(tun), "our TUN address not recognised")
     }
 
     // ---- 2. real-ping semantics -----------------------------------------

@@ -205,7 +205,17 @@ object AppState {
      */
     fun pingAllConfigs() {
         if (connectedOrBusy) return
-        configs.forEach { pingConfig(it) }
+        pingConfigs(configs)
+    }
+
+    /**
+     * Measures latency for ONE group only (a server's folder, one
+     * subscription, the unsorted pile) — the user asked for per-folder pings
+     * because Ping-all on a big list takes minutes. Same engine, fewer rows.
+     */
+    fun pingConfigs(list: List<VpnConfig>) {
+        if (connectedOrBusy) return
+        list.forEach { pingConfig(it) }
     }
 
     private var pollJob: Job? = null
@@ -234,22 +244,46 @@ object AppState {
         // displayed as a fresh one.
         latencyCached = configs.mapNotNull { c -> PingCache.get(c.id)?.let { c.id to it } }.toMap()
         runCatching { PingCache.retainAll(configs.map { it.id }.toSet()) }
-        // Mirror the persisted tray preference into its Compose holder.
-        TraySettings.closeToTray = settings.closeToTray
+        // Mirror the persisted close/tray preference into its Compose holder.
+        TraySettings.closeAction = vpn.core.CloseBehavior.sanitize(settings.closeAction)
         // ONE-TIME cleanup of the RETIRED kill switch (removed in 3.6.5):
         // a machine that ran an older build may still be firewall
         // default-deny with no internet. Fire a detached elevated cleanup.
         runCatching { KillSwitchCleanup.cleanupIfNeeded() }
-        startupHeal()
-        refreshVpnStatus()
-        // Auto-connect on launch: after status/heal so it sees clean state.
-        if (settings.autoConnect && activeConfig != null && vpnStatus != VpnStatus.CONNECTED) {
-            AppLog.i("App", "Auto-connecting to ${activeConfig?.name} on launch")
-            connectActive()
+        // ONE sequential startup coroutine: heal leftovers FIRST, then probe
+        // the real tunnel state, then honour auto-connect. Previously heal and
+        // the status probe ran as racing coroutines — the probe could observe
+        // a leftover core (or a foreign listener) before heal killed it and
+        // report the app CONNECTED the moment it opened.
+        scope.launch {
+            startupHeal()
+
+            // Ground-truth probe (the refreshVpnStatus body, inlined so the
+            // auto-connect decision below sees the FINAL state instead of a
+            // stale default that the async probe had not yet written back).
+            val up = withContext(Dispatchers.IO) { VpnService.isVpnUp() }
+            if (connectJob == null) {
+                vpnStatus = if (up) VpnStatus.CONNECTED else VpnStatus.DISCONNECTED
+                if (up) {
+                    // An adopted tunnel (TUN/IKEv2/OpenVPN survived the
+                    // previous run) has no known start time; without this the
+                    // session clock showed the PREVIOUS session's elapsed time.
+                    if (sessionStartedAt == 0L) sessionStartedAt = System.currentTimeMillis()
+                    startPolling()
+                } else {
+                    sessionStartedAt = 0L
+                    resetTraffic()
+                }
+            }
+
+            // NO auto-connect on launch — ever. The app opens DISCONNECTED
+            // unless an adopted tunnel is genuinely up; the user decides when
+            // to press connect (reported 2 Sep 2026: the app connected the
+            // moment it opened, which must never happen).
+            // ONE daemon loop: auto-reconnect watchdog + periodic subscription
+            // refresh (both no-op when their preconditions are not met).
+            startBackgroundJobs()
         }
-        // ONE daemon loop: auto-reconnect watchdog + periodic subscription
-        // refresh (both no-op when their preconditions are not met).
-        startBackgroundJobs()
     }
 
     /**
@@ -258,31 +292,29 @@ object AppState {
      * system's internet down, and stray core processes keep ports occupied.
      * Safe to run: the single-instance guard already evicted live instances.
      */
-    private fun startupHeal() {
-        scope.launch {
-            // isOurs() OR a dead loopback proxy: either way the machine has no
-            // working HTTP path and must be freed. The dead-port branch also
-            // covers a session that used a DIFFERENT base port than the one
-            // configured now, which isOurs() alone could never recognise.
-            val healedProxy = runCatching { Proxy.isOurs() || Proxy.pointsAtDeadLocalProxy() }
-                .getOrDefault(false)
-            if (healedProxy) {
-                withContext(Dispatchers.IO) {
-                    runCatching { Proxy.restoreState() }
-                    // restoreState may have re-enabled a legitimately saved
-                    // proxy; only a still-dead one gets forced off.
-                    if (runCatching { Proxy.pointsAtDeadLocalProxy() }.getOrDefault(false)) {
-                        runCatching { Proxy.disable() }
-                    }
-                }
-                AppLog.i("App", "healed: disabled leftover system proxy from a previous run")
-            }
+    private suspend fun startupHeal() {
+        // isOurs() OR a dead loopback proxy: either way the machine has no
+        // working HTTP path and must be freed. The dead-port branch also
+        // covers a session that used a DIFFERENT base port than the one
+        // configured now, which isOurs() alone could never recognise.
+        val healedProxy = runCatching { Proxy.isOurs() || Proxy.pointsAtDeadLocalProxy() }
+            .getOrDefault(false)
+        if (healedProxy) {
             withContext(Dispatchers.IO) {
-                runCatching { VpnService.killAllCores() }
+                runCatching { Proxy.restoreState() }
+                // restoreState may have re-enabled a legitimately saved
+                // proxy; only a still-dead one gets forced off.
+                if (runCatching { Proxy.pointsAtDeadLocalProxy() }.getOrDefault(false)) {
+                    runCatching { Proxy.disable() }
+                }
             }
-            if (healedProxy) {
-                lastError = ""
-            }
+            AppLog.i("App", "healed: disabled leftover system proxy from a previous run")
+        }
+        withContext(Dispatchers.IO) {
+            runCatching { VpnService.killAllCores() }
+        }
+        if (healedProxy) {
+            lastError = ""
         }
     }
 
@@ -291,28 +323,6 @@ object AppState {
         scope.launch {
             withContext(Dispatchers.IO) { runCatching { Proxy.forceReset() } }
             onDone("System proxy turned off and our saved state cleared.")
-        }
-    }
-    fun refreshVpnStatus() {
-        // Don't overwrite a deliberate connection flow (CONNECTING/DISCONNECTING
-        // or an in-flight connect job) with a background probe that might race
-        // and report stale state.
-        if (vpnStatus == VpnStatus.CONNECTING ||
-            vpnStatus == VpnStatus.DISCONNECTING ||
-            connectJob != null) return
-        scope.launch {
-            val up = withContext(Dispatchers.IO) { VpnService.isVpnUp() }
-            vpnStatus = if (up) VpnStatus.CONNECTED else VpnStatus.DISCONNECTED
-            if (up) {
-                // A tunnel adopted at startup (or after a heal) has no known
-                // start time. Without this the session clock displayed the
-                // PREVIOUS session's elapsed time, or 0 forever.
-                if (sessionStartedAt == 0L) sessionStartedAt = System.currentTimeMillis()
-                startPolling()
-            } else {
-                sessionStartedAt = 0L
-                resetTraffic()
-            }
         }
     }
 
@@ -999,6 +1009,21 @@ object AppState {
     fun selectConfig(id: String) {
         activeConfigId = id
         Storage.saveActiveConfigId(id)
+    }
+
+    /**
+     * Persists what the X button should do ([vpn.core.CloseActions]).
+     *
+     * ONE writer for both entry points — the Settings picker and the "remember
+     * my choice" box in the close dialog — so the disk value and the Compose
+     * mirror can never disagree (3.6.15's bug was a mirror with no disk write).
+     */
+    fun setCloseAction(action: String) {
+        val clean = vpn.core.CloseBehavior.sanitize(action)
+        TraySettings.closeAction = clean
+        settings = settings.copy(closeAction = clean)
+        Storage.saveSettings(settings)
+        AppLog.i("App", "Close button action set to $clean")
     }
 
     fun deleteConfig(config: VpnConfig) {

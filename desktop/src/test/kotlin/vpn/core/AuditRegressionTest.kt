@@ -523,11 +523,51 @@ class AuditRegressionTest {
     @Test
     fun `tcp precheck budget is the short one`() {
         // The fail-fast that screens dead endpoints before a core spins up
-        // must keep its 2s budget — if someone raises it back to 5s the
+        // must keep its 1.5s budget — if someone raises it back to 5s the
         // "dead server" list case regresses to the old slowness.
-        assertEquals(2000, VpnPingInternals.tcpPrecheckMs())
-        assertTrue(VpnPingInternals.pingTimeoutMs() <= 5000, "ping budget must stay tight")
-        assertTrue(VpnPingInternals.coreWaitMs() <= 3000, "core wait must stay tight")
+        assertEquals(1500, VpnPingInternals.tcpPrecheckMs())
+        assertTrue(VpnPingInternals.pingTimeoutMs() <= 2500, "ping budget must stay tight")
+        assertTrue(VpnPingInternals.coreWaitMs() <= 2000, "core wait must stay tight")
+    }
+
+    // ---- 3.6.16: the confirmation pass ----
+
+    @Test
+    fun `the confirmation pass is narrow and patient`() {
+        // The fast wave is what CAUSES most "timeouts": 16 temp cores x 4 raced
+        // HTTPS probes saturate one uplink, and rows that failed at 16-wide
+        // answered in 373-817 ms when retested alone (measured on the user's
+        // 57-config list, 2 Sep 2026). So the retest must be BOTH narrower than
+        // the wave and given more time than it — otherwise it reproduces the
+        // very contention it exists to rule out.
+        assertTrue(
+            VpnPingInternals.confirmParallel() < VpnPing.PARALLEL,
+            "a confirmation as wide as the wave measures the same contention",
+        )
+        assertTrue(
+            VpnPingInternals.confirmParallel() in 1..4,
+            "confirmation width ${VpnPingInternals.confirmParallel()} is not 'nearly alone'",
+        )
+        assertTrue(
+            VpnPingInternals.confirmTimeoutMs() > VpnPingInternals.pingTimeoutMs(),
+            "the retest must be more patient than the fast pass",
+        )
+        // Cold healthy latency reached ~1.35s in measurement; the retest budget
+        // must clear that with real headroom, without becoming a hang.
+        assertTrue(
+            VpnPingInternals.confirmTimeoutMs() in 3000..8000,
+            "confirmation budget ${VpnPingInternals.confirmTimeoutMs()}ms is out of range",
+        )
+    }
+
+    @Test
+    fun `the confirmation waits for the wave but never forever`() {
+        // Bounded: on a 200-row list the wave keeps launching for a long time,
+        // and a confirmation that waited for true idleness would hang the row.
+        assertTrue(
+            VpnPingInternals.waveIdleWaitMs() in 10_000..120_000,
+            "wave-idle wait ${VpnPingInternals.waveIdleWaitMs()}ms is out of range",
+        )
     }
 
     // ---- 3.6.13 audit fixes ----
@@ -621,6 +661,15 @@ object VpnPingInternals {
 
     fun coreWaitMs(): Int =
         VpnPing::class.java.getField("CORE_WAIT_MS").get(null) as Int
+
+    fun confirmTimeoutMs(): Int =
+        VpnPing::class.java.getField("CONFIRM_TIMEOUT_MS").get(null) as Int
+
+    fun confirmParallel(): Int =
+        VpnPing::class.java.getField("CONFIRM_PARALLEL").get(null) as Int
+
+    fun waveIdleWaitMs(): Int =
+        VpnPing::class.java.getField("WAVE_IDLE_WAIT_MS").get(null) as Int
 
     fun isTcpBasedTransport(network: String?): Boolean =
         invoke("isTcpBasedTransport", network) as Boolean

@@ -54,15 +54,35 @@ object SingBox {
     private fun coreComplete(): Boolean =
         exe() != null && CoreManifest.allPresent(dir, coreFiles)
 
+    /**
+     * Per-run extraction guard — same reason as [Xray.extractBundleOnce]:
+     * hysteria2 rows call [ensureCore] once per ping, and re-copying
+     * hiddify-core.dll (56 MB) over a core that a sibling test just launched
+     * both fails and breaks that test's spawn.
+     */
+    private val extractAttempts = java.util.concurrent.atomic.AtomicInteger(0)
+    private val extractLock = Any()
+
+    /** Test seam: forget this run's extraction so the next call extracts again. */
+    internal fun resetExtractionState() = extractAttempts.set(0)
+
+    private fun extractBundleOnce() {
+        if (!CoreManifest.shouldExtract(extractAttempts.get(), coreComplete())) return
+        synchronized(extractLock) {
+            if (!CoreManifest.shouldExtract(extractAttempts.get(), coreComplete())) return
+            extractAttempts.incrementAndGet()
+            val copied = Resources.extractAll(CoreManifest.SINGBOX_RES, coreFiles, dir)
+            if (copied > 0) AppLog.i("SingBox", "Extracted $copied files from resources")
+        }
+    }
+
     suspend fun ensureCore(allowDownload: Boolean = true, forceDownload: Boolean = false): File? = withContext(Dispatchers.IO) {
         if (forceDownload) {
             return@withContext downloadCore()
         }
-        // Always (re-)extract the bundled files: a partially downloaded core
-        // (e.g. exe present but wintun.dll missing) must be repaired even
-        // when the exe already exists.
-        val copied = Resources.extractAll(CoreManifest.SINGBOX_RES, coreFiles, dir)
-        if (copied > 0) AppLog.i("SingBox", "Extracted $copied files from resources")
+        // Repairs a partial core (e.g. exe present but wintun.dll missing) on
+        // the first call of the run; NOT on every ping (see extractBundleOnce).
+        extractBundleOnce()
         if (coreComplete()) return@withContext exe()
 
         if (allowDownload) {

@@ -15,6 +15,11 @@ object Storage {
     }
 
     val dataDir: File by lazy {
+        // TEST ISOLATION: the Gradle test task pins this property to a scratch
+        // dir, so the suite can never touch the developer's real data files
+        // (before this, `gradlew test` overwrote the live servers/configs/
+        // settings with fixture data — real data loss, 2 Sep 2026).
+        System.getProperty("multivpn.dataDir")?.let { return@lazy File(it).apply { mkdirs() } }
         val base = System.getenv("APPDATA")
             ?: System.getProperty("user.home")
         val dir = File(base, "MultiVPN")
@@ -113,7 +118,9 @@ object Storage {
      * exists; re-point them into the current data dir when possible.
      */
     private fun remapLegacyPaths(c: VpnConfig): VpnConfig {
-        val base = System.getenv("APPDATA") ?: System.getProperty("user.home")
+        // Parent of dataDir: %APPDATA% in production, the scratch root in
+        // tests — never hardcodes the environment.
+        val base = dataDir.parentFile
         val oldPrefix = File(base, "FreebuffVPN").absolutePath
 
         fun findGenerated(fileName: String): String? =
@@ -165,6 +172,15 @@ object Storage {
         if (s.splitMode !in SplitModes.ALL) s.splitMode = SplitModes.OFF
         if (!ProxyPorts.valid(s.proxyPort)) {
             s.proxyPort = ProxyPorts.DEFAULT
+            saveSettings(s)
+        }
+        // 3.6.16 migration: the boolean closeToTray becomes the three-state
+        // closeAction. Done ONCE (closeAction stays non-null afterwards) so a
+        // user who later picks "ask" is not dragged back to "tray" on every
+        // launch by the old flag still sitting in the file.
+        val migrated = CloseBehavior.migrate(s.closeAction, s.closeToTray)
+        if (s.closeAction != migrated) {
+            s.closeAction = migrated
             saveSettings(s)
         }
         s
@@ -260,10 +276,11 @@ object Storage {
      * Returns the number of servers imported, or 0 when nothing was found.
      */
     fun importLegacyFlutterData(): Int = runCatching {
-        val appData = System.getenv("APPDATA") ?: return 0
-        val root = File(appData)
-        if (!root.isDirectory) return 0
-        val candidates = root.listFiles { d -> d.isDirectory } ?: return 0
+        // dataDir's parent (respects the test isolation override — tests must
+        // never scan the real %APPDATA% for legacy imports).
+        val appData = dataDir.parentFile
+        if (!appData.isDirectory) return 0
+        val candidates = appData.listFiles { d -> d.isDirectory } ?: return 0
         for (dir in candidates) {
             if (dir.name == "FreebuffVPN") continue
             // path_provider layout: %APPDATA%\<company>\<app>\servers.json

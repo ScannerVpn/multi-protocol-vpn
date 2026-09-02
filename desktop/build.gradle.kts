@@ -1,4 +1,7 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.gradle.api.tasks.Copy
+import org.gradle.internal.os.OperatingSystem
+import java.io.File
 
 plugins {
     kotlin("jvm") version "2.1.0"
@@ -20,7 +23,7 @@ plugins {
  * said 3.6.11. The generateBuildInfo task below emits vpn.BuildInfo from this
  * value, and every UI string reads it, so drift is now impossible.
  */
-val appVersion = "3.6.15"
+val appVersion = "3.6.16"
 
 group = "com.multivpn"
 version = appVersion
@@ -61,6 +64,12 @@ sourceSets.main { kotlin.srcDir(generateBuildInfo) }
 
 tasks.test {
     useJUnitPlatform()
+    // TEST ISOLATION (critical): pin Storage's data directory to a scratch
+    // dir. Storage honours -Dmultivpn.dataDir; without this the whole test
+    // suite read/wrote the developer's REAL %APPDATA%\MultiVPN — a full
+    // `gradlew test` silently overwrote the live servers.json / configs.json /
+    // settings.json with fixture data (real data loss reported 2 Sep 2026).
+    jvmArgs("-Dmultivpn.dataDir=${layout.buildDirectory.dir("test-data").get().asFile.absolutePath}")
 }
 
 /**
@@ -126,6 +135,13 @@ compose.desktop {
             packageVersion = appVersion
             description = "MultiVPN - multi-protocol VPN client"
             vendor = "MultiVPN"
+            windows {
+                iconFile = project.file("icon\\multivpn-shield-m.ico")
+                upgradeUuid = "8e2f7a41-6c3b-4d9e-9f5a-2b7c8d1e4a6f"
+                console = false
+                menu = true
+                shortcut = true
+            }
             // Modules the bundled jlink runtime must contain. This list is NOT
             // cosmetic: jpackage builds a minimal runtime from exactly these,
             // and anything missing fails only in the PACKAGED app (never in
@@ -151,12 +167,11 @@ compose.desktop {
                 "java.net.http", "jdk.crypto.ec", "java.security.jgss",
                 "java.naming", "java.sql", "java.instrument", "jdk.unsupported",
             )
-            windows {
-                upgradeUuid = "8e2f7a41-6c3b-4d9e-9f5a-2b7c8d1e4a6f"
-                console = false
-                menu = true
-                shortcut = true
-            }
         }
     }
 }
+
+// Compose's jpackage backend occasionally ignores iconFile when the source
+// is a PNG-wrapped ICO. A post-packaging copy keeps the resource bundled for
+// the runtime while the jpackage Windows block uses the valid ICO for exe.
+

@@ -62,4 +62,39 @@ internal object CoreManifest {
     /** True when every name in [files] exists inside [dir]. */
     fun allPresent(dir: File, files: List<String>): Boolean =
         files.all { File(dir, it).exists() }
+
+    /**
+     * Upper bound on bundle-extraction attempts per app RUN.
+     *
+     * Three is enough for the only case that can benefit from a retry (a
+     * transient file lock during the very first attempt); anything still
+     * broken after that is broken for a reason a fourth copy cannot fix.
+     */
+    const val MAX_EXTRACT_ATTEMPTS = 3
+
+    /**
+     * Pure decision: may the caller extract its bundled core files now?
+     *
+     * WHY THIS EXISTS (3.6.16 — the ping bug the user reported):
+     * `ensure*Core()` used to call [Resources.extractAll] UNCONDITIONALLY on
+     * every invocation, and the realping path calls it once per config. A
+     * 57-row "Ping all" therefore recopied 65 MB of xray (exe + geoip +
+     * geosite) 57 times, 16 of them concurrently, straight over the SAME
+     * xray.exe the temp cores were being started from. Two failures follow:
+     *
+     *  1. `Files.copy(REPLACE_EXISTING)` onto a running image fails —
+     *     app.log filled with "Failed to copy /bin/xray/xray.exe" (26 in a
+     *     single Ping-all on 2 Sep 2026);
+     *  2. worse, a copy that lands WHILE a sibling racer calls CreateProcessW
+     *     on that exe makes the spawn fail with ERROR_SHARING_VIOLATION (32).
+     *     `startDetached` then returns null, `quickXrayPing` reports Skipped,
+     *     and AppState WIPES the row's number. Measured on this machine:
+     *     16-wide with per-ping extraction = 4/16 rows lost their spawn; with
+     *     extraction hoisted out = 53/57 rows measured a real latency.
+     *
+     * So: extract once per run (which still lands a bundle upgrade after an
+     * app update), and only retry while the core is genuinely incomplete.
+     */
+    fun shouldExtract(attempts: Int, complete: Boolean): Boolean =
+        attempts == 0 || (!complete && attempts < MAX_EXTRACT_ATTEMPTS)
 }
