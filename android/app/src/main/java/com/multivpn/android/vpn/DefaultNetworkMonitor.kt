@@ -40,6 +40,13 @@ class DefaultNetworkMonitor(private val context: Context) {
 
     fun start(l: InterfaceUpdateListener) {
         listener = l
+        // A RESTART gets a brand-new listener that knows nothing, so the
+        // dedupe memory must be cleared first. Leaving it set is what broke
+        // reconnect: publish() saw "eth0 is already current", returned early,
+        // and the fresh core was never told its default interface — TUN up,
+        // zero traffic, exactly the failure this class exists to prevent.
+        currentName = null
+        currentIndex = -1
         // Push what we already know immediately: the core may start before the
         // first callback arrives, and an unbound core dials nowhere.
         cm?.activeNetwork?.let { publish(it) }
@@ -71,6 +78,8 @@ class DefaultNetworkMonitor(private val context: Context) {
         callback?.let { cb -> runCatching { cm?.unregisterNetworkCallback(cb) } }
         callback = null
         listener = null
+        currentName = null
+        currentIndex = -1
     }
 
     private fun publish(

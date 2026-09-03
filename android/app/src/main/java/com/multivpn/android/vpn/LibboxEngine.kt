@@ -1,6 +1,7 @@
 package com.multivpn.android.vpn
 
-import android.util.Log
+import com.multivpn.android.data.AppLog
+import com.multivpn.android.data.Settings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -10,44 +11,74 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * The REAL engine (phase 2): drives [TunnelVpnService] + libbox and refuses
- * to report "Connected" before a genuine 204 passes through the TUN — the
- * desktop's verifyTraffic() contract, carried over verbatim.
+ * The tunnel engine: renders configs, starts libbox, and refuses to report
+ * "connected" before a genuine 204 passes through the TUN — the desktop's
+ * verifyTraffic() contract, carried over verbatim.
  *
- * Verification method differs from the desktop only in the transport: on
- * Android the whole system rides the TUN, so a plain request to
- * cp.cloudflare.com/generate_204 IS through-tunnel (no local proxy port to
- * race). A captive portal answer (200-with-body / redirect) is rejected —
- * [isRealNoContent] is the same predicate as the desktop's TrafficProbe.
+ * Verification differs from the desktop only in transport: on Android the whole
+ * system rides the TUN, so a plain request IS through-tunnel (there is no local
+ * proxy port to race). A captive-portal answer (200-with-body / redirect) is
+ * rejected — [isRealNoContent] is the same predicate as the desktop's
+ * TrafficProbe.
+ *
+ * The config handed to the core contains EVERY renderable config inside a
+ * selector (see [BoxConfigBuilder]), which is what allows switching config
+ * without a reconnect and measuring real latency per config.
  */
 class LibboxEngine : VpnEngine {
 
     override val state = EngineBridge.status
 
-    private var verifying = false
+    @Volatile
+    private var connecting = false
 
-    override suspend fun connect(config: VpnConfig) {
-        if (verifying) return
+    /** Config ids currently present in the running core's selector. */
+    @Volatile
+    var loadedIds: List<String> = emptyList()
+        private set
+
+    override suspend fun connect(config: VpnConfig) =
+        connect(listOf(config), config.id, Settings())
+
+    /**
+     * Starts the tunnel with [configs] loaded and [activeId] selected.
+     *
+     * A config that cannot be rendered is REPORTED, not silently dropped: the
+     * notice names it and why, so an unsupported protocol or a broken `.conf`
+     * is visible instead of a config that just never works.
+     */
+    suspend fun connect(configs: List<VpnConfig>, activeId: String?, settings: Settings) {
+        if (connecting) return
         val service = TunnelVpnService.instance
             ?: run {
                 EngineBridge.setFailed("سرویس تونل هنوز راه نیفتاده — یک بار دیگر تلاش کنید.")
                 return
             }
 
-        val json = BoxConfigBuilder.build(config).getOrElse { e ->
+        val render = try {
+            BoxConfigBuilder.buildTunnel(configs, activeId, settings)
+        } catch (e: Exception) {
             EngineBridge.setFailed(e.message ?: "کانفیگ قابل رندر نیست.")
             return
         }
+        if (render.rejected.isNotEmpty()) {
+            AppLog.i(
+                "Engine",
+                "skipped ${render.rejected.size} config(s): " +
+                    render.rejected.joinToString("; ") { "${it.name}: ${it.reason}" },
+            )
+        }
 
-        // Persist the rendered config for diagnostics (and so a support dump
-        // shows exactly what the core was handed).
-        runCatching { File(service.filesDir, "active_box.json").writeText(json) }
+        // Persist the rendered config so a support dump shows exactly what the
+        // core was handed.
+        runCatching { File(service.filesDir, "active_box.json").writeText(render.json) }
 
-        verifying = true
+        connecting = true
         try {
-            // A rejection here is FINAL: the core already told us why, so
-            // waiting out the connect timeout would only hide the reason.
-            service.loadAndStart(json)?.let { return }
+            // A rejection here is FINAL: the core already said why, and waiting
+            // out the connect timeout would only hide the reason.
+            service.loadAndStart(render.json)?.let { return }
+            loadedIds = render.includedIds
 
             val deadline = System.currentTimeMillis() + CONNECT_TIMEOUT_MS
             while (System.currentTimeMillis() < deadline) {
@@ -59,23 +90,38 @@ class LibboxEngine : VpnEngine {
                 }
                 if (probeThroughTunnel()) {
                     EngineBridge.setStatus(EngineStatus.CONNECTED)
+                    CoreClient.startStatus()
+                    AppLog.i("Engine", "connected; ${render.includedIds.size} config(s) loaded")
                     return
                 }
             }
-            // Honest timeout, plus whatever the Go side complained about —
-            // a core panic never reaches Java as an exception.
+            // Honest timeout, plus whatever the Go side complained about — a
+            // core panic never reaches Java as an exception.
             val tail = service.coreStderrTail()
             val base = "تایم‌اوت اتصال — ترافیک واقعی از داخل تونل رد نشد (همان قاعدهٔ صداقت نسخهٔ ویندوز)."
-            Log.w(TAG, "connect timed out; core stderr tail: $tail")
+            AppLog.e("Engine", "connect timed out; core stderr: ${tail ?: "(empty)"}")
             EngineBridge.setFailed(if (tail != null) "$base\n\nخروجی هسته:\n$tail" else base)
         } finally {
-            verifying = false
+            connecting = false
         }
     }
 
     override suspend fun disconnect() {
         EngineBridge.setStatus(EngineStatus.DISCONNECTING)
+        CoreClient.stopStatus()
+        loadedIds = emptyList()
         TunnelVpnService.instance?.requestDisconnect()
+    }
+
+    /**
+     * Switches the live tunnel to [configId] with no reconnect, when that
+     * config is already a member of the running selector. @return false when a
+     * full reconnect is required (the config was added after connecting).
+     */
+    fun switchLive(configId: String): Boolean {
+        if (EngineBridge.status.value.status != EngineStatus.CONNECTED) return false
+        if (configId !in loadedIds) return false
+        return CoreClient.selectConfig(configId)
     }
 
     /**
@@ -109,8 +155,7 @@ class LibboxEngine : VpnEngine {
     }
 
     companion object {
-        private const val TAG = "MultiVPN.Engine"
-        const val PROBE_URL = "https://cp.cloudflare.com/generate_204"
+        const val PROBE_URL = BoxConfigBuilder.PROBE_URL
         const val PROBE_TIMEOUT_MS = 3000
         const val CONNECT_TIMEOUT_MS = 20_000
     }

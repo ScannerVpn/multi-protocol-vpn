@@ -115,8 +115,7 @@ class TunnelVpnService : VpnService(), PlatformInterface {
         runCatching { commandServer?.closeService() }
         runCatching { commandServer?.close() }
         commandServer = null
-        runCatching { tunFd?.close() }
-        tunFd = null
+        closeTun()
         instance = null
         EngineBridge.setServiceGone()
         super.onDestroy()
@@ -220,13 +219,27 @@ class TunnelVpnService : VpnService(), PlatformInterface {
 
         val ex = options.getExcludePackage()
         while (ex.hasNext()) runCatching { builder.addDisallowedApplication(ex.next()) }
+        val inc = options.getIncludePackage()
+        while (inc.hasNext()) runCatching { builder.addAllowedApplication(inc.next()) }
 
-        runCatching { tunFd?.close() }
+        closeTun()
         val fd = builder.establish()
             ?: throw Exception("establish() returned null — دسترسی VPN داده نشده است")
         tunFd = fd
         Log.i(TAG, "TUN established")
-        return fd.detachFd()
+        // fd.fd, NOT detachFd(): libbox does not take ownership of the
+        // descriptor, so detaching left nobody to close it — every reconnect
+        // leaked an fd and stranded a tun device (observed: tun0/tun1/tun2 all
+        // present after three connects). We keep the ParcelFileDescriptor and
+        // close it in closeTun().
+        return fd.fd
+    }
+
+    /** Closes the TUN we own, if any. Safe to call repeatedly. */
+    private fun closeTun() {
+        val fd = tunFd ?: return
+        tunFd = null
+        runCatching { fd.close() }
     }
 
     override fun autoDetectInterfaceControl(fd: Int) {
