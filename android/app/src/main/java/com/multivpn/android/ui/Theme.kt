@@ -25,8 +25,14 @@ object Palette {
     val Glass = Color(0x14FFFFFF)
     val GlassStrong = Color(0x22FFFFFF)
     val Border = Color(0x2AFFFFFF)
+
+    // Latency/status grades. Ok/Warn/Bad are the three LatencyGrade buckets —
+    // one colour per grade, defined once so a pill and a chip can never
+    // disagree about the same server (the desktop's audit P3-4).
     val Ok = Color(0xFF34D399)
-    val Error = Color(0xFFF87171)
+    val Warn = Color(0xFFFBBF24)
+    val Bad = Color(0xFFF87171)
+    val Error = Bad
 }
 
 private val AuroraScheme = darkColorScheme(

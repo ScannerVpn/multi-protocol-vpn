@@ -81,6 +81,31 @@ class Store(private val dir: File) {
         atomicSaveList("subscriptions.json", list, Subscription.serializer())
 
     // ------------------------------------------------------------------
+    // Settings
+    // ------------------------------------------------------------------
+
+    /** Settings are never quarantined: a broken file falls back to defaults
+     *  and the next save rewrites it. Losing a toggle is recoverable in one
+     *  tap; losing the config list is not, which is why only the lists get
+     *  the `.corrupt-*` treatment. */
+    fun loadSettings(): Settings {
+        val f = File(dir, "settings.json")
+        if (!f.exists()) return Settings()
+        return try {
+            json.decodeFromString(Settings.serializer(), f.readText())
+        } catch (_: Exception) {
+            Settings()
+        }
+    }
+
+    fun saveSettings(settings: Settings) {
+        writeAtomically("settings.json", json.encodeToString(Settings.serializer(), settings))
+    }
+
+    /** The data directory itself — [PingCache] and [AppLog] write beside us. */
+    val dataDir: File get() = dir
+
+    // ------------------------------------------------------------------
     // Active config id
     // ------------------------------------------------------------------
 

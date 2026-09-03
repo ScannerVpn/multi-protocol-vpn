@@ -3,6 +3,7 @@ package com.multivpn.android
 import android.app.Application
 import com.hiddify.core.libbox.Libbox
 import com.hiddify.core.libbox.SetupOptions
+import com.multivpn.android.data.AppLog
 import java.io.File
 
 /**
@@ -20,6 +21,7 @@ class MultiVpnApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        AppLog.init(this)
         val base = filesDir
         val working = File(filesDir, "box").apply { mkdirs() }
         val temp = File(cacheDir, "box").apply { mkdirs() }
@@ -39,6 +41,7 @@ class MultiVpnApp : Application() {
             )
         }.onFailure {
             LibboxSetup.error = it.message ?: it.toString()
+            AppLog.e("App", "Libbox.setup failed: ${LibboxSetup.error}")
         }
         LibboxSetup.done = true
     }
