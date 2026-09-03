@@ -12,3 +12,8 @@ local.properties
 captures/
 .externalNativeBuild/
 .cxx/
+
+# The tunnel core AAR (~107 MB) — same policy as desktop/resources/bin: too
+# large for git and reproducible from fetch-core.ps1, which verifies the
+# SHA256 pinned in core-hashes.json.
+app/libs/*.aar

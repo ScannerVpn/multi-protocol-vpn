@@ -3,8 +3,22 @@
          plain-http subs either; tighten with a network security config when
          the tunnel engine ships. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The tunnel itself. VpnService.prepare() drives the consent dialog. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- API 34+ enforces a permission PER foregroundServiceType. Android has no
+         dedicated VPN type, so a VpnService uses specialUse — and without this
+         permission startForeground() throws SecurityException and the tunnel
+         dies in onCreate before libbox is ever asked to start. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- The core binds its outbound sockets to the default interface reported
+         by DefaultNetworkMonitor; reading link properties needs this. Without
+         it auto_detect_interface has nothing to bind to and the tunnel carries
+         no traffic despite a healthy TUN device. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
+        android:name=".MultiVpnApp"
         android:allowBackup="true"
         android:label="@string/app_name"
         android:supportsRtl="true"
@@ -17,5 +31,26 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- Transparent consent trampoline for the VPN dialog. -->
+        <activity
+            android:name=".vpn.VpnRequestActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <!-- The tunnel transport. Never exported: only the app starts it. -->
+        <service
+            android:name=".vpn.TunnelVpnService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            android:permission="android.permission.BIND_VPN_SERVICE">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+            <!-- API 34 requires a justification for specialUse or the install
+                 is flagged; a VPN tunnel has no dedicated type to use. -->
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="vpn tunnel transport (sing-box/libbox core)" />
+        </service>
     </application>
 </manifest>

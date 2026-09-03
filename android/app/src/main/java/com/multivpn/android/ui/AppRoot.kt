@@ -67,8 +67,8 @@ import com.multivpn.android.vpn.EngineStatus
 
 /**
  * The Android UI — three tabs mirroring the desktop app (خانه / کانفیگ‌ها /
- * تنظیمات). The سرورها tab is deliberately absent in phase 1: SSH
- * provisioning is the next milestone, and an empty tab would be a lie.
+ * تنظیمات). The سرورها tab is deliberately absent: SSH provisioning is a later
+ * milestone, and an empty tab would be a lie.
  */
 enum class Tab(val label: String) { HOME("خانه"), CONFIGS("کانفیگ‌ها"), SETTINGS("تنظیمات") }
 
@@ -223,12 +223,26 @@ fun HomeScreen() {
 
         Spacer(Modifier.height(22.dp))
         val connecting = engineState.status == EngineStatus.CONNECTING
+        val connected = engineState.status == EngineStatus.CONNECTED
+        val context = LocalContext.current
         Button(
             onClick = {
-                if (engineState.status == EngineStatus.CONNECTED) {
+                if (connected) {
                     AppModel.disconnectActive()
                 } else {
-                    AppModel.connectActive()
+                    // First click goes through the VPN consent trampoline;
+                    // VpnRequestActivity starts the service + engine on grant.
+                    // Direct connects (permission already granted) skip it.
+                    if (android.net.VpnService.prepare(context) == null) {
+                        AppModel.connectActive()
+                    } else {
+                        context.startActivity(
+                            android.content.Intent(
+                                context,
+                                com.multivpn.android.vpn.VpnRequestActivity::class.java,
+                            ),
+                        )
+                    }
                 }
             },
             enabled = !connecting,
@@ -239,7 +253,7 @@ fun HomeScreen() {
                 .height(52.dp),
         ) {
             Text(
-                if (engineState.status == EngineStatus.CONNECTED) "قطع اتصال"
+                if (connected) "قطع اتصال"
                 else if (connecting) "در حال اتصال…"
                 else "وصل شدن",
                 fontWeight = FontWeight.Bold,
@@ -247,8 +261,9 @@ fun HomeScreen() {
             )
         }
 
-        // The honest engine note (phase 1: no bundled core). Never hidden —
-        // the desktop's honesty contract applies to Android verbatim.
+        // The honest engine note (failures, VPN revoked, unsupported
+        // protocols). Never hidden — the desktop's honesty contract applies
+        // to Android verbatim.
         engineState.message?.let { msg ->
             Spacer(Modifier.height(16.dp))
             Text(
@@ -509,9 +524,10 @@ fun SettingsScreen() {
             Card {
                 Text("درباره", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Palette.TextPrimary)
                 Spacer(Modifier.height(6.dp))
-                Text("MultiVPN Android · نسخه 0.1.0 (فاز ۱)", color = Palette.TextSecondary, fontSize = 12.sp)
-                Text("پروتکل‌ها: Hysteria2 · VLESS+Reality · Trojan · SS-2022 · WireGuard · AmneziaWG · IKEv2 · OpenVPN",
-                    color = Palette.TextSecondary, fontSize = 12.sp)
+                Text("MultiVPN Android · نسخه 0.2.0 (فاز ۲ — تونل واقعی)", color = Palette.TextSecondary, fontSize = 12.sp)
+                Text("تونل فعال: Hysteria2 · VLESS+Reality · Trojan · SS-2022", color = Palette.TextSecondary, fontSize = 12.sp)
+                Text("هنوز نه: WireGuard · AmneziaWG · IKEv2 · OpenVPN (فاز بعد)",
+                    color = Palette.TextFaint, fontSize = 11.sp)
                 Text("هم‌خانوادهٔ نسخه ویندوز — پارسر لینک‌ها و مدل‌ها مشترک است.",
                     color = Palette.TextFaint, fontSize = 10.5.sp)
             }
@@ -526,7 +542,7 @@ fun SettingsScreen() {
                     fontSize = 12.sp,
                 )
                 Text(
-                    "فاز ۲: هسته sing-box (libbox) + VpnService اندروید — همان قرارداد صداقتِ نسخه ویندوز.",
+                    "هستهٔ sing-box (libbox) + VpnService اندروید. «وصل شد» فقط بعد از یک پاسخ ۲۰۴ واقعی از داخل تونل گفته می‌شود — همان قرارداد صداقتِ نسخه ویندوز.",
                     color = Palette.TextFaint, fontSize = 10.5.sp,
                 )
             }

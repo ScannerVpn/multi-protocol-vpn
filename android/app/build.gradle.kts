@@ -13,11 +13,12 @@ android {
         applicationId = "com.multivpn.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
+        versionCode = 2
         // THE single source of truth for the Android version. The desktop app
         // keeps its own appVersion in desktop/build.gradle.kts — the two
-        // release on different cadences until the tunnel engine ships.
-        versionName = "0.1.0"
+        // release on different cadences.
+        // 0.2.0 = phase 2: the real libbox tunnel, verified with live traffic.
+        versionName = "0.2.0"
     }
 
     buildTypes {
@@ -49,6 +50,12 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.core)
+
+    // The tunnel core — hiddify-core v4.1.0 AAR, the SAME core the Windows
+    // app bundles (desktop core-hashes pins it). Downloaded once by
+    // fetch-core.ps1 into app/libs/ (not in git, ~107 MB); SHA256 in
+    // core-hashes.json and enforced by the fileExists guard below.
+    implementation(files("libs/hiddify-core-4.1.0.aar"))
 
     testImplementation(libs.junit)
 }
