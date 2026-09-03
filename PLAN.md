@@ -446,8 +446,7 @@ $env:LIVE_PING_LINKS = "$env:TEMP\mvpn-diag\links.json"   # [{name, protocol, li
 ## ۹. نسخه اندروید (فاز ۱ — ۲ سپتامبر ۲۰۲۶، نسخه 0.1.0)
 
 پوشه `android/` — Kotlin + Jetpack Compose، minSdk 26 / target 35، AGP 8.7.3 / Gradle 8.14.
-جزئیات کامل: `android/README.md`. وضعیت: **مدیریت کانفیگ کار میکند؛ موتور تونل عمداً غایب و
-صادقانه اعلام میشود** (PlaceholderEngine — هیچ Connected/پینگ جعلی، همان قرارداد §۴).
+جزئیات کامل: `android/README.md`.
 
 - **هسته مشترک:** ۵ فایل پرتابل دسکتاپ (`Links/Models/Ports/LatencyGrade/Awg`) کپی بایتبهبایت
   با پکیج یکسان `vpn.core` در `android/app/src/main/java/vpn/core/`؛ `LinksParityTest` واگرایی
@@ -456,10 +455,55 @@ $env:LIVE_PING_LINKS = "$env:TEMP\mvpn-diag\links.json"   # [{name, protocol, li
   default 10808، کامنت divergence در فایل). `Store.kt` اندروید معامل storage است (اتمیک +
   قرنطینه + نجات subscriptions) با `SecretKeeper` بهجای DPAPI (Android Keystore، همان
   قرارداد prefix/unwrap).
-- **تستها:** ۱۲ تست JVM سبز (پارتن پاریت + Store: اتمیک/قرنطینه/نجات).
 - **بیلد:** منابع از میرورهای aliyun (شبکه کاربر — dl.google.com ناپایدار؛ بند §۲ دسکتاپ)؛
   از Git Bash حتماً `TMP/TEMP` ویندوزی ست شود وگرنه AAPT2 میمیرد.
-- **تأیید زنده:** بیلد + نصب + اجرا روی ایمولاتور (EmuTest/API 37)؛ ایمپورت ۲ لینک از UI واقعی
-  و ماندگاری بعد از ریاستارت تأیید شد (اسکرین‌شات: `android/docs/screenshot-*.png`).
-- **فاز ۲ (بعدی):** موتور تونل — sing-box libbox AAR پشت `android.net.VpnService`،
-  `verifyTraffic` قبل از «Connected». فاز ۳: پینگ واقعی. فاز ۴: SSH provision.
+- **تأیید زنده فاز ۱:** ایمپورت ۲ لینک از UI واقعی و ماندگاری بعد از ریاستارت
+  (اسکرین‌شات: `android/docs/screenshot-*.png`).
+
+## ۹.۱ نسخه اندروید (فاز ۲ — ۳ سپتامبر ۲۰۲۶، موتور تونل واقعی)
+
+وضعیت: **تونل کار میکند و روی ایمولاتور با ترافیک واقعی تأیید شد.** ۲۶ تست JVM سبز
+(۶ Store + ۶ پاریتی + ۱۴ اسکیمای sing-box).
+
+- **هسته:** `hiddify-core-4.1.0.aar` (همان هستهای که ویندوز دارد) → داخلش
+  **sing-box v1.13.0** (از روی `.so` خوانده شد؛ در ران‌تایم `Libbox.version()` = 1.13.1).
+  دانلود با `android/fetch-core.ps1`، SHA256 در `core-hashes.json`، خارج از git (~۱۰۷MB).
+- **معماری:** `MultiVpnApp` (Libbox.setup) → `TunnelVpnService` (VpnService +
+  PlatformInterface + CommandServer) → `LibboxEngine` (رندر کانفیگ + اثبات ۲۰۴) →
+  `EngineBridge` (StateFlow به Compose). `DefaultNetworkMonitor` اینترفیس پیش‌فرض را
+  به هسته میدهد.
+- **قرارداد صداقت (§۴) روی اندروید:** «وصل شد» فقط بعد از ۲۰۴ واقعی از داخل TUN؛
+  کانفیگ مرده → تایم‌اوت صادق + دم `stderr` هسته در پیام. هر دو مسیر زنده تست شد.
+
+### پنج شکست واقعی فاز ۲ و ریشه‌شان (هر کدام یک بار کل تونل را کشت)
+
+۱. **`startForeground` با `specialUse` بدون پرمیشن** → از API 34 هر
+   `foregroundServiceType` پرمیشن جدا میخواهد؛ `FOREGROUND_SERVICE_SPECIAL_USE`
+   نبود و سرویس در `onCreate` میمرد، قبل از آنکه libbox اصلاً صدا زده شود.
+۲. **`Libbox.setup()` صدا زده نشده بود** → libbox یک کتابخانه Go است؛ بدون
+   `setup` (basePath/workingPath/tempPath) هر تماس بعدی داخل Go شکست میخورد بدون
+   هیچ استک‌تریس جاوا. الان در `Application.onCreate` + `redirectStderr` برای دیدن
+   پنیک‌های Go.
+۳. **`CommandServer.start()` صدا زده نشده بود** → بدون آن
+   `startOrReloadService` بی‌اثر است.
+۴. **`startOrReloadService(json, null)`** → sing-box 1.13 همان اول
+   `OverrideOptions` را dereference میکند (`command_server.go:173`)؛ `null` = SIGSEGV
+   و کشتن کل **پروسه** (هیچ catch جاوایی نمیبیندش). راه‌حل: `OverrideOptions()` خالی.
+۵. **اسکیمای کانفیگ ۱.۱۱ به هستهی ۱.۱۳ داده میشد** → و بعد از رفع آن،
+   `getInterfaces()` آدرس IPv6 لینک‌لوکال را با zone (`fe80::…%dummy0`) میداد و
+   `netip.MustParsePrefix` پنیک میکرد. هر دو در `BoxConfigSchemaTest` و کامنت
+   `getInterfaces` قفل شدند:
+   - `inet4_address`/`inet6_address` → یک آرایه `address`
+   - `sniff` از inbound → اکشن مسیر `{"action":"sniff"}`
+   - outbound نوع `dns`/`block` حذف شد → `{"action":"hijack-dns"}` و `reject`
+   - سرور DNS به شکل `{"type":"https","server":…}` نه رشتهی `address:`
+   - `flags` اینترفیس باید بیت‌های واقعی `net.Flags` گو را داشته باشد وگرنه هسته
+     هیچ اینترفیسی برای bind پیدا نمیکند.
+
+**درس عمومی (به §۵ اضافه شود):** یک هستهی Go داخل JNI شکستش را با استک‌تریس جاوا
+اعلام نمیکند؛ سه ابزار لازم است — `redirectStderr`، فیلتر `E Go` در logcat، و
+`checkConfig` قبل از `startOrReloadService` تا خطای اسکیمایی بهجای «تایم‌اوت ۲۰
+ثانیهای» گزارش شود.
+
+- **فاز بعدی:** پینگ واقعی کانفیگ‌ها (فاز ۳)، WireGuard/AmneziaWG از فایل `.conf`
+  (فاز ۲.۵)، SSH provision (فاز ۴).

@@ -9,7 +9,7 @@ import com.multivpn.android.ui.MultiVPNTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        AppModel.init(filesDir)
+        AppModel.init(filesDir, this)
         setContent {
             MultiVPNTheme {
                 AppRoot()

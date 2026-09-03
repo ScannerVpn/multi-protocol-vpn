@@ -3,11 +3,14 @@ package com.multivpn.android
 import com.multivpn.android.data.SecretKeeper
 import com.multivpn.android.data.Store
 import com.multivpn.android.data.Subs
-import com.multivpn.android.vpn.PlaceholderEngine
+import com.multivpn.android.vpn.EngineBridge
+import com.multivpn.android.vpn.LibboxEngine
+import com.multivpn.android.vpn.TunnelVpnService
 import com.multivpn.android.vpn.VpnEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -32,14 +35,22 @@ object AppModel {
     /** Transient user-facing message (import results, engine honesty note). */
     val notice = MutableStateFlow<String?>(null)
 
-    val engine: VpnEngine = PlaceholderEngine()
+    val engine: VpnEngine = LibboxEngine()
 
     private var store: Store? = null
     private var confDir: File? = null
+
+    /** Application context — needed to start the tunnel service from the model. */
+    private var appContext: android.content.Context? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+    /** How long connectActive waits for the service to publish its instance.
+     *  Generous on purpose: onCreate loads a ~100 MB native core. */
+    private const val SERVICE_WAIT_MS = 6_000L
+
     /** Called once from MainActivity with the app's private storage. */
-    fun init(filesDir: File) {
+    fun init(filesDir: File, context: android.content.Context? = null) {
+        appContext = context?.applicationContext ?: appContext
         if (store != null) return
         confDir = File(filesDir, "confs")
         val s = Store(File(filesDir, "data"))
@@ -187,6 +198,11 @@ object AppModel {
      * The Home connect button entry point. Runs on the app scope: the UI
      * never calls the engine directly (a suspend fun is not callable from a
      * Compose lambda).
+     *
+     * The service is started HERE and awaited: the engine needs
+     * `TunnelVpnService.instance` (and its libbox command server) to exist,
+     * and a fixed sleep after startService is a race — onCreate has to finish
+     * loading a 100 MB native core first.
      */
     fun connectActive() {
         val cfg = activeConfig
@@ -194,11 +210,40 @@ object AppModel {
             notice.value = "اول یک کانفیگ انتخاب کنید."
             return
         }
-        scope.launch { engine.connect(cfg) }
+        val ctx = appContext
+        scope.launch {
+            if (ctx != null && !awaitTunnelService(ctx)) {
+                EngineBridge.setFailed("سرویس تونل بالا نیامد — لاگ هسته را بررسی کنید.")
+                return@launch
+            }
+            engine.connect(cfg)
+        }
+    }
+
+    /**
+     * Starts the tunnel service if needed and waits (up to [SERVICE_WAIT_MS])
+     * for it to publish its instance. @return true when it is ready.
+     */
+    suspend fun awaitTunnelService(context: android.content.Context): Boolean {
+        if (TunnelVpnService.instance != null) return true
+        TunnelVpnService.start(context)
+        val deadline = System.currentTimeMillis() + SERVICE_WAIT_MS
+        while (System.currentTimeMillis() < deadline) {
+            if (TunnelVpnService.instance != null) return true
+            delay(100)
+        }
+        return TunnelVpnService.instance != null
     }
 
     fun disconnectActive() {
         scope.launch { engine.disconnect() }
+    }
+
+    /** Starts the VPN permission dialog flow (must be called from the Activity). */
+    fun requestVpnPermission(activity: android.app.Activity): Boolean {
+        val intent = android.content.Intent(activity, com.multivpn.android.vpn.VpnRequestActivity::class.java)
+        activity.startActivity(intent)
+        return true
     }
 
     fun removeConfig(id: String) {
