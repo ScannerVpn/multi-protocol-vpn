@@ -20,13 +20,11 @@ object EngineBridge {
         _status.value = EngineState(EngineStatus.DISCONNECTED, message)
     }
 
-    fun setServiceAlive(service: TunnelVpnService) {}
-
     fun setServiceGone() {
         // Only demote to DISCONNECTED if the state was a live one; an
         // explicit engine failure already set its own message.
         val cur = _status.value
-        if (cur.status in listOf(EngineStatus.CONNECTING, EngineStatus.CONNECTED)) {
+        if (cur.status != EngineStatus.DISCONNECTED) {
             _status.value = EngineState(EngineStatus.DISCONNECTED, null)
         }
     }

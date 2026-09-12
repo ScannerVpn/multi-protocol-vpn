@@ -17,3 +17,10 @@ captures/
 # large for git and reproducible from fetch-core.ps1, which verifies the
 # SHA256 pinned in core-hashes.json.
 app/libs/*.aar
+.kotlin/
+__pycache__/
+
+# Signing credentials must never be committed.
+*.jks
+*.keystore
+key.properties

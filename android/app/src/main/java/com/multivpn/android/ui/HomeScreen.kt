@@ -3,6 +3,8 @@ package com.multivpn.android.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -65,6 +67,7 @@ fun HomeScreen() {
     Column(
         Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -121,7 +124,7 @@ fun HomeScreen() {
         val context = LocalContext.current
         Button(
             onClick = {
-                if (connected) {
+                if (connected || connecting) {
                     AppModel.disconnectActive()
                 } else {
                     // First click goes through the VPN consent trampoline;
@@ -138,7 +141,7 @@ fun HomeScreen() {
                     }
                 }
             },
-            enabled = !connecting,
+            enabled = engineState.status != EngineStatus.DISCONNECTING,
             shape = RoundedCornerShape(16.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Palette.Accent),
             modifier = Modifier
@@ -148,7 +151,7 @@ fun HomeScreen() {
             Text(
                 when {
                     connected -> "قطع اتصال"
-                    connecting -> "در حال اتصال…"
+                    connecting -> "لغو اتصال"
                     else -> "وصل شدن"
                 },
                 fontWeight = FontWeight.Bold,
@@ -177,7 +180,7 @@ fun HomeScreen() {
                     .padding(12.dp),
             )
         }
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(24.dp))
     }
 }
 

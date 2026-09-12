@@ -204,9 +204,9 @@ class BoxConfigSchemaTest {
         )
     }
 
-    @Test
-    fun `an active id that did not render falls back to a config that did`() {
-        val render = BoxConfigBuilder.buildTunnel(
+    @Test(expected = IllegalArgumentException::class)
+    fun `an unsupported active config must not silently connect a different server`() {
+        BoxConfigBuilder.buildTunnel(
             configs = listOf(
                 VpnConfig(id = "ovpn", name = "OldVPN", serverIp = "1.1.1.1", protocol = "openvpn"),
                 config("good"),
@@ -214,9 +214,44 @@ class BoxConfigSchemaTest {
             activeId = "ovpn",
             settings = Settings(),
         )
-        val selector = outbounds(json.parseToJsonElement(render.json).jsonObject)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `a missing active ID is rejected instead of selecting an arbitrary server`() {
+        BoxConfigBuilder.buildTunnel(listOf(config("a")), "missing")
+    }
+
+    @Test
+    fun `a null selection may use the first renderable config`() {
+        val result = BoxConfigBuilder.buildTunnel(listOf(config("a")), null)
+        val group = outbounds(json.parseToJsonElement(result.json).jsonObject)
             .first { it["type"]!!.jsonPrimitive.content == "selector" }
-        assertEquals("p-good", selector["default"]!!.jsonPrimitive.content)
+        assertEquals("p-a", group["default"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `verification has an explicit loopback proxy and cannot take the direct route`() {
+        val result = BoxConfigBuilder.buildTunnel(listOf(config("a")), "a",
+            Settings(splitMode = SplitModes.INCLUDE, splitApps = listOf("other.app")), 23456, "test-secret")
+        val root = json.parseToJsonElement(result.json).jsonObject
+        val inbound = root["inbounds"]!!.jsonArray.map { it.jsonObject }
+            .first { it["tag"]!!.jsonPrimitive.content == "verify-in" }
+        assertEquals("127.0.0.1", inbound["listen"]!!.jsonPrimitive.content)
+        assertEquals("23456", inbound["listen_port"]!!.jsonPrimitive.content)
+        assertEquals("http", inbound["type"]!!.jsonPrimitive.content)
+        val rule = root["route"]!!.jsonObject["rules"]!!.jsonArray.first().jsonObject
+        assertEquals("verify-in", rule["inbound"]!!.jsonArray.first().jsonPrimitive.content)
+        assertEquals("proxy", rule["outbound"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `proxy hostnames bootstrap through local DNS rather than recursively through the proxy`() {
+        assertEquals("local", render()["route"]!!.jsonObject["default_domain_resolver"]!!.jsonPrimitive.content)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `an invalid verification port cannot enter a core config`() {
+        BoxConfigBuilder.buildTunnel(listOf(config("a")), "a", verificationPort = 0)
     }
 
     // ---------- probe config (measuring while disconnected) ----------
@@ -269,6 +304,46 @@ class BoxConfigSchemaTest {
         )
         assertNull(t["include_package"])
         assertNull(t["exclude_package"])
+    }
+
+    @Test
+    fun `standard trojan links enable TLS without a security query parameter`() {
+        val root = render("trojan://secret@vpn.example:443#Trojan")
+        val node = outbounds(root).first { it["type"]!!.jsonPrimitive.content == "trojan" }
+        assertEquals("true", node["tls"]!!.jsonObject["enabled"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `explicit trojan no TLS is preserved`() {
+        val node = outbounds(render("trojan://secret@vpn.example:443?security=none#Trojan"))
+            .first { it["type"]!!.jsonPrimitive.content == "trojan" }
+        assertEquals("false", node["tls"]!!.jsonObject["enabled"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `TLS preserves the negotiated ALPN protocols`() {
+        val node = outbounds(render("trojan://secret@vpn.example:443?alpn=h2%2Chttp%2F1.1#T"))
+            .first { it["type"]!!.jsonPrimitive.content == "trojan" }
+        assertEquals(listOf("h2", "http/1.1"), node["tls"]!!.jsonObject["alpn"]!!.jsonArray.map { it.jsonPrimitive.content })
+    }
+
+    @Test
+    fun `escaped control characters in passwords remain valid JSON without changing the secret`() {
+        val node = outbounds(render("trojan://a%09b%0Ac@vpn.example:443#T"))
+            .first { it["type"]!!.jsonPrimitive.content == "trojan" }
+        assertEquals("a\tb\nc", node["password"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `unsupported transports cannot silently become TCP`() {
+        val result = BoxConfigBuilder.build(config(link = "vless://uuid@vpn.example:443?type=xhttp&security=tls"))
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull()!!.message!!.contains("xhttp"))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `verification must not expose an unauthenticated local proxy`() {
+        BoxConfigBuilder.buildTunnel(listOf(config("a")), "a", verificationPort = 23456)
     }
 
     // ---------- per-protocol rendering ----------

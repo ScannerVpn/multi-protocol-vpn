@@ -2,149 +2,161 @@ package com.multivpn.android.vpn
 
 import com.multivpn.android.data.AppLog
 import com.multivpn.android.data.Settings
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import vpn.core.VpnConfig
-import java.io.File
 import java.net.HttpURLConnection
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.net.ServerSocket
 import java.net.URL
 
-/**
- * The tunnel engine: renders configs, starts libbox, and refuses to report
- * "connected" before a genuine 204 passes through the TUN — the desktop's
- * verifyTraffic() contract, carried over verbatim.
- *
- * Verification differs from the desktop only in transport: on Android the whole
- * system rides the TUN, so a plain request IS through-tunnel (there is no local
- * proxy port to race). A captive-portal answer (200-with-body / redirect) is
- * rejected — [isRealNoContent] is the same predicate as the desktop's
- * TrafficProbe.
- *
- * The config handed to the core contains EVERY renderable config inside a
- * selector (see [BoxConfigBuilder]), which is what allows switching config
- * without a reconnect and measuring real latency per config.
- */
+/** Owns verified connections; all blocking core calls run off the UI thread. */
 class LibboxEngine : VpnEngine {
-
     override val state = EngineBridge.status
 
     @Volatile
-    private var connecting = false
-
-    /** Config ids currently present in the running core's selector. */
-    @Volatile
     var loadedIds: List<String> = emptyList()
         private set
+    private var loadedConfigs: Map<String, VpnConfig> = emptyMap()
+    private var verificationPort = 0
+    private var verificationToken = ""
 
     override suspend fun connect(config: VpnConfig) =
         connect(listOf(config), config.id, Settings())
 
-    /**
-     * Starts the tunnel with [configs] loaded and [activeId] selected.
-     *
-     * A config that cannot be rendered is REPORTED, not silently dropped: the
-     * notice names it and why, so an unsupported protocol or a broken `.conf`
-     * is visible instead of a config that just never works.
-     */
-    suspend fun connect(configs: List<VpnConfig>, activeId: String?, settings: Settings) {
-        if (connecting) return
-        val service = TunnelVpnService.instance
-            ?: run {
-                EngineBridge.setFailed("سرویس تونل هنوز راه نیفتاده — یک بار دیگر تلاش کنید.")
-                return
-            }
-
-        val render = try {
-            BoxConfigBuilder.buildTunnel(configs, activeId, settings)
-        } catch (e: Exception) {
-            EngineBridge.setFailed(e.message ?: "کانفیگ قابل رندر نیست.")
-            return
-        }
-        if (render.rejected.isNotEmpty()) {
-            AppLog.i(
-                "Engine",
-                "skipped ${render.rejected.size} config(s): " +
-                    render.rejected.joinToString("; ") { "${it.name}: ${it.reason}" },
-            )
-        }
-
-        // Persist the rendered config so a support dump shows exactly what the
-        // core was handed.
-        runCatching { File(service.filesDir, "active_box.json").writeText(render.json) }
-
-        connecting = true
-        try {
-            // A rejection here is FINAL: the core already said why, and waiting
-            // out the connect timeout would only hide the reason.
-            service.loadAndStart(render.json)?.let { return }
-            loadedIds = render.includedIds
-
-            val deadline = System.currentTimeMillis() + CONNECT_TIMEOUT_MS
-            while (System.currentTimeMillis() < deadline) {
-                delay(300)
-                when (EngineBridge.status.value.status) {
-                    EngineStatus.DISCONNECTED -> return // failed inside libbox
-                    EngineStatus.CONNECTED -> return
-                    else -> {}
+    suspend fun connect(configs: List<VpnConfig>, activeId: String?, settings: Settings) =
+        withContext(Dispatchers.IO) {
+            TunnelVpnService.operationMutex.withLock {
+                val service = TunnelVpnService.instance
+                if (service == null || service.ending) {
+                    EngineBridge.setFailed("سرویس تونل هنوز آماده نیست؛ دوباره تلاش کنید.")
+                    return@withLock
                 }
-                if (probeThroughTunnel()) {
-                    EngineBridge.setStatus(EngineStatus.CONNECTED)
-                    CoreClient.startStatus()
-                    AppLog.i("Engine", "connected; ${render.includedIds.size} config(s) loaded")
-                    return
+                var verified = false
+                var failure: String? = null
+                try {
+                    currentCoroutineContext().ensureActive()
+                    CoreClient.stopStatus()
+                    // Reserve an available loopback port. If another process wins
+                    // the bind race, checkConfig/start fails closed, never direct.
+                    verificationPort = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))
+                        .use { it.localPort }
+                    verificationToken = java.util.UUID.randomUUID().toString()
+                    val render = BoxConfigBuilder.buildTunnel(configs, activeId, settings, verificationPort, verificationToken)
+                    AppLog.i("Engine", "loading ${render.includedIds.size} config(s); ${render.rejected.size} rejected")
+                    service.loadAndStart(render.json)?.let { throw IllegalStateException(it) }
+                    loadedIds = render.includedIds
+                    loadedConfigs = configs.filter { it.id in loadedIds }.associateBy { it.id }
+                    verified = verify(service)
+                    if (!verified) failure = "اتصال تأیید نشد؛ تونل بسته شد. سرور و دسترسی اینترنت را بررسی کنید."
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    failure = e.message ?: "اجرای تونل ناموفق بود."
+                } finally {
+                    if (!verified) {
+                        loadedIds = emptyList()
+                        loadedConfigs = emptyMap()
+                        service.finishSession()
+                        if (failure != null) EngineBridge.setFailed(failure)
+                        else EngineBridge.setServiceGone()
+                    }
                 }
             }
-            // Honest timeout, plus whatever the Go side complained about — a
-            // core panic never reaches Java as an exception.
-            val tail = service.coreStderrTail()
-            val base = "تایم‌اوت اتصال — ترافیک واقعی از داخل تونل رد نشد (همان قاعدهٔ صداقت نسخهٔ ویندوز)."
-            AppLog.e("Engine", "connect timed out; core stderr: ${tail ?: "(empty)"}")
-            EngineBridge.setFailed(if (tail != null) "$base\n\nخروجی هسته:\n$tail" else base)
-        } finally {
-            connecting = false
+        }
+
+    override suspend fun disconnect() = withContext(Dispatchers.IO) {
+        TunnelVpnService.operationMutex.withLock {
+            EngineBridge.setStatus(EngineStatus.DISCONNECTING)
+            CoreClient.stopStatus()
+            loadedIds = emptyList()
+            loadedConfigs = emptyMap()
+            TunnelVpnService.instance?.finishSession()
+            EngineBridge.setStatus(EngineStatus.DISCONNECTED)
         }
     }
 
-    override suspend fun disconnect() {
-        EngineBridge.setStatus(EngineStatus.DISCONNECTING)
-        CoreClient.stopStatus()
-        loadedIds = emptyList()
-        TunnelVpnService.instance?.requestDisconnect()
+    /** Refuses stale/edited configs; a successful switch must pass a NEW probe. */
+    suspend fun switchLive(config: VpnConfig): Boolean = withContext(Dispatchers.IO) {
+        TunnelVpnService.operationMutex.withLock {
+            val service = TunnelVpnService.instance ?: return@withLock false
+            if (state.value.status != EngineStatus.CONNECTED) return@withLock false
+            val loaded = loadedConfigs[config.id] ?: return@withLock false
+            if (loaded.xrayLink != config.xrayLink || loaded.tunnelConfPath != config.tunnelConfPath ||
+                loaded.protocol != config.protocol) return@withLock false
+            if (!CoreClient.selectConfig(config.id)) return@withLock false
+            EngineBridge.setStatus(EngineStatus.CONNECTING)
+            var verified = false
+            try {
+                verified = verify(service, startStats = false)
+                verified
+            } finally {
+                if (!verified) {
+                    loadedIds = emptyList()
+                    loadedConfigs = emptyMap()
+                    service.finishSession()
+                    EngineBridge.setFailed("سرور انتخاب‌شده ترافیک را عبور نداد؛ اتصال بسته شد.")
+                }
+            }
+        }
     }
 
-    /**
-     * Switches the live tunnel to [configId] with no reconnect, when that
-     * config is already a member of the running selector. @return false when a
-     * full reconnect is required (the config was added after connecting).
-     */
-    fun switchLive(configId: String): Boolean {
-        if (EngineBridge.status.value.status != EngineStatus.CONNECTED) return false
-        if (configId !in loadedIds) return false
-        return CoreClient.selectConfig(configId)
+    private suspend fun verify(service: TunnelVpnService, startStats: Boolean = true): Boolean {
+        val deadline = System.nanoTime() + CONNECT_TIMEOUT_MS * 1_000_000L
+        while (System.nanoTime() < deadline) {
+            currentCoroutineContext().ensureActive()
+            if (TunnelVpnService.instance !== service || !service.hasTun || service.ending ||
+                state.value.status == EngineStatus.DISCONNECTED) return false
+            if (probeThroughTunnel()) {
+                currentCoroutineContext().ensureActive()
+                // Revocation/disconnect may have occurred during the HTTP read.
+                if (TunnelVpnService.instance !== service || !service.hasTun || service.ending ||
+                    state.value.status == EngineStatus.DISCONNECTED) return false
+                EngineBridge.setStatus(EngineStatus.CONNECTED)
+                service.markConnected()
+                if (startStats) CoreClient.startStatus()
+                return true
+            }
+            delay(300)
+        }
+        return false
     }
 
-    /**
-     * The through-tunnel proof: cp.cloudflare.com/generate_204 must answer a
-     * REAL 204 (or an empty 200). Redirects/bodies = captive portal = NOT
-     * connected, no matter what libbox's own state says.
+    /** Never trusts Android's default route: per-app split can bypass the TUN.
+     * HTTPS CONNECT through our loopback inbound proves the selected outbound.
+     * A single byte is enough to reject a captive portal; never read an unbounded body.
      */
-    private suspend fun probeThroughTunnel(): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val conn = URL(PROBE_URL).openConnection() as HttpURLConnection
+    private fun probeThroughTunnel(): Boolean {
+        var conn: HttpURLConnection? = null
+        return try {
+            val proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", verificationPort))
+            conn = URL(PROBE_URL).openConnection(proxy) as HttpURLConnection
             conn.connectTimeout = PROBE_TIMEOUT_MS
             conn.readTimeout = PROBE_TIMEOUT_MS
             conn.instanceFollowRedirects = false
-            conn.setRequestProperty("User-Agent", "MultiVPN-connectivity-check")
+            conn.useCaches = false
+            val auth = java.util.Base64.getEncoder().encodeToString("probe:$verificationToken".toByteArray(Charsets.UTF_8))
+            conn.setRequestProperty("Proxy-Authorization", "Basic $auth")
+            conn.setRequestProperty("Connection", "close")
             conn.setRequestProperty("Cache-Control", "no-cache")
             val code = conn.responseCode
-            val bodyLen = try {
-                conn.inputStream?.use { it.readBytes() }?.size ?: 0
-            } catch (_: Exception) { 0 }
-            conn.disconnect()
-            isRealNoContent(code, bodyLen)
+            val bodyLength = when (code) {
+                204 -> 0
+                200 -> conn.inputStream.use { if (it.read() == -1) 0 else 1 }
+                else -> -1
+            }
+            isRealNoContent(code, bodyLength)
         } catch (_: Exception) {
             false
+        } finally {
+            conn?.disconnect()
         }
     }
 

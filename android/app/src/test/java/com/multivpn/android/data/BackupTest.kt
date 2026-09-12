@@ -124,6 +124,59 @@ class BackupTest {
     }
 
     @Test
+    fun `file based profiles restore on another device without their original paths`() {
+        val source = store()
+        val profile = java.io.File(source.dataDir, "wireguard.conf").apply {
+            writeText("[Interface]\nPrivateKey = secret-key\nAddress = 10.0.0.2/32\n")
+        }
+        val config = VpnConfig(id = "../../unsafe", name = "WG", serverIp = "1.2.3.4",
+            protocol = "wireguard", tunnelConfPath = profile.absolutePath)
+        val out = ByteArrayOutputStream()
+        val exported = Backup(source).export(out, "correct horse".toCharArray(), listOf(config), emptyList(), Settings(), config.id)
+        assertTrue(exported.message, exported.ok)
+        assertFalse(out.toString("ISO-8859-1").contains("secret-key"))
+        profile.delete()
+        val target = store()
+        val result = Backup(target).import(ByteArrayInputStream(out.toByteArray()), "correct horse".toCharArray())
+        assertTrue(result.message, result.ok)
+        val restoredFile = java.io.File(target.loadConfigs().single().tunnelConfPath!!)
+        assertTrue(restoredFile.canonicalPath.startsWith(target.dataDir.canonicalPath + java.io.File.separator))
+        assertTrue(restoredFile.readText().contains("PrivateKey = secret-key"))
+    }
+
+    @Test
+    fun `missing source profile fails export rather than producing a broken backup`() {
+        val config = VpnConfig(id = "wg", name = "WG", serverIp = "host", protocol = "wireguard",
+            tunnelConfPath = java.io.File(tmp.root, "missing.conf").path)
+        val result = Backup(store()).export(ByteArrayOutputStream(), "correct horse".toCharArray(),
+            listOf(config), emptyList(), Settings(), "wg")
+        assertFalse(result.ok)
+    }
+
+    @Test
+    fun `tampered ciphertext does not replace the target data`() {
+        val out = ByteArrayOutputStream()
+        Backup(store()).export(out, "correct horse".toCharArray(), configs, subs, settings, "a")
+        val bytes = out.toByteArray()
+        bytes[bytes.lastIndex] = (bytes.last().toInt() xor 1).toByte()
+        val target = store()
+        target.saveConfigs(listOf(configs.first()))
+        val result = Backup(target).import(ByteArrayInputStream(bytes), "correct horse".toCharArray())
+        assertFalse(result.ok)
+        assertEquals(1, target.loadConfigs().size)
+    }
+
+    @Test
+    fun `short passphrases still close the caller owned output stream`() {
+        var closed = false
+        val output = object : ByteArrayOutputStream() {
+            override fun close() { closed = true; super.close() }
+        }
+        Backup(store()).export(output, "short".toCharArray(), configs, subs, settings, "a")
+        assertTrue(closed)
+    }
+
+    @Test
     fun `the suggested file name carries the mvbak extension`() {
         assertTrue(Backup.suggestedName().endsWith(".mvbak"))
     }

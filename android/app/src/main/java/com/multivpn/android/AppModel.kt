@@ -16,6 +16,9 @@ import com.multivpn.android.vpn.TunnelVpnService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -55,6 +58,15 @@ object AppModel {
     val engine = LibboxEngine()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var connectionJob: Job? = null
+    @Volatile private var reconnectAllowed = false
+    private var reconnectJob: Job? = null
+
+    fun cancelReconnect() {
+        reconnectAllowed = false
+        reconnectJob?.cancel()
+        reconnectJob = null
+    }
 
     val pinger = Pinger(scope)
 
@@ -84,8 +96,29 @@ object AppModel {
         activeConfigId.value = s.loadActiveConfigId()
         settings.value = s.loadSettings()
         cachedLatency.value = pingCache?.all() ?: emptyMap()
-        if (activeConfigId.value == null && configs.value.isNotEmpty()) {
-            setActive(configs.value.first().id)
+        if (configs.value.none { it.id == activeConfigId.value }) {
+            setActive(configs.value.firstOrNull()?.id)
+        }
+        scope.launch {
+            var previous = EngineStatus.DISCONNECTED
+            EngineBridge.status.collect { state ->
+                val unexpectedlyDropped = previous == EngineStatus.CONNECTED &&
+                    state.status == EngineStatus.DISCONNECTED
+                previous = state.status
+                if (unexpectedlyDropped && reconnectAllowed && settings.value.autoReconnect) {
+                    // One re-dial per established session; no retries on a failed
+                    // initial connection, explicit disconnect, or VPN revocation.
+                    reconnectAllowed = false
+                    reconnectJob = scope.launch {
+                        delay(1000)
+                        if (settings.value.autoReconnect &&
+                            EngineBridge.status.value.status == EngineStatus.DISCONNECTED &&
+                            appContext?.let { android.net.VpnService.prepare(it) == null } == true) {
+                            connectActive()
+                        }
+                    }
+                }
+            }
         }
         AppLog.i("Model", "loaded ${configs.value.size} config(s), ${subscriptions.value.size} sub(s)")
         if (settings.value.autoConnect && activeConfig != null) {
@@ -197,6 +230,7 @@ object AppModel {
         )
         configs.value = configs.value + config
         persist()
+        if (activeConfigId.value == null) setActive(id)
         notice.value = if (protocol == "openvpn") {
             "«$name» ذخیره شد، ولی OpenVPN روی اندروید هنوز پیاده نشده."
         } else {
@@ -265,6 +299,7 @@ object AppModel {
 
     /** Removes a subscription; [withConfigs] also deletes what it brought. */
     fun removeSubscription(sub: Subscription, withConfigs: Boolean = false) {
+        if (withConfigs && configs.value.any { it.source == "subscription:${sub.id}" && !canModify(it.id) }) return
         subscriptions.value = subscriptions.value.filterNot { it.id == sub.id }
         if (withConfigs) {
             val key = "subscription:${sub.id}"
@@ -298,6 +333,7 @@ object AppModel {
      * worse than the previous one.
      */
     fun updateConfigLink(id: String, newLink: String): Boolean {
+        if (!canModify(id)) return false
         val raw = newLink.trim()
         val link = Links.parse(raw)
         if (link == null) {
@@ -323,7 +359,16 @@ object AppModel {
     /** Text to share: the link itself, or a note for file-based configs. */
     fun shareText(config: VpnConfig): String? = config.xrayLink
 
+    private fun canModify(id: String): Boolean {
+        if (id == activeConfigId.value && EngineBridge.status.value.status != EngineStatus.DISCONNECTED) {
+            notice.value = "قبل از ویرایش یا حذف کانفیگ فعال، اتصال را قطع کنید."
+            return false
+        }
+        return true
+    }
+
     fun removeConfig(id: String) {
+        if (!canModify(id)) return
         configs.value.firstOrNull { it.id == id }?.tunnelConfPath?.let { p ->
             runCatching { File(p).delete() }
         }
@@ -345,11 +390,25 @@ object AppModel {
      * dropped session. Otherwise it is just the stored preference.
      */
     fun setActive(id: String?) {
-        if (id == null) return
-        val live = engine.switchLive(id)
+        val config = configs.value.firstOrNull { it.id == id }
+        if (id != null && config == null) return
+        if (EngineBridge.status.value.status == EngineStatus.CONNECTED) {
+            if (connectionJob?.isActive == true || config == null) return
+            connectionJob = scope.launch {
+                pinger.cancelAndWait()
+                if (engine.switchLive(config)) {
+                    activeConfigId.value = id
+                    store?.saveActiveConfigId(id)
+                    notice.value = "به «${config.name}» سوییچ شد و ترافیک تأیید شد."
+                } else {
+                    notice.value = "سوییچ انجام نشد؛ اتصال را قطع و کانفیگ را دوباره انتخاب کنید."
+                }
+            }
+            return
+        }
+        if (EngineBridge.status.value.status != EngineStatus.DISCONNECTED) return
         activeConfigId.value = id
         store?.saveActiveConfigId(id)
-        if (live) notice.value = "بدون قطع اتصال به «${configs.value.firstOrNull { it.id == id }?.name}» سوییچ شد."
     }
 
     /**
@@ -363,18 +422,38 @@ object AppModel {
      * ~100 MB native core first.
      */
     fun connectActive() {
+        if (connectionJob?.isActive == true || EngineBridge.status.value.status == EngineStatus.CONNECTED) return
         val cfg = activeConfig
         if (cfg == null) {
             notice.value = "اول یک کانفیگ انتخاب کنید."
             return
         }
-        val ctx = appContext
-        scope.launch {
-            if (ctx != null && !awaitTunnelService(ctx)) {
-                EngineBridge.setFailed("سرویس تونل بالا نیامد — لاگ هسته را بررسی کنید.")
-                return@launch
+        val ctx = appContext ?: return
+        try {
+            if (android.net.VpnService.prepare(ctx) != null) {
+                ctx.startActivity(android.content.Intent(ctx, com.multivpn.android.vpn.VpnRequestActivity::class.java)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                return
             }
-            engine.connect(configs.value, cfg.id, settings.value)
+        } catch (e: Exception) {
+            EngineBridge.setFailed("درخواست دسترسی VPN ناموفق بود: ${e.message}")
+            return
+        }
+        reconnectAllowed = true
+        connectionJob = scope.launch {
+            try {
+                pinger.cancelAndWait()
+                EngineBridge.setStatus(EngineStatus.CONNECTING)
+                if (!awaitTunnelService(ctx)) {
+                    EngineBridge.setFailed("سرویس تونل بالا نیامد — لاگ هسته را بررسی کنید.")
+                    return@launch
+                }
+                engine.connect(configs.value, cfg.id, settings.value)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                EngineBridge.setFailed("راه‌اندازی VPN ناموفق بود: ${e.message}")
+            }
         }
     }
 
@@ -383,9 +462,11 @@ object AppModel {
      * for it to publish its instance. @return true when it is ready.
      */
     suspend fun awaitTunnelService(context: android.content.Context): Boolean {
+        val deadline = System.currentTimeMillis() + SERVICE_WAIT_MS
+        while (TunnelVpnService.instance?.ending == true && System.currentTimeMillis() < deadline) delay(50)
+        if (TunnelVpnService.instance?.ending == true) return false
         if (TunnelVpnService.instance != null) return true
         TunnelVpnService.start(context)
-        val deadline = System.currentTimeMillis() + SERVICE_WAIT_MS
         while (System.currentTimeMillis() < deadline) {
             if (TunnelVpnService.instance != null) return true
             delay(100)
@@ -394,7 +475,14 @@ object AppModel {
     }
 
     fun disconnectActive() {
-        scope.launch { engine.disconnect() }
+        cancelReconnect()
+        val pending = connectionJob
+        pending?.cancel()
+        connectionJob = scope.launch {
+            pending?.join()
+            pinger.cancelAndWait()
+            engine.disconnect()
+        }
     }
 
     // ------------------------------------------------------------------
@@ -403,9 +491,14 @@ object AppModel {
 
     /** Measures every testable config, persisting each number as it lands. */
     fun pingAll() {
+        if (connectionJob?.isActive == true) {
+            notice.value = "پس از پایان عملیات اتصال، تست را شروع کنید."
+            return
+        }
         val ctx = appContext
         scope.launch {
-            if (ctx != null && !awaitTunnelService(ctx)) {
+            val ready = try { ctx != null && awaitTunnelService(ctx) } catch (_: Exception) { false }
+            if (!ready) {
                 notice.value = "برای تست، سرویس تونل باید بالا باشد."
                 return@launch
             }
@@ -479,6 +572,12 @@ object AppModel {
     }
 
     fun importBackup(input: InputStream, passphrase: CharArray) {
+        if (EngineBridge.status.value.status != EngineStatus.DISCONNECTED || pinger.active.value) {
+            input.close()
+            passphrase.fill('\u0000')
+            notice.value = "قبل از بازگردانی، اتصال و تست کانفیگ‌ها را متوقف کنید."
+            return
+        }
         val s = store ?: return
         scope.launch {
             val result = withContext(Dispatchers.IO) { Backup(s).import(input, passphrase) }
@@ -489,6 +588,9 @@ object AppModel {
                 subscriptions.value = s.loadSubscriptions()
                 settings.value = s.loadSettings()
                 activeConfigId.value = s.loadActiveConfigId()
+                if (configs.value.none { it.id == activeConfigId.value }) setActive(configs.value.firstOrNull()?.id)
+                cachedLatency.value.keys.forEach { pingCache?.remove(it); pinger.forget(it) }
+                cachedLatency.value = emptyMap()
             }
             notice.value = result.message
         }
