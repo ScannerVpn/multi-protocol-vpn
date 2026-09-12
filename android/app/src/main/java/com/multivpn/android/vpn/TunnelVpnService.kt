@@ -69,8 +69,11 @@ class TunnelVpnService : VpnService(), PlatformInterface {
         var instance: TunnelVpnService? = null
             private set
 
+        /** Serializes core reloads, ping waves, switches, and disconnects. */
+        val operationMutex = kotlinx.coroutines.sync.Mutex()
+
         fun start(context: android.content.Context) {
-            context.startService(Intent(context, TunnelVpnService::class.java))
+            context.startForegroundService(Intent(context, TunnelVpnService::class.java))
         }
 
         fun stop(context: android.content.Context) {
@@ -80,12 +83,14 @@ class TunnelVpnService : VpnService(), PlatformInterface {
     }
 
     private var commandServer: CommandServer? = null
-    private var tunFd: ParcelFileDescriptor? = null
+    @Volatile private var tunFd: ParcelFileDescriptor? = null
+    val hasTun: Boolean get() = tunFd != null
+    @Volatile var ending: Boolean = false
+        private set
     private val netMonitor by lazy { DefaultNetworkMonitor(this) }
 
     override fun onCreate() {
         super.onCreate()
-        instance = this
         createChannel()
         startForeground(NOTIFICATION_ID, buildNotification("در حال آماده‌سازی…"))
         LibboxSetup.error?.let { e ->
@@ -98,8 +103,10 @@ class TunnelVpnService : VpnService(), PlatformInterface {
             val server = Libbox.newCommandServer(StatusHandler(), this)
             // start() opens the core's control socket. Without it
             // startOrReloadService is a no-op and the tunnel never comes up.
-            server.start()
             commandServer = server
+            server.start()
+            // Publish only after the command socket is ready.
+            instance = this
             Log.i(TAG, "command server started, libbox ${runCatching { Libbox.version() }.getOrNull()}")
         } catch (e: Exception) {
             Log.e(TAG, "newCommandServer/start failed", e)
@@ -108,16 +115,22 @@ class TunnelVpnService : VpnService(), PlatformInterface {
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    // No persisted session can be restored here; a sticky empty service would
+    // claim to run a VPN while providing no protection after process death.
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_NOT_STICKY
 
     override fun onDestroy() {
+        ending = true
         runCatching { netMonitor.stop() }
         runCatching { commandServer?.closeService() }
         runCatching { commandServer?.close() }
         commandServer = null
         closeTun()
-        instance = null
-        EngineBridge.setServiceGone()
+        if (instance === this) {
+            instance = null
+            CoreClient.stopStatus()
+            EngineBridge.setServiceGone()
+        }
         super.onDestroy()
     }
 
@@ -127,11 +140,11 @@ class TunnelVpnService : VpnService(), PlatformInterface {
      *         runs first so a schema error is reported as a schema error
      *         instead of a silent "timeout" 20 s later.
      */
-    fun loadAndStart(configJson: String): String? {
+    fun loadAndStart(configJson: String, probing: Boolean = false): String? {
         val server = commandServer
             ?: return "سرویس تونل هنوز راه نیفتاده — یک بار دیگر تلاش کنید."
-        EngineBridge.setStatus(EngineStatus.CONNECTING)
-        updateNotification("در حال اتصال…")
+        if (!probing) EngineBridge.setStatus(EngineStatus.CONNECTING)
+        updateNotification(if (probing) "در حال تست کانفیگ‌ها…" else "در حال اتصال…")
         try {
             server.checkConfig(configJson)
         } catch (e: Exception) {
@@ -157,8 +170,19 @@ class TunnelVpnService : VpnService(), PlatformInterface {
     }
 
     fun requestDisconnect() {
+        CoreClient.stopStatus()
         runCatching { commandServer?.closeService() }
+        closeTun()
     }
+
+    fun finishSession() {
+        ending = true
+        requestDisconnect()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    fun markConnected() = updateNotification("متصل — ترافیک تأیید شد")
 
     /** The core's stderr (Go panics never surface as Java exceptions). */
     fun coreStderrTail(maxChars: Int = 600): String? = runCatching {
@@ -218,9 +242,31 @@ class TunnelVpnService : VpnService(), PlatformInterface {
         }
 
         val ex = options.getExcludePackage()
-        while (ex.hasNext()) runCatching { builder.addDisallowedApplication(ex.next()) }
+        while (ex.hasNext()) {
+            val pkg = ex.next()
+            try { builder.addDisallowedApplication(pkg) }
+            catch (_: android.content.pm.PackageManager.NameNotFoundException) {
+                Log.w(TAG, "Split-tunnel package is no longer installed")
+            }
+        }
         val inc = options.getIncludePackage()
-        while (inc.hasNext()) runCatching { builder.addAllowedApplication(inc.next()) }
+        var requestedIncludes = 0
+        var appliedIncludes = 0
+        while (inc.hasNext()) {
+            val pkg = inc.next()
+            requestedIncludes++
+            try {
+                builder.addAllowedApplication(pkg)
+                appliedIncludes++
+            } catch (_: android.content.pm.PackageManager.NameNotFoundException) {
+                Log.w(TAG, "Split-tunnel package is no longer installed")
+            }
+        }
+        // An empty Android allowlist means ALL apps, not NONE. Never silently
+        // broaden an include-only policy after selected packages are removed.
+        check(requestedIncludes == 0 || appliedIncludes > 0) {
+            "هیچ‌کدام از اپ‌های انتخاب‌شده نصب نیستند؛ تنظیمات تفکیک تونل را اصلاح کنید."
+        }
 
         closeTun()
         val fd = builder.establish()
@@ -243,7 +289,10 @@ class TunnelVpnService : VpnService(), PlatformInterface {
     }
 
     override fun autoDetectInterfaceControl(fd: Int) {
-        protect(fd)
+        val protected = protect(fd)
+        // A TUN-less latency wave needs no VPN permission. Once we own a TUN,
+        // protection failure must be fatal rather than creating a routing loop.
+        check(protected || !hasTun) { "Cannot protect the outbound socket from VPN routing" }
     }
 
     override fun usePlatformAutoDetectInterfaceControl(): Boolean = true
@@ -379,6 +428,7 @@ class TunnelVpnService : VpnService(), PlatformInterface {
 
     override fun onRevoke() {
         // VPN revoked from system settings — report honestly, no retry loop.
+        com.multivpn.android.AppModel.cancelReconnect()
         EngineBridge.setFailed("دسترسی VPN توسط سیستم لغو شد.")
         stopSelf()
     }
@@ -395,10 +445,17 @@ class TunnelVpnService : VpnService(), PlatformInterface {
         }
 
         override fun serviceStop() {
-            EngineBridge.setStatus(EngineStatus.DISCONNECTED)
-            updateNotification("قطع")
-            runCatching { tunFd?.close() }
-            tunFd = null
+            val unexpected = EngineBridge.status.value.status == EngineStatus.CONNECTED && !ending
+            CoreClient.stopStatus()
+            EngineBridge.setServiceGone()
+            closeTun()
+            if (unexpected) {
+                ending = true
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            } else if (!ending) {
+                updateNotification("قطع")
+            }
         }
 
         override fun setSystemProxyEnabled(enabled: Boolean) {}

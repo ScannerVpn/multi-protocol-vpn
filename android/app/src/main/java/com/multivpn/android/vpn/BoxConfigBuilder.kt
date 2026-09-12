@@ -83,18 +83,23 @@ object BoxConfigBuilder {
         configs: List<VpnConfig>,
         activeId: String?,
         settings: Settings = Settings(),
+        verificationPort: Int? = null,
+        verificationToken: String? = null,
     ): Render {
         val nodes = renderAll(configs)
         require(nodes.first.isNotEmpty()) {
             nodes.second.firstOrNull()?.reason ?: "هیچ کانفیگ قابل‌اجرایی وجود ندارد."
         }
-        val active = activeId?.takeIf { id -> nodes.first.any { it.configId == id } }
-            ?: nodes.first.first().configId
+        require(activeId == null || nodes.first.any { it.configId == activeId }) {
+            nodes.second.firstOrNull { it.configId == activeId }?.reason
+                ?: "کانفیگ انتخاب‌شده وجود ندارد؛ دوباره انتخاب کنید."
+        }
+        val active = activeId ?: nodes.first.first().configId
         val sb = StringBuilder()
         sb.append("{\n")
         sb.append("  \"log\": { \"level\": \"warn\", \"timestamp\": true },\n")
         sb.append(dnsBlock(settings))
-        sb.append(tunInbound(settings))
+        sb.append(tunInbound(settings, verificationPort, verificationToken))
         sb.append(outboundsBlock(nodes.first, selectorDefault = tagOf(active)))
         sb.append(endpointsBlock(nodes.first))
         sb.append(routeBlock())
@@ -127,6 +132,7 @@ object BoxConfigBuilder {
         sb.append(endpointsBlock(nodes.first))
         sb.append("  \"route\": {\n")
         sb.append("    \"final\": \"$SELECTOR_TAG\",\n")
+        sb.append("    \"default_domain_resolver\": \"local\",\n")
         sb.append("    \"auto_detect_interface\": true\n")
         sb.append("  }\n")
         sb.append("}")
@@ -229,7 +235,7 @@ object BoxConfigBuilder {
      * desktop's process-name matching, which only works while a routed
      * interface can attribute a flow to a process.
      */
-    private fun tunInbound(settings: Settings): String {
+    private fun tunInbound(settings: Settings, verificationPort: Int?, verificationToken: String?): String {
         val sb = StringBuilder()
         sb.append("  \"inbounds\": [\n")
         sb.append("    {\n")
@@ -247,8 +253,16 @@ object BoxConfigBuilder {
             sb.append(apps.joinToString(", ") { "\"${j(it)}\"" })
             sb.append("]")
         }
-        sb.append("\n    }\n")
-        sb.append("  ],\n")
+        sb.append("\n    }")
+        if (verificationPort != null) {
+            require(verificationPort in 1..65535) { "Invalid verification port" }
+            require(!verificationToken.isNullOrBlank()) { "Verification proxy requires authentication" }
+            // Loopback-only HTTP proxy: verification MUST enter this core even
+            // when Android excludes this app from the per-app VPN routes.
+            sb.append(",\n    {\"type\":\"http\",\"tag\":\"verify-in\",\"listen\":\"127.0.0.1\",\"listen_port\":$verificationPort,")
+            sb.append("\"users\":[{\"username\":\"probe\",\"password\":\"${j(verificationToken)}\"}]}")
+        }
+        sb.append("\n  ],\n")
         return sb.toString()
     }
 
@@ -302,11 +316,13 @@ object BoxConfigBuilder {
         val sb = StringBuilder()
         sb.append("  \"route\": {\n")
         sb.append("    \"rules\": [\n")
+        sb.append("      { \"inbound\": [\"verify-in\"], \"outbound\": \"$SELECTOR_TAG\" },\n")
         sb.append("      { \"action\": \"sniff\" },\n")
         sb.append("      { \"protocol\": \"dns\", \"action\": \"hijack-dns\" },\n")
         sb.append("      { \"ip_is_private\": true, \"outbound\": \"direct\" }\n")
         sb.append("    ],\n")
         sb.append("    \"final\": \"$SELECTOR_TAG\",\n")
+        sb.append("    \"default_domain_resolver\": \"local\",\n")
         sb.append("    \"auto_detect_interface\": true\n")
         sb.append("  }\n")
         return sb.toString()
@@ -460,12 +476,16 @@ object BoxConfigBuilder {
      * here instead of surfacing as a cryptic core error the user cannot act on.
      */
     private fun tlsBlock(l: ProxyLink): String {
-        val security = l.security
+        // Standard trojan:// links imply TLS even without ?security=tls.
+        val security = l.params["security"] ?: if (l.protocol == "trojan") "tls" else "none"
+        require(security in setOf("none", "tls", "reality", "")) { "Unsupported security: $security" }
         if (security != "tls" && security != "reality") return "{ \"enabled\": false }"
         val sb = StringBuilder()
         sb.append("{\n")
         sb.append("        \"enabled\": true,\n")
-        sb.append("        \"server_name\": \"${j(l.params["sni"] ?: l.address)}\"")
+        sb.append("        \"server_name\": \"${j(l.params["sni"] ?: l.params["peer"] ?: l.address)}\"")
+        val alpn = l.params["alpn"]?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+        if (alpn.isNotEmpty()) sb.append(",\n        \"alpn\": [${alpn.joinToString(",") { "\"${j(it)}\"" }}]")
         if (security == "reality") {
             val fp = l.params["fp"]?.takeIf { it.isNotBlank() } ?: "chrome"
             sb.append(",\n        \"utls\": { \"enabled\": true, \"fingerprint\": \"${j(fp)}\" }")
@@ -505,12 +525,13 @@ object BoxConfigBuilder {
             ",\n      \"transport\": { \"type\": \"httpupgrade\", \"path\": \"${j(path)}\", " +
                 "\"host\": \"${j(host)}\" }"
         }
-        else -> ""
+        "tcp", "raw", "" -> ""
+        else -> throw IllegalArgumentException("Transport ${l.network} در هستهٔ اندروید این نسخه پشتیبانی نمی‌شود.")
     }
 
     /** JSON-escapes a user-supplied string (share links are untrusted input). */
     private fun j(s: String): String =
-        s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ").replace("\r", " ")
+        kotlinx.serialization.json.JsonPrimitive(s).toString().removeSurrounding("\"")
 
     /** The endpoint urlTest measures against — a real 204, like the desktop. */
     const val PROBE_URL = "https://cp.cloudflare.com/generate_204"

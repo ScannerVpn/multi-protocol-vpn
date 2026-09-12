@@ -73,9 +73,9 @@ object CoreClient {
     }
 
     fun stopStatus() {
-        val c = statusClient ?: return
+        val c = statusClient
         statusClient = null
-        runCatching { c.disconnect() }
+        runCatching { c?.disconnect() }
         _stats.value = null
         _startedAt.value = 0L
     }
@@ -164,9 +164,9 @@ object CoreClient {
      *    Observed live: a black-hole config came back as 65535 and the list
      *    rendered "65535 ms" as if it were a real latency.
      */
-    suspend fun urlTest(timeoutMs: Long = 30_000): UrlTestResult {
+    suspend fun urlTest(timeoutMs: Long = 30_000, requestedIds: Set<String>? = null): UrlTestResult {
         val done = CompletableDeferred<Map<String, Int>>()
-        val handler = GroupsHandler(done)
+        val handler = GroupsHandler(done, requestedIds)
         val client = runCatching {
             val options = CommandClientOptions().apply { addCommand(Libbox.CommandGroup) }
             Libbox.newCommandClient(handler, options).also { it.connect() }
@@ -174,11 +174,17 @@ object CoreClient {
             return UrlTestResult(emptyMap(), "اتصال به هسته برقرار نشد: ${it.message}")
         }
         try {
+            // The first subscription snapshot contains cached values. Capture it
+            // BEFORE triggering this wave; only newer per-item timestamps count.
+            if (withTimeoutOrNull(5000) { handler.baselineReady.await() } != true) {
+                return UrlTestResult(emptyMap(), "گروه تست از هسته دریافت نشد.")
+            }
+            handler.round.arm()
             runCatching { client.urlTest(BoxConfigBuilder.SELECTOR_TAG) }
                 .onFailure { return UrlTestResult(emptyMap(), "اجرای تست ناموفق: ${it.message}") }
             val delays = withTimeoutOrNull(timeoutMs) { done.await() }
                 ?: return UrlTestResult(handler.latest(), "تست کامل نشد (تایم‌اوت).")
-            return UrlTestResult(delays, null)
+            return UrlTestResult(delays, handler.error)
         } finally {
             runCatching { client.disconnect() }
         }
@@ -192,40 +198,63 @@ object CoreClient {
      * delay or a test timestamp — a timestamp with delay 0 is a real, recorded
      * FAILURE, which is different from "not tested yet".
      */
+    /** Pure, synchronized freshness filter: old cached latency is not a new test. */
+    internal class MeasurementRound(private val requestedIds: Set<String>? = null) {
+        data class Reading(val id: String, val time: Long, val delay: Int)
+        private var armed = false
+        private val baseline = LinkedHashMap<String, Long>()
+        private val tested = LinkedHashSet<String>()
+        private val delays = LinkedHashMap<String, Int>()
+
+        @Synchronized fun arm() { armed = true }
+        @Synchronized fun latest(): Map<String, Int> = LinkedHashMap(delays)
+
+        @Synchronized fun accept(readings: List<Reading>): Boolean {
+            val members = readings.filter { requestedIds == null || it.id in requestedIds }
+            if (!armed) {
+                members.forEach { baseline[it.id] = it.time }
+                return false
+            }
+            members.forEach {
+                if (it.time > (baseline[it.id] ?: 0L)) {
+                    tested += it.id
+                    if (isRealDelay(it.delay)) delays[it.id] = it.delay else delays.remove(it.id)
+                }
+            }
+            return members.isNotEmpty() && members.all { it.id in tested }
+        }
+    }
+
     private class GroupsHandler(
         private val done: CompletableDeferred<Map<String, Int>>,
+        requestedIds: Set<String>?,
     ) : BaseHandler() {
-
-        private val delays = LinkedHashMap<String, Int>()
-        private val tested = LinkedHashSet<String>()
-        private var memberCount = -1
-
-        fun latest(): Map<String, Int> = LinkedHashMap(delays)
+        val round = MeasurementRound(requestedIds)
+        val baselineReady = CompletableDeferred<Boolean>()
+        @Volatile var error: String? = null
+        fun latest(): Map<String, Int> = round.latest()
 
         override fun writeGroups(groups: OutboundGroupIterator) {
             while (groups.hasNext()) {
                 val g = groups.next()
                 if (g.tag != BoxConfigBuilder.SELECTOR_TAG) continue
+                val readings = mutableListOf<MeasurementRound.Reading>()
                 val items = g.items
-                var count = 0
                 while (items.hasNext()) {
                     val item = items.next()
-                    count++
                     val id = BoxConfigBuilder.configIdOf(item.tag) ?: continue
-                    if (item.urlTestTime > 0L) {
-                        tested += id
-                        if (isRealDelay(item.urlTestDelay)) delays[id] = item.urlTestDelay
-                    }
+                    readings += MeasurementRound.Reading(id, item.urlTestTime, item.urlTestDelay)
                 }
-                memberCount = count
-                if (memberCount > 0 && tested.size >= memberCount && !done.isCompleted) {
-                    done.complete(LinkedHashMap(delays))
-                }
+                val settled = round.accept(readings)
+                baselineReady.complete(true)
+                if (settled) done.complete(round.latest())
             }
         }
 
         override fun disconnected(message: String) {
-            if (!done.isCompleted) done.complete(LinkedHashMap(delays))
+            error = "ارتباط با هسته در حین تست قطع شد."
+            baselineReady.complete(false)
+            done.complete(round.latest())
         }
     }
 

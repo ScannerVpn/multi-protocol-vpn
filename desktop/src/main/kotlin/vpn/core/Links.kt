@@ -209,16 +209,16 @@ object Links {
             .filter { it.value.isNotEmpty() }
             .joinToString("&") { "${enc(it.key)}=${enc(it.value)}" }
 
-    private fun dec(s: String) = runCatching { URLDecoder.decode(s, Charsets.UTF_8) }.getOrDefault(s)
+    private fun dec(s: String) = runCatching { URLDecoder.decode(s, Charsets.UTF_8.name()) }.getOrDefault(s)
 
     /**
      * Strict RFC 3986 percent-decoder: unlike [URLDecoder] it leaves '+' as
      * a literal plus (path/userinfo/fragment are NOT form-encoded data).
      */
     private fun pct(s: String): String = runCatching {
-        URLDecoder.decode(s.replace("+", "%2B"), Charsets.UTF_8)
+        URLDecoder.decode(s.replace("+", "%2B"), Charsets.UTF_8.name())
     }.getOrDefault(s)
-    private fun enc(s: String) = URLEncoder.encode(s, Charsets.UTF_8).replace("+", "%20")
+    private fun enc(s: String) = URLEncoder.encode(s, Charsets.UTF_8.name()).replace("+", "%20")
 
     /** Bracketed form for IPv6 literals, unchanged text otherwise. */
     private fun hostToken(host: String): String =

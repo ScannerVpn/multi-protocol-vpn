@@ -17,7 +17,75 @@ import vpn.core.VpnConfig
  */
 class PingerLogicTest {
 
-    private val pinger = Pinger(kotlinx.coroutines.GlobalScope)
+    private val pinger = Pinger(kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined))
+
+    private fun reading(id: String, time: Long, ms: Int) =
+        CoreClient.MeasurementRound.Reading(id, time, ms)
+
+    @Test
+    fun `cached results cannot satisfy a new latency wave`() {
+        val round = CoreClient.MeasurementRound()
+        assertFalse(round.accept(listOf(reading("a", 100, 20))))
+        round.arm()
+        assertFalse(round.accept(listOf(reading("a", 100, 20))))
+        assertTrue(round.latest().isEmpty())
+        assertTrue(round.accept(listOf(reading("a", 101, 150))))
+        assertEquals(mapOf("a" to 150), round.latest())
+    }
+
+    @Test
+    fun `a fresh failure removes the previous success in this wave`() {
+        val round = CoreClient.MeasurementRound()
+        round.accept(listOf(reading("a", 10, 30)))
+        round.arm()
+        round.accept(listOf(reading("a", 11, 40)))
+        assertTrue(round.accept(listOf(reading("a", 12, CoreClient.FAILED_DELAY))))
+        assertTrue(round.latest().isEmpty())
+    }
+
+    @Test
+    fun `only requested configs participate so untestable endpoints cannot block completion`() {
+        val round = CoreClient.MeasurementRound(setOf("a"))
+        round.accept(listOf(reading("a", 10, 30), reading("wg", 0, 0)))
+        round.arm()
+        assertTrue(round.accept(listOf(reading("a", 11, 40), reading("wg", 0, 0))))
+        assertEquals(mapOf("a" to 40), round.latest())
+    }
+
+    @Test
+    fun `a wave waits for all requested members to receive fresh verdicts`() {
+        val round = CoreClient.MeasurementRound()
+        round.accept(listOf(reading("a", 1, 20), reading("b", 1, 30)))
+        round.arm()
+        assertFalse(round.accept(listOf(reading("a", 2, 80), reading("b", 1, 30))))
+        assertTrue(round.accept(listOf(reading("a", 2, 80), reading("b", 2, 0))))
+        assertEquals(mapOf("a" to 80), round.latest())
+    }
+
+    @Test
+    fun `disconnect completion does not leave the UI stuck disconnecting`() {
+        EngineBridge.setStatus(EngineStatus.DISCONNECTING)
+        EngineBridge.setServiceGone()
+        assertEquals(EngineStatus.DISCONNECTED, EngineBridge.status.value.status)
+    }
+
+    @Test
+    fun `service cleanup preserves the original failure reason`() {
+        EngineBridge.setFailed("original error")
+        EngineBridge.setServiceGone()
+        assertEquals("original error", EngineBridge.status.value.message)
+    }
+
+    @Test
+    fun `verification rejects redirects bodies and failed body reads`() {
+        val engine = LibboxEngine()
+        assertTrue(engine.isRealNoContent(204, 0))
+        assertTrue(engine.isRealNoContent(200, 0))
+        assertFalse(engine.isRealNoContent(200, 1))
+        assertFalse(engine.isRealNoContent(200, -1))
+        assertFalse(engine.isRealNoContent(302, 0))
+        assertFalse(engine.isRealNoContent(500, 0))
+    }
 
     private fun cfg(protocol: String, link: String? = "vless://u@h:443?security=tls#x") =
         VpnConfig(id = protocol, name = protocol, serverIp = "h", protocol = protocol, xrayLink = link)

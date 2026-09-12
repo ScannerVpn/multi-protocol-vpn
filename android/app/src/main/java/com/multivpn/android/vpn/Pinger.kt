@@ -7,9 +7,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.withLock
 import vpn.core.VpnConfig
 
 /**
@@ -81,7 +84,13 @@ class Pinger(private val scope: CoroutineScope) {
         _progress.value = 0 to testable.size
         job = scope.launch(Dispatchers.IO) {
             try {
-                runWave(testable, onMeasured, onFailed)
+                TunnelVpnService.operationMutex.withLock {
+                    runWave(testable, onMeasured, onFailed)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _message.value = "تست ناموفق بود: ${e.message}"
             } finally {
                 _active.value = false
                 _progress.value = 0 to 0
@@ -91,10 +100,14 @@ class Pinger(private val scope: CoroutineScope) {
 
     fun cancel() {
         job?.cancel()
-        job = null
-        _active.value = false
-        _progress.value = 0 to 0
+        // Keep active until the cancelled wave's finally has closed its core.
+        // Otherwise a second wave races with the first one's cleanup.
         _message.value = "تست لغو شد."
+    }
+
+    suspend fun cancelAndWait() {
+        job?.cancelAndJoin()
+        job = null
     }
 
     fun clearMessage() {
@@ -119,16 +132,23 @@ class Pinger(private val scope: CoroutineScope) {
             return
         }
 
+        if (service.ending) return
+        val eligible = if (live) configs.filter { it.id in com.multivpn.android.AppModel.engine.loadedIds } else configs
+        if (eligible.isEmpty()) {
+            _message.value = "کانفیگ‌های انتخابی در هستهٔ فعال نیستند؛ برای تست دوباره وصل شوید."
+            return
+        }
+        try {
         // Disconnected: load a TUN-less probe config so measuring costs the
         // user nothing. Connected: measure the live core as it stands.
         if (!live) {
             val render = try {
-                BoxConfigBuilder.buildProbe(configs)
+                BoxConfigBuilder.buildProbe(eligible)
             } catch (e: Exception) {
                 _message.value = e.message ?: "کانفیگ تست ساخته نشد."
                 return
             }
-            service.loadAndStart(render.json)?.let { err ->
+            service.loadAndStart(render.json, probing = true)?.let { err ->
                 _message.value = "هسته کانفیگ تست را نپذیرفت: $err"
                 return
             }
@@ -137,11 +157,11 @@ class Pinger(private val scope: CoroutineScope) {
             delay(600)
         }
 
-        if (!scope.isActive) return
-        val outcome = CoreClient.urlTest(timeoutMs = waveTimeoutMs(configs.size))
-        val delays = outcome.delays
-
-        val testedIds = configs.map { it.id }.toSet()
+        currentCoroutineContext().ensureActive()
+        val testedIds = eligible.map { it.id }.toSet()
+        val outcome = CoreClient.urlTest(timeoutMs = waveTimeoutMs(eligible.size), requestedIds = testedIds)
+        currentCoroutineContext().ensureActive()
+        val delays = outcome.delays.filterKeys { it in testedIds }
         val failedIds = testedIds - delays.keys
         _results.value = (_results.value - failedIds) + delays
         _failed.value = (_failed.value - delays.keys) + failedIds
@@ -161,9 +181,12 @@ class Pinger(private val scope: CoroutineScope) {
 
         // Leave the device as we found it: a probe core has no TUN, but leaving
         // it running would keep dialing servers in the background for nothing.
-        if (!live) {
-            service.requestDisconnect()
-            EngineBridge.setStatus(EngineStatus.DISCONNECTED)
+        } finally {
+            // Also runs on cancellation, render failure, and core exceptions.
+            if (!live) {
+                service.finishSession()
+                EngineBridge.setServiceGone()
+            }
         }
     }
 

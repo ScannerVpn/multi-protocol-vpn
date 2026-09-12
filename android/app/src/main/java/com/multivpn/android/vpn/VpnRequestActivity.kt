@@ -17,6 +17,8 @@ class VpnRequestActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The system retains an in-flight consent result across recreation.
+        if (savedInstanceState != null) return
         val consent = VpnService.prepare(this)
         if (consent == null) {
             onVpnGranted()
