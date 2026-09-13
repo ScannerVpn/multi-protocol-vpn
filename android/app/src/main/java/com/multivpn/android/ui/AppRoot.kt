@@ -34,11 +34,16 @@ import androidx.compose.ui.unit.sp
 import com.multivpn.android.AppModel
 
 /**
- * The Android UI — three tabs mirroring the desktop app (خانه / کانفیگ‌ها /
- * تنظیمات). The سرورها tab is deliberately absent: SSH provisioning is a later
- * milestone and an empty tab would be a lie.
+ * The Android UI — four tabs mirroring the desktop app (خانه / کانفیگ‌ها /
+ * سرورها / تنظیمات). The سرورها tab provisions the user's own VPS over SSH
+ * with the SAME scripts the desktop runs.
  */
-enum class Tab(val label: String) { HOME("خانه"), CONFIGS("کانفیگ‌ها"), SETTINGS("تنظیمات") }
+enum class Tab(val label: String) {
+    HOME("خانه"),
+    CONFIGS("کانفیگ‌ها"),
+    SERVERS("سرورها"),
+    SETTINGS("تنظیمات"),
+}
 
 @Composable
 fun AppRoot() {
@@ -56,6 +61,7 @@ fun AppRoot() {
                                 when (t) {
                                     Tab.HOME -> Icons.Filled.Home
                                     Tab.CONFIGS -> Icons.Filled.List
+                                    Tab.SERVERS -> Icons.Filled.List
                                     Tab.SETTINGS -> Icons.Filled.Settings
                                 },
                                 contentDescription = t.label,
@@ -81,6 +87,7 @@ fun AppRoot() {
             when (tab) {
                 Tab.HOME -> HomeScreen()
                 Tab.CONFIGS -> ConfigsScreen()
+                Tab.SERVERS -> ServersScreen()
                 Tab.SETTINGS -> SettingsScreen()
             }
         }

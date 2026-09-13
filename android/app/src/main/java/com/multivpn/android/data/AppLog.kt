@@ -78,4 +78,13 @@ object AppLog {
         runCatching { logFile()?.writeText("") }
         Unit
     }
+
+    /**
+     * The directory other subsystems write beside (the SSH host-key pin file
+     * lives here). In the plain-JVM unit-test environment there is no
+     * Application, so it falls back to the temp dir — the pin tests create
+     * their own [dir] anyway.
+     */
+    val baseDir: File
+        get() = dir ?: File(System.getProperty("java.io.tmpdir", "/tmp"), "multivpn-data").apply { mkdirs() }
 }

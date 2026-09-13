@@ -20,12 +20,16 @@ object EngineBridge {
         _status.value = EngineState(EngineStatus.DISCONNECTED, message)
     }
 
+    /**
+     * The service instance went away. Delegates the decision to
+     * [EngineTransitions.onServiceGone] so DISCONNECTING is demoted too — the
+     * previous version only demoted CONNECTING/CONNECTED, which is one of the
+     * two ways the UI could get stranded on "در حال قطع…". An explicit engine
+     * failure (DISCONNECTED with a message) is left untouched.
+     */
     fun setServiceGone() {
-        // Only demote to DISCONNECTED if the state was a live one; an
-        // explicit engine failure already set its own message.
-        val cur = _status.value
-        if (cur.status != EngineStatus.DISCONNECTED) {
-            _status.value = EngineState(EngineStatus.DISCONNECTED, null)
+        EngineTransitions.onServiceGone(_status.value.status)?.let {
+            _status.value = EngineState(it, null)
         }
     }
 }

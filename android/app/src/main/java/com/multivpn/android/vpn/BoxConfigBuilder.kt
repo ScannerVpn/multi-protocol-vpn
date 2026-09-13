@@ -40,7 +40,10 @@ import vpn.core.WgConf
  *    sing-box for these (its older AWG support did not speak the wire format);
  *    Android has no second process to run, so the endpoint is used and the
  *    honesty contract decides: no traffic, no "connected".
- *  - OpenVPN / IKEv2 are refused with a reason, never silently skipped.
+ *  - OpenVPN does NOT render here: it rides its own native core
+ *    ([OpenVpnEngine], a separate VpnService on libovpn3.so). This builder
+ *    refuses it with a reason so a mixed list still loads the rest.
+ *  - IKEv2 is refused with a reason, never silently skipped.
  *
  * Lessons carried from the desktop's SingBox.kt: auto_route on so the TUN
  * really captures traffic (§5-24a — a tunnel that starts but captures nothing
@@ -180,9 +183,13 @@ object BoxConfigBuilder {
                 ?: throw Exception("فایل ‎.conf ناقص است (PrivateKey / Address / PublicKey / Endpoint لازم است).")
             return Node(config.id, wireguardEndpoint(profile, tag), isEndpoint = true)
         }
-        if (config.protocol == "openvpn" || config.protocol == "ikev2") {
-            val label = if (config.protocol == "openvpn") "OpenVPN" else "IKEv2"
-            throw Exception("$label روی اندروید پیاده نشده (هستهٔ این نسخه sing-box است).")
+        if (config.protocol == "openvpn") {
+            // Rides OpenVpnEngine (libovpn3.so), NOT the libbox core — this
+            // builder only ever renders for the libbox tunnel/probe.
+            throw Exception("OpenVPN روی هستهٔ جداگانهٔ خودش اجرا می‌شود (این لیست برای هستهٔ sing-box است).")
+        }
+        if (config.protocol == "ikev2") {
+            throw Exception("IKEv2 روی اندروید پیاده نشده (گواهی کلاینت به استور کلید سیستم نیاز دارد).")
         }
         val link = config.xrayLink?.let { Links.parse(it) }
             ?: throw Exception("لینک قابل‌پارسی ندارد.")

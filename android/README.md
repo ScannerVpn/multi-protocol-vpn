@@ -1,6 +1,6 @@
 # MultiVPN Android
 
-نسخه اندرویدی MultiVPN — **فاز ۳ (برابری قابلیت با نسخه ویندوز)**. با Kotlin +
+نسخه اندرویدی MultiVPN — **فاز ۴ (تکمیل قابلیت‌ها + تب سرورها)**. با Kotlin +
 Jetpack Compose و همان هویت بصری نسخه ویندوز (پالت aurora: #070912 + ایندیگو
 #6D5DFB → فیروزهای #2DD4E8).
 
@@ -24,8 +24,26 @@ Jetpack Compose و همان هویت بصری نسخه ویندوز (پالت au
 - **اثبات ترافیک:** موتور بعد از start هسته، `cp.cloudflare.com/generate_204` را
   از داخل TUN صدا میزند و فقط ۲۰۴ واقعی (یا ۲۰۰ با بدنه خالی) را قبول میکند؛
   ریدایرکت/بدنه‌دار = کپتیو پورتال = وصل نیست.
-- **هنوز نه:** IKEv2 و OpenVPN — موتور این نسخه sing-box است و این دو را ندارد؛
-  اپ صریحاً میگوید «پیاده نشده» و کانفیگ را رندر نمیکند.
+- **OpenVPN کامل (جدید در 0.4.0):** فایل ‎.ovpn روی هستهٔ اختصاصی خودش
+  (`libovpn3.so` — کلاینت OpenVPN 3) در یک VpnService جدا اجرا میشود، چون
+  libbox اصلاً OpenVPN بلد نیست. وضعیت از همان پل `EngineBridge` رد میشود؛
+  فقط همزمان با تونل libbox بالا نمیرود (دستگاه یک جاگاه VPN دارد).
+- **تب «سرورها» (جدید در 0.4.0):** افزودن VPS با SSH، تست هندشیک، و نصب
+  VLESS+Reality / Trojan / Shadowsocks-2022 با **همان اسکریپت‌های نسخهٔ
+  ویندوز** (`server/setup-xray.sh` باندلشده بهعنوان asset و از طریق stdin به
+  سرور پمپ میشود — روی دیسک سرور چیزی نوشته نمیشود). خروجی زندهٔ نصب در اپ
+  استریم میشود و هر `MULTIVPN-LINK:` بهعنوان کانفیگ ایمپورت میگردد.
+- **کلید میزبان SSH** روی اولین اتصال pin میشود (TOFU روی `HostKeyRepository`
+  جسچ)؛ بعداً هر مغایرتی اتصال را رد میکند. رمز SSH با Keystore رمزشده ذخیره
+  میشود.
+- **فیکس قطع اتصال (0.4.0):** «در حال قطع…» دیگر گیر نمیکند. قبلاً وضعیت
+  DISCONNECTING منتظر کال‌بک `serviceStop`ِ libbox میماند — کال‌بکی که برای
+  `closeService` از سمت پلتفرم هرگز صدا زده نمیشود. حالا ماشین‌وضعیت خالص
+  (`EngineTransitions`) مالک گذار به DISCONNECTED است، خودِ سرویس TUN را
+  میبندد، و تایم‌اوت ۴ ثانیهای هم همیشه دکمه را برمیگرداند (تأیید زنده روی
+  امولاتور: وصل → قطع → tun0 بسته → دوباره وصل → tun0 تازه).
+- **هنوز نه:** IKEv2 — احراز گواهی کلاینت به استور کلید سیستم اندروید نیاز
+  دارد (دیالوگ سیستمی خارج از کنترل اپ). اپ صریحاً میگوید.
 
 **قابلیت‌هایی که در این فاز رسیدند (همه با نسخه ویندوز برابر یا بهتر):**
 
@@ -79,7 +97,7 @@ cd android
 $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.19.10-hotspot"
 .\fetch-core.ps1                        # یک بار: دانلود + تأیید AAR هسته
 .\gradlew.bat :app:assembleDebug        # apk: app\build\outputs\apk\debug\
-.\gradlew.bat :app:testDebugUnitTest    # ۷۴ تست JVM
+.\gradlew.bat :app:testDebugUnitTest    # ۹۳ تست JVM
 ```
 
 - منابع گرادل از میرورهای **aliyun** میروند (dl.google.com روی این شبکه ناپایدار است —
@@ -87,6 +105,22 @@ $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.19.10-hotspot"
 - Gradle wrapper 8.14 در ریپو هست؛ AGP 8.7.3 / Kotlin 2.0.21 / Compose BOM 2024.12.
 - `TMP/TEMP` باید مسیر ویندوزی باشد (از Git Bash بلاسبور، AAPT2 روی مسیر POSIX میمیرد):
   `set TMP=C:\Users\...\AppData\Local\Temp`.
+
+### حجم (کمترین حجم برای همهٔ دستگاه‌ها)
+
+هستهٔ `libhiddify-core.so` (~۸۲MB برای x86_64) خودش ۸۰٪ حجم APK است؛ کاری با
+آن نمیشود جز اینکه هر دستگاه فقط ABI خودش را بگیرد. 0.4.0 اینها را انجام داده:
+
+- **Splits per-ABI** — بهجای یک APK ۳۴۰MB جهانی، چهار APK (هر کدام حدود
+  ۸۷–۹۶MB). تبلت/گوشی arm64 همان `app-arm64-v8a-release.apk` را میگیرد.
+- **R8 + shrinkResources روی release** — کلاسهای استفاده‌نشدهٔ لایههای جاوای
+  دو هسته حذف میشوند؛ قوانین keep در `proguard-rules.pro` فقط JNI/ reflektion
+  واقعی (libbox، ovpn3، jsch، serializers) را نگه میدارد.
+- **چهار ABI فعال** (arm64, armv7, x86_64, x86) — حتی ایکس۸۶ قدیمی و
+  امولاتورها پوشش داده میشوند.
+
+اگر توزیع با Play Store باشد، همان splits بهصورت AAB خودکار App Bundle میشوند
+(`bundleRelease`); کاربر فقط ABI دستگاهش را دانلود میکند.
 
 ## دیباگ هستهی تونل
 
@@ -112,7 +146,7 @@ adb shell "cat /proc/net/dev | grep tun0"  # شمارندهی بایت = ترا�
 | ۱ | مدیریت کانفیگ: ایمپورت لینک/فایل/ساب، storage امن، UI سه تب | ✅ (0.1.0) |
 | ۲ | **موتور تونل**: هسته sing-box (libbox AAR) پشت `android.net.VpnService`؛ `verifyTraffic` قبل از اعلام «Connected» | ✅ (0.2.0) |
 | ۳ | **برابری قابلیت**: پینگ واقعی (urlTest) · سوییچ بی‌قطعی · ترافیک زنده · WireGuard/AmneziaWG · اسپلیت per-app · پشتیبان رمزشده · لاگ اپ | ✅ (0.3.0) |
-| ۴ | Provision سرور با SSH (sshj روی اندروید اجرا میشود) + تالار سرورها | بعدی |
+| ۴ | **تکمیل قابلیت‌ها**: تب سرورها (SSH provisioning با jsch) · OpenVPN با هستهٔ خودش · فیکس «در حال قطع…» · R8 + splits حجم | ✅ (0.4.0) |
 | ۵ | همگرایی KMP: هسته پرتابل به یک ماژول `shared/commonMain` منتقل شود و هر دو اپ از یک منبع بخوانند | بدهی ساختاری |
 
 ### چیزی که عمداً روی اندروید نیست (و چرا)

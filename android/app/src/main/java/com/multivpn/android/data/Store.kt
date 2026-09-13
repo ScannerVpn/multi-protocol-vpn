@@ -3,6 +3,7 @@ package com.multivpn.android.data
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import vpn.core.ServerConfig
 import vpn.core.Subscription
 import vpn.core.VpnConfig
 import java.io.File
@@ -79,6 +80,28 @@ class Store(private val dir: File) {
 
     fun saveSubscriptions(list: List<Subscription>) =
         atomicSaveList("subscriptions.json", list, Subscription.serializer())
+
+    // ------------------------------------------------------------------
+    // Personal servers (سرورها tab)
+    // ------------------------------------------------------------------
+
+    /**
+     * The user's own VPS list. The SSH password is the most dangerous secret
+     * this app holds — it is root on a machine — so it goes through
+     * [SecretKeeper] (Android Keystore AES-256-GCM) exactly like share links,
+     * and is plaintext only in memory. Same contract as the desktop's
+     * DPAPI-wrapped `ServerConfig.password`.
+     */
+    fun loadServers(): List<ServerConfig> =
+        loadList("servers.json", ServerConfig.serializer())
+            .map { s -> s.copy(password = SecretKeeper.unwrap(s.password)) }
+
+    fun saveServers(list: List<ServerConfig>) =
+        atomicSaveList(
+            "servers.json",
+            list.map { s -> s.copy(password = SecretKeeper.protect(s.password)) },
+            ServerConfig.serializer(),
+        )
 
     // ------------------------------------------------------------------
     // Settings

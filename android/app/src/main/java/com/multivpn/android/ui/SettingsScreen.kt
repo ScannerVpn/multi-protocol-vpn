@@ -196,13 +196,17 @@ fun SettingsScreen() {
             Card {
                 Text("درباره", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Palette.TextPrimary)
                 Spacer(Modifier.height(6.dp))
-                Text("MultiVPN Android · نسخه 0.3.0", color = Palette.TextSecondary, fontSize = 12.sp)
+                Text("MultiVPN Android · نسخه 0.4.0", color = Palette.TextSecondary, fontSize = 12.sp)
                 Text(
-                    "تونل: Hysteria2 · VLESS+Reality · Trojan · SS-2022 · WireGuard · AmneziaWG",
+                    "تونل: Hysteria2 · VLESS+Reality · Trojan · SS-2022 · WireGuard · AmneziaWG · OpenVPN",
                     color = Palette.TextSecondary, fontSize = 11.5.sp,
                 )
                 Text(
-                    "هنوز نه: IKEv2 · OpenVPN — موتور این نسخه sing-box است و این دو را ندارد.",
+                    "سرورها: نصب خودکار VLESS/Trojan/SS روی VPS خودت با SSH (همان اسکریپت‌های نسخهٔ ویندوز).",
+                    color = Palette.TextSecondary, fontSize = 11.5.sp,
+                )
+                Text(
+                    "هنوز نه: IKEv2 — گواهی کلاینت به استور کلید سیستم اندروید نیاز دارد.",
                     color = Palette.TextFaint, fontSize = 10.5.sp,
                 )
                 Spacer(Modifier.height(6.dp))

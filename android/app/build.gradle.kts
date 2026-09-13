@@ -17,20 +17,59 @@ android {
         applicationId = "com.multivpn.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
+        versionCode = 5
         // THE single source of truth for the Android version. The desktop app
         // keeps its own appVersion in desktop/build.gradle.kts — the two
         // release on different cadences.
-        // 0.3.0 = feature parity pass: real per-config ping (urlTest), live
-        // traffic counters, no-reconnect config switching, WireGuard/AmneziaWG
-        // from .conf, per-app split tunneling, encrypted backup/restore.
-        versionName = "0.3.1"
+        // 0.4.0 = desktop feature completion: the سرورها tab (SSH provisioning
+        // with the same bundled scripts), OpenVPN via its own native core,
+        // and the disconnect state-machine fix — built on top of 0.3.1's
+        // verified-connect lifecycle fixes.
+
+        // Only ship the ABIs the core .so files actually carry. Splitting per
+        // ABI keeps each APK at roughly a QUARTER of the universal one — the
+        // single biggest size lever this app has, since the two native cores
+        // (libbox and libovpn3) dominate the payload.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+        }
     }
 
     buildTypes {
         release {
+            // Shrinking is not optional here: two native cores carry large
+            // Java layers (hiddify-core, openvpn lib, appcompat) and R8 strips
+            // several MB of unused classes from them.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
+        debug {
+            // Keep debug builds fast; shrinking only the release artifact.
             isMinifyEnabled = false
         }
+    }
+
+    // Per-ABI APKs for release (a universal APK still builds for testing).
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+            isUniversalApk = true
+        }
+    }
+
+    packaging {
+        resources.excludes += setOf(
+            "META-INF/AL2.0",
+            "META-INF/LGPL2.1",
+            "META-INF/LICENSE.md",
+            "META-INF/LICENSE-notice.md",
+        )
     }
 
     compileOptions {
@@ -45,7 +84,28 @@ android {
     buildFeatures {
         compose = true
     }
+
+    // The provisioning scripts live ONCE, at the repo root in server/, and are
+    // copied into the APK at build time. Duplicating them into the Android
+    // source tree is what let the desktop's own copies drift before, and a
+    // script that differs between clients means the same button provisions two
+    // different servers.
+    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/serverScripts"))
 }
+
+val copyServerScripts by tasks.registering(Copy::class) {
+    from(rootProject.file("../server")) { include("*.sh") }
+    into(layout.buildDirectory.dir("generated/serverScripts/scripts"))
+}
+
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }
+    .configureEach { dependsOn(copyServerScripts) }
+
+// LintVital (release lint) scans the sources before the assets merge and
+// fails the build with "directory does not exist" if it runs first — both its
+// analyze and report tasks need the generated scripts.
+tasks.matching { it.name.contains("LintVital", ignoreCase = true) }
+    .configureEach { dependsOn(copyServerScripts) }
 
 dependencies {
     implementation(libs.androidx.core.ktx)
@@ -62,6 +122,15 @@ dependencies {
     // fetch-core.ps1 into app/libs/ (not in git, ~107 MB); SHA256 in
     // core-hashes.json and enforced by verifyCore before every build.
     implementation(files("libs/hiddify-core-4.1.0.aar"))
+
+    // The سرورها tab: SSH provisioning of the user's own VPS with the SAME
+    // scripts the desktop runs (server/*.sh, bundled as assets).
+    implementation(libs.jsch)
+
+    // OpenVPN. libbox cannot speak the protocol at all — the shipped .so
+    // registers no openvpn outbound (verified with strings/nm) — so .ovpn
+    // configs run on their own native core in a separate VpnService.
+    implementation(libs.openvpn)
 
     testImplementation(libs.junit)
 }

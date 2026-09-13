@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import com.multivpn.android.AppModel
 import com.multivpn.android.vpn.CoreClient
 import com.multivpn.android.vpn.EngineStatus
+import com.multivpn.android.vpn.EngineTransitions
 import kotlinx.coroutines.delay
 
 /**
@@ -63,6 +64,11 @@ fun HomeScreen() {
     var pickerOpen by remember { mutableStateOf(false) }
     val connected = engineState.status == EngineStatus.CONNECTED
     val connecting = engineState.status == EngineStatus.CONNECTING
+    // Busy = CONNECTING or DISCONNECTING. Deriving it from the state machine
+    // (instead of testing CONNECTING alone) is what keeps the button honest
+    // while a stop is in flight — the old code showed an enabled "وصل شدن"
+    // over a tunnel that was still coming down.
+    val busy = EngineTransitions.isBusy(engineState.status)
 
     Column(
         Modifier
@@ -76,7 +82,18 @@ fun HomeScreen() {
         Text(labelOfStatus(engineState.status), fontSize = 12.sp, color = Palette.TextSecondary)
         Spacer(Modifier.height(22.dp))
         StatusRing(engineState.status)
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(14.dp))
+
+        // The desktop's SessionFactsRow, in Android shape: the active config
+        // and its protocol, ONCE (the ring already carries the status).
+        activeConfig?.let { cfg ->
+            Text(
+                "${cfg.name} · ${AppModel.labelOf(cfg.protocol)}",
+                color = Palette.TextSecondary,
+                fontSize = 11.sp,
+            )
+        }
+        Spacer(Modifier.height(10.dp))
 
         // Active config picker. When a tunnel is live this switches config
         // INSIDE the running core (no reconnect) — see AppModel.setActive.
@@ -141,7 +158,7 @@ fun HomeScreen() {
                     }
                 }
             },
-            enabled = engineState.status != EngineStatus.DISCONNECTING,
+            enabled = !busy,
             shape = RoundedCornerShape(16.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Palette.Accent),
             modifier = Modifier
@@ -152,6 +169,7 @@ fun HomeScreen() {
                 when {
                     connected -> "قطع اتصال"
                     connecting -> "لغو اتصال"
+                    engineState.status == EngineStatus.DISCONNECTING -> "در حال قطع…"
                     else -> "وصل شدن"
                 },
                 fontWeight = FontWeight.Bold,
@@ -167,7 +185,13 @@ fun HomeScreen() {
         // The honest engine note (failures, VPN revoked, unsupported
         // protocols). Never hidden — the desktop's honesty contract applies
         // to Android verbatim.
-        engineState.message?.let { msg ->
+        val note = engineState.message
+            ?: run {
+                if (activeConfig?.protocol == "openvpn" && !connected) {
+                    "این کانفیگ با هستهٔ OpenVPN اجرا می‌شود؛ در صورت باز بودن تونل دیگر، اول قطعش کنید."
+                } else null
+            }
+        note?.let { msg ->
             Spacer(Modifier.height(14.dp))
             Text(
                 msg,
