@@ -72,6 +72,15 @@ class TunnelVpnService : VpnService(), PlatformInterface {
         /** Serializes core reloads, ping waves, switches, and disconnects. */
         val operationMutex = kotlinx.coroutines.sync.Mutex()
 
+        /**
+         * The application context, captured in onCreate — the OpenVPN
+         * transport needs a Context that outlives this service (it runs in a
+         * separate process through the library's own service).
+         */
+        @Volatile
+        var appContext: android.content.Context? = null
+            private set
+
         fun start(context: android.content.Context) {
             context.startForegroundService(Intent(context, TunnelVpnService::class.java))
         }
@@ -91,6 +100,7 @@ class TunnelVpnService : VpnService(), PlatformInterface {
 
     override fun onCreate() {
         super.onCreate()
+        appContext = applicationContext
         createChannel()
         startForeground(NOTIFICATION_ID, buildNotification("در حال آماده‌سازی…"))
         LibboxSetup.error?.let { e ->
@@ -169,10 +179,33 @@ class TunnelVpnService : VpnService(), PlatformInterface {
         }
     }
 
-    fun requestDisconnect() {
+    /**
+     * Stops the core and tears the TUN down. @return null on success, or the
+     * core's own complaint.
+     *
+     * WHY THIS RETURNS AND CLOSES THE TUN ITSELF (v0.4.0 bug): the old version
+     * called `closeService()` inside a `runCatching{}` and then trusted libbox
+     * to call [StatusHandler.serviceStop] back. That callback only fires when a
+     * command CLIENT asks the core to stop — never for the platform's own
+     * closeService — so the status stayed at DISCONNECTING forever and the TUN
+     * device stayed up with nobody reading it. The teardown is now done by the
+     * side that can actually observe it finishing.
+     */
+    fun requestDisconnect(): String? {
         CoreClient.stopStatus()
-        runCatching { commandServer?.closeService() }
+        val err = try {
+            commandServer?.closeService()
+            null
+        } catch (e: Exception) {
+            val msg = e.message ?: e.toString()
+            // "service not started" is not a failure: it means the core was
+            // already down, which is exactly the state being asked for.
+            Log.w(TAG, "closeService: $msg")
+            if (msg.contains("not started", ignoreCase = true)) null else msg
+        }
         closeTun()
+        updateNotification("قطع")
+        return err
     }
 
     fun finishSession() {
@@ -182,7 +215,22 @@ class TunnelVpnService : VpnService(), PlatformInterface {
         stopSelf()
     }
 
+    /**
+     * Tears the foreground service down WITHOUT touching the core again —
+     * used by [LibboxEngine.disconnect] after requestDisconnect() already
+     * stopped (or failed to stop) the core. closeService() on a wedged core
+     * can throw a second time; the service teardown must not depend on it.
+     */
+    fun finishServiceOnly() {
+        ending = true
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
     fun markConnected() = updateNotification("متصل — ترافیک تأیید شد")
+
+    /** True while a TUN device opened by this service is still open. */
+    val tunOpen: Boolean get() = tunFd != null
 
     /** The core's stderr (Go panics never surface as Java exceptions). */
     fun coreStderrTail(maxChars: Int = 600): String? = runCatching {
@@ -445,9 +493,14 @@ class TunnelVpnService : VpnService(), PlatformInterface {
         }
 
         override fun serviceStop() {
+            // The CORE asked to stop (a command client, or an internal fatal).
+            // Still honoured — it is just no longer the only path to
+            // DISCONNECTED; see EngineTransitions.
             val unexpected = EngineBridge.status.value.status == EngineStatus.CONNECTED && !ending
             CoreClient.stopStatus()
-            EngineBridge.setServiceGone()
+            EngineBridge.setStatus(
+                EngineTransitions.onCoreRequestedStop(EngineBridge.status.value.status),
+            )
             closeTun()
             if (unexpected) {
                 ending = true

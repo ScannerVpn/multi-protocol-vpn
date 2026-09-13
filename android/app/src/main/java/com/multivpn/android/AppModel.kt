@@ -7,7 +7,10 @@ import com.multivpn.android.data.Settings
 import com.multivpn.android.data.SplitModes
 import com.multivpn.android.data.Store
 import com.multivpn.android.data.Subs
+import com.multivpn.android.ssh.SshService
+import com.multivpn.android.ssh.TofuHostKeys
 import com.multivpn.android.vpn.CoreClient
+import com.multivpn.android.vpn.Transports
 import com.multivpn.android.vpn.EngineBridge
 import com.multivpn.android.vpn.EngineStatus
 import com.multivpn.android.vpn.LibboxEngine
@@ -26,6 +29,7 @@ import kotlinx.coroutines.withContext
 import vpn.core.Awg
 import vpn.core.ConfigSort
 import vpn.core.Links
+import vpn.core.ServerConfig
 import vpn.core.Subscription
 import vpn.core.VpnConfig
 import java.io.File
@@ -46,6 +50,7 @@ object AppModel {
 
     val configs = MutableStateFlow<List<VpnConfig>>(emptyList())
     val subscriptions = MutableStateFlow<List<Subscription>>(emptyList())
+    val servers = MutableStateFlow<List<ServerConfig>>(emptyList())
     val activeConfigId = MutableStateFlow<String?>(null)
     val settings = MutableStateFlow(Settings())
 
@@ -78,6 +83,15 @@ object AppModel {
     private var confDir: File? = null
     private var appContext: android.content.Context? = null
 
+    /** Live log of a running provisioning (سرورها tab). */
+    val provisioningLog = MutableStateFlow<List<String>>(emptyList())
+
+    /** True while a provisioning script is running on a server. */
+    val provisioningActive = MutableStateFlow(false)
+
+    /** Progress message for the provisioning run (current step). */
+    val provisioningStatus = MutableStateFlow("")
+
     /** How long connectActive waits for the service to publish its instance.
      *  Generous on purpose: onCreate loads a ~100 MB native core. */
     private const val SERVICE_WAIT_MS = 8_000L
@@ -93,6 +107,7 @@ object AppModel {
         pingCache = PingCache(dataDir)
         configs.value = s.loadConfigs()
         subscriptions.value = s.loadSubscriptions()
+        servers.value = s.loadServers()
         activeConfigId.value = s.loadActiveConfigId()
         settings.value = s.loadSettings()
         cachedLatency.value = pingCache?.all() ?: emptyMap()
@@ -197,7 +212,8 @@ object AppModel {
      * Imports a tunnel conf (.conf = WireGuard/AmneziaWG, .ovpn = OpenVPN).
      * The text is saved into the app's private conf dir and the config keeps
      * its absolute path — the same [VpnConfig.tunnelConfPath] contract the
-     * desktop uses.
+     * desktop uses. OpenVPN is fully supported since 0.4.0: it rides its own
+     * native core ([com.multivpn.android.vpn.OpenVpnEngine]).
      */
     fun importTunnelConf(fileName: String, text: String): Boolean {
         val dir = confDir ?: return false
@@ -232,7 +248,7 @@ object AppModel {
         persist()
         if (activeConfigId.value == null) setActive(id)
         notice.value = if (protocol == "openvpn") {
-            "«$name» ذخیره شد، ولی OpenVPN روی اندروید هنوز پیاده نشده."
+            "«$name» اضافه شد (OpenVPN — روی هستهٔ اختصاصی خودش اجرا می‌شود)."
         } else {
             "«$name» اضافه شد (${labelOf(protocol)}${config.awgVersion?.let { " $it" } ?: ""})."
         }
@@ -546,9 +562,173 @@ object AppModel {
         }
     }
 
+
+
     fun setSplitMode(mode: String) = updateSettings { it.copy(splitMode = mode) }
 
     fun setSplitApps(apps: List<String>) = updateSettings { it.copy(splitApps = apps) }
+
+    // ------------------------------------------------------------------
+    // Personal servers (سرورها tab)
+    // ------------------------------------------------------------------
+
+    /** Adds a VPS entry; nothing is sent to the server until Setup runs. */
+    fun addServer(ip: String, port: Int, username: String, password: String, name: String?): Boolean {
+        val host = ip.trim()
+        if (!host.matches(Regex("^[a-zA-Z0-9._-]+$"))) {
+            notice.value = "آدرس سرور معتبر نیست."
+            return false
+        }
+        if (password.isBlank()) {
+            notice.value = "رمز SSH لازم است."
+            return false
+        }
+        val server = ServerConfig(
+            id = UUID.randomUUID().toString(),
+            name = name?.trim()?.ifEmpty { null } ?: host,
+            ip = host,
+            sshPort = port.coerceIn(1, 65535),
+            username = username.trim().ifEmpty { "root" },
+            password = password,
+            isReady = false,
+        )
+        if (servers.value.any { it.ip == server.ip && it.sshPort == server.sshPort }) {
+            notice.value = "این سرور قبلاً اضافه شده."
+            return false
+        }
+        servers.value = servers.value + server
+        persistServers()
+        notice.value = "سرور «${server.name}» اضافه شد."
+        return true
+    }
+
+    fun removeServer(server: ServerConfig, withConfigs: Boolean) {
+        servers.value = servers.value.filterNot { it.id == server.id }
+        if (withConfigs) {
+            val doomed = configs.value.filter { it.serverId == server.id }.map { it.id }.toSet()
+            configs.value = configs.value.filterNot { it.id in doomed }
+            doomed.forEach { pingCache?.remove(it); pinger.forget(it) }
+            if (activeConfigId.value in doomed) setActive(configs.value.firstOrNull()?.id)
+            persist()
+            cachedLatency.value = pingCache?.all() ?: emptyMap()
+        }
+        persistServers()
+    }
+
+    /** Drops the server's pinned SSH host key (after a deliberate rebuild). */
+    fun forgetServerHostKey(server: ServerConfig) {
+        runCatching {
+            val keys = TofuHostKeys(AppLog.baseDir)
+            keys.forget(TofuHostKeys.hostKeyId(server.ip, server.sshPort))
+            notice.value = "پین کلید میزبان «${server.ip}» حذف شد؛ اتصال بعدی دوباره pin می‌شود."
+        }
+    }
+
+    /** Handshake probe for the Test button. Result lands in [notice]. */
+    fun testServer(server: ServerConfig) {
+        scope.launch {
+            val res = withContext(Dispatchers.IO) { SshService.testConnection(server) }
+            notice.value = res.fold(
+                { "SSH «${server.name}» OK — احراز و کلید میزبان تأیید شد." },
+                { "تست SSH ناموفق: ${it.message}" },
+            )
+        }
+    }
+
+    /**
+     * Runs setup-xray.sh for [variant] on [server], streaming the output into
+     * [provisioningLog]; then imports every share link the run produced.
+     */
+    fun provisionServer(server: ServerConfig, variant: String) {
+        if (provisioningActive.value) {
+            notice.value = "یک نصب از قبل در جریان است."
+            return
+        }
+        val script = readAsset("scripts/setup-xray.sh")
+        if (script == null) {
+            notice.value = "اسکریپت نصب در بستهٔ اپ پیدا نشد."
+            return
+        }
+        provisioningActive.value = true
+        provisioningCancel.value = false
+        provisioningLog.value = listOf("Setup $variant روی ${server.ip} شروع شد…")
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                SshService.provision(
+                    server = server,
+                    variant = variant,
+                    scriptText = script,
+                    onLine = { line ->
+                        provisioningLog.value = (provisioningLog.value + line).takeLast(400)
+                        if (line.contains("MULTIVPN-LINK:")) {
+                            provisioningStatus.value = "دریافت کانفیگ تولیدشده…"
+                        }
+                    },
+                    isCancelled = { provisioningCancel.value },
+                )
+            }
+            provisioningActive.value = false
+            result.fold(
+                { r ->
+                    val links = r.transcript.lineSequence()
+                        .filter { it.contains("MULTIVPN-LINK:") }
+                        .map { it.substringAfter("MULTIVPN-LINK:").trim() }
+                        .filter { it.contains("://") }
+                        .toList()
+                    if (r.ok) {
+                        servers.value = servers.value.map {
+                            if (it.id == server.id) it.copy(isReady = true) else it
+                        }
+                        persistServers()
+                    }
+                    if (links.isNotEmpty()) {
+                        val existing = configs.value.mapNotNull { it.xrayLink }.toSet()
+                        val fresh = links.filter { it !in existing }
+                        fresh.forEach { raw ->
+                            val link = Links.parse(raw)
+                            configs.value = configs.value + VpnConfig(
+                                id = UUID.randomUUID().toString(),
+                                name = link?.name?.ifEmpty { null } ?: ("${server.name} · ${fresh.indexOf(raw) + 1}"),
+                                serverIp = link?.address ?: server.ip,
+                                protocol = link?.protocol ?: variant,
+                                xrayLink = raw,
+                                category = "my_servers",
+                                serverId = server.id,
+                            )
+                        }
+                        if (fresh.isNotEmpty()) persist()
+                        notice.value = if (r.ok) "نصب کامل شد؛ ${fresh.size} کانفیگ اضافه شد."
+                        else "نصب با خطا تمام شد ولی ${fresh.size} کانفیگ پیدا شد."
+                    } else {
+                        notice.value = if (r.ok) "نصب کامل شد ولی هیچ لینکی چاپ نشد."
+                        else "نصب ناموفق بود — خروجی را در لاگ ببینید."
+                    }
+                    provisioningLog.value = (provisioningLog.value + "— پایان —").takeLast(400)
+                },
+                { e ->
+                    provisioningActive.value = false
+                    notice.value = "نصب ناموفق: ${e.message}"
+                    provisioningLog.value = (provisioningLog.value + "خطا: ${e.message}").takeLast(400)
+                },
+            )
+        }
+    }
+
+    /** Cancels the running provisioning at the next output tick. */
+    fun cancelProvisioning() {
+        provisioningCancel.value = true
+    }
+
+    private val provisioningCancel = MutableStateFlow(false)
+
+    private fun persistServers() {
+        store?.saveServers(servers.value)
+    }
+
+    /** Reads a bundled asset (the server scripts) or null. */
+    private fun readAsset(path: String): String? = runCatching {
+        appContext?.assets?.open(path)?.use { it.readBytes().toString(Charsets.UTF_8) }
+    }.getOrNull()
 
     // ------------------------------------------------------------------
     // Backup / restore
@@ -629,6 +809,12 @@ object AppModel {
         "openvpn" -> "OpenVPN"
         else -> protocol
     }
+
+    /**
+     * The connect path for [config]: "openvpn" (the native core), "libbox"
+     * (the sing-box tunnel), or "unsupported". Pure — unit-tested.
+     */
+    fun transportOf(config: VpnConfig?): String = Transports.forConfig(config?.protocol)
 
     /** Split-mode label for the settings row (kept out of the composable). */
     fun splitLabel(): String {

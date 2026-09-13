@@ -183,6 +183,9 @@ class Pinger(private val scope: CoroutineScope) {
         // it running would keep dialing servers in the background for nothing.
         } finally {
             // Also runs on cancellation, render failure, and core exceptions.
+            // finishSession does the disconnect-fix teardown (closeService +
+            // closeTun, observed synchronously) AND stops the foreground
+            // service the probe started.
             if (!live) {
                 service.finishSession()
                 EngineBridge.setServiceGone()
