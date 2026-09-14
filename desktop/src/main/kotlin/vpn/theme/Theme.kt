@@ -11,58 +11,59 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
 /**
- * "Happ" palette (v3.7 restyle, modeled on the Happ client): near-black blue
- * base, an electric-blue→violet brand gradient on the connect orb, green for
- * secured states. Token names are stable — every existing screen keeps
- * compiling; only the values were retuned.
+ * Cyber-teal palette (v3.8 restyle, user mockup 2026-09-14 — applied in
+ * lockstep with the Android Palette): deep navy #0F131D base, electric cyan
+ * #00F0FF → blue #3B82F6 brand gradient, mint #65F2B5 for secured states.
+ * Token names are stable — every existing screen keeps compiling; only the
+ * values were retuned.
  */
 object C {
-    val BgTop = Color(0xFF05070E)
-    val BgMid = Color(0xFF0A0F1E)
-    val BgBottom = Color(0xFF04060C)
+    val BgTop = Color(0xFF0F131D)
+    val BgMid = Color(0xFF171B26)
+    val BgBottom = Color(0xFF0A0E18)
 
-    val Surface = Color(0xFF0B101E)
-    val SurfaceHigh = Color(0xFF0E1526)
-    val SurfaceLow = Color(0xFF080D19)
+    val Surface = Color(0xFF1C1F2A)
+    val SurfaceHigh = Color(0xFF262A35)
+    val SurfaceLow = Color(0xFF171B26)
     val Glass = Color(0x0FFFFFFF)
     val GlassStrong = Color(0x1CFFFFFF)
 
-    val Accent = Color(0xFF4F8CFF)      // electric blue — primary accent
-    val Accent2 = Color(0xFF8B5CF6)     // violet — secondary
-    val Accent3 = Color(0xFF22D3EE)     // cyan — tertiary
-    val AccentDim = Color(0xFF2563EB)
-    val AccentGlow = Color(0x384F8CFF)  // soft outer glow
+    val Accent = Color(0xFF00F0FF)       // electric cyan — primary accent
+    val Accent2 = Color(0xFF3B82F6)      // blue — gradient partner
+    val Accent3 = Color(0xFF00DBE9)      // primary-fixed-dim cyan
+    val AccentDim = Color(0xFF00A3B4)
+    val AccentGlow = Color(0x3800F0FF)   // soft outer glow
 
-    val TextPrimary = Color(0xFFE7ECF6)
-    val TextSecondary = Color(0xFF8B99B4)
-    val TextFaint = Color(0xFF5B6880)
+    val TextPrimary = Color(0xFFDFE2F1)
+    val TextSecondary = Color(0xFFB9CACB)
+    val TextFaint = Color(0xFF849495)
 
-    val Success = Color(0xFF22C55E)
-    val SuccessDim = Color(0x2622C55E)
+    val Success = Color(0xFF65F2B5)
+    val SuccessDim = Color(0x2665F2B5)
     val Warning = Color(0xFFFBBF24)
     val WarningDim = Color(0x26FBBF24)
-    val Error = Color(0xFFF87171)
-    val ErrorDim = Color(0x26F87171)
+    val Error = Color(0xFFFFB4AB)
+    val ErrorDim = Color(0x26FFB4AB)
 
-    val Border = Color(0xFF182036)
-    val BorderStrong = Color(0xFF263251)
-    val OnAccent = Color(0xFF05070E)
+    val Border = Color(0xFF3B494B)
+    val BorderStrong = Color(0xFF4A5A5C)
+    val OnAccent = Color(0xFF00363A)
 
     /**
      * The app's own title bar (the window is undecorated — see
      * [vpn.ui.AppTitleBar]). Slightly darker than [Surface] so the bar reads as
      * window chrome rather than as another content card.
      */
-    val TitleBar = Color(0xFF05070E)
+    val TitleBar = Color(0xFF0A0E18)
 
-    /** Shared brand gradient (electric blue → violet, the Happ signature). */
+    /** Shared brand gradient (electric cyan → blue, the CyberShield signature). */
     val BrandGradient: Brush
         get() = Brush.linearGradient(listOf(Accent, Accent2))
 
     /** Diagonal hero gradient used on big surfaces. */
     val HeroGradient: Brush
         get() = Brush.linearGradient(
-            listOf(Accent.copy(alpha = 0.85f), Color(0xFF6D5DF6), Accent2.copy(alpha = 0.85f)),
+            listOf(Accent.copy(alpha = 0.85f), Color(0xFF00B4D8), Accent2.copy(alpha = 0.85f)),
         )
 }
 

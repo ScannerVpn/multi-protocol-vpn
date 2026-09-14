@@ -97,11 +97,11 @@ object TrayIconManager {
     fun updateStatus(status: VpnStatus, configName: String?) {
         val trayIcon = icon ?: return
         val (_, label) = when (status) {
-            VpnStatus.CONNECTED -> 0xFF34D399.toInt() to "Connected${configName?.let { " — $it" } ?: ""}"
+            VpnStatus.CONNECTED -> 0xFF65F2B5.toInt() to "Connected${configName?.let { " — $it" } ?: ""}"
             VpnStatus.CONNECTING, VpnStatus.DISCONNECTING ->
                 0xFFFBBF24.toInt() to "Working…"
-            VpnStatus.ERROR -> 0xFFF87171.toInt() to "Error — see app log"
-            VpnStatus.DISCONNECTED -> 0xFF22D3EE.toInt() to "Disconnected"
+            VpnStatus.ERROR -> 0xFFFFB4AB.toInt() to "Error — see app log"
+            VpnStatus.DISCONNECTED -> 0xFF00DBE9.toInt() to "Disconnected"
         }
         SwingUtilities.invokeLater {
             runCatching {
