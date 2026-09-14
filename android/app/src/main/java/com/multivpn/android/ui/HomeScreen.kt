@@ -1,9 +1,14 @@
 package com.multivpn.android.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,11 +36,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -62,6 +71,7 @@ fun HomeScreen() {
     val configs by AppModel.configs.collectAsState()
     val activeConfig = configs.firstOrNull { it.id == active }
     var pickerOpen by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     val connected = engineState.status == EngineStatus.CONNECTED
     val connecting = engineState.status == EngineStatus.CONNECTING
     // Busy = CONNECTING or DISCONNECTING. Deriving it from the state machine
@@ -81,7 +91,40 @@ fun HomeScreen() {
         Text("MultiVPN", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Palette.TextPrimary)
         Text(labelOfStatus(engineState.status), fontSize = 12.sp, color = Palette.TextSecondary)
         Spacer(Modifier.height(22.dp))
-        StatusRing(engineState.status)
+        // THE RING IS THE BUTTON (user request 2026-09-14): tap the ring to
+        // connect/disconnect. The separate button below is gone. While busy
+        // (CONNECTING/DISCONNECTING) the ring spins and taps are ignored —
+        // the state machine owns the transition, the ring only reflects it.
+        val ringDescription = when {
+            connected -> "قطع اتصال"
+            busy -> labelOfStatus(engineState.status)
+            else -> "وصل شدن"
+        }
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(190.dp)
+                .clip(CircleShape)
+                .clickable(enabled = !busy) {
+                    if (connected) {
+                        AppModel.disconnectActive()
+                    } else {
+                        if (android.net.VpnService.prepare(context) == null) {
+                            AppModel.connectActive()
+                        } else {
+                            context.startActivity(
+                                android.content.Intent(
+                                    context,
+                                    com.multivpn.android.vpn.VpnRequestActivity::class.java,
+                                ),
+                            )
+                        }
+                    }
+                }
+                .semantics { contentDescription = ringDescription },
+        ) {
+            AnimatedRing(engineState.status, connected, busy)
+        }
         Spacer(Modifier.height(14.dp))
 
         // The desktop's SessionFactsRow, in Android shape: the active config
@@ -137,49 +180,15 @@ fun HomeScreen() {
             }
         }
 
-        Spacer(Modifier.height(18.dp))
-        val context = LocalContext.current
-        Button(
-            onClick = {
-                if (connected || connecting) {
-                    AppModel.disconnectActive()
-                } else {
-                    // First click goes through the VPN consent trampoline;
-                    // VpnRequestActivity hands off to AppModel on grant.
-                    if (android.net.VpnService.prepare(context) == null) {
-                        AppModel.connectActive()
-                    } else {
-                        context.startActivity(
-                            android.content.Intent(
-                                context,
-                                com.multivpn.android.vpn.VpnRequestActivity::class.java,
-                            ),
-                        )
-                    }
-                }
-            },
-            enabled = !busy,
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Palette.Accent),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp),
-        ) {
-            Text(
-                when {
-                    connected -> "قطع اتصال"
-                    connecting -> "لغو اتصال"
-                    engineState.status == EngineStatus.DISCONNECTING -> "در حال قطع…"
-                    else -> "وصل شدن"
-                },
-                fontWeight = FontWeight.Bold,
-                fontSize = 15.sp,
-            )
-        }
+        Spacer(Modifier.height(16.dp))
 
+        // Session usage summary — visible on the home screen even BEFORE the
+        // full traffic card, and always when connected (user request: «میزان
+        // مصرف» روی خانه).
         if (connected) {
-            Spacer(Modifier.height(16.dp))
             TrafficCard()
+        } else {
+            SessionUsageHint()
         }
 
         // The honest engine note (failures, VPN revoked, unsupported
@@ -274,45 +283,133 @@ private fun TrafficCard() {
     }
 }
 
-private fun labelOfStatus(s: EngineStatus): String = when (s) {
-    EngineStatus.CONNECTED -> "وصل شد"
-    EngineStatus.CONNECTING -> "در حال اتصال…"
-    EngineStatus.DISCONNECTING -> "در حال قطع…"
-    EngineStatus.DISCONNECTED -> "قطع"
-    EngineStatus.UNSUPPORTED -> "این کانفیگ پشتیبانی نمی‌شود"
-}
-
+/**
+ * The animated ring that IS the connect/disconnect button.
+ *
+ * Animations (user request 2026-09-14: «ب دایره قطع و وصل کردم هم انیمیشن بده»):
+ *  - the status dot PULSES (scale + alpha breathe) while CONNECTING;
+ *  - the whole gradient arc SPINS while CONNECTING/DISCONNECTING (busy);
+ *  - connected: full circle in Ok-green with a slow shimmer sweep;
+ *  - disconnected: the resting 300° arc in the aurora gradient;
+ *  - every color/state change cross-fades (animateColorAsState) so the ring
+ *    never snaps.
+ */
 @Composable
-private fun StatusRing(status: EngineStatus) {
-    val color = when (status) {
-        EngineStatus.CONNECTED -> Palette.Ok
-        EngineStatus.CONNECTING, EngineStatus.DISCONNECTING -> Palette.Cyan
-        EngineStatus.DISCONNECTED -> Palette.TextFaint
-        EngineStatus.UNSUPPORTED -> Palette.Accent
+private fun AnimatedRing(status: EngineStatus, connected: Boolean, busy: Boolean) {
+    val ringColor by animateColorAsState(
+        targetValue = when (status) {
+            EngineStatus.CONNECTED -> Palette.Ok
+            EngineStatus.CONNECTING, EngineStatus.DISCONNECTING -> Palette.Cyan
+            EngineStatus.DISCONNECTED -> Palette.TextFaint
+            EngineStatus.UNSUPPORTED -> Palette.Accent
+        },
+        animationSpec = tween(400),
+        label = "ringColor",
+    )
+    // Spin only while busy; reset gracefully when the state settles.
+    val spin = remember { Animatable(0f) }
+    LaunchedEffect(busy) {
+        if (busy) {
+            while (true) {
+                spin.animateTo(spin.value + 360f, tween(1100, easing = LinearEasing))
+            }
+        } else {
+            spin.animateTo(0f, tween(300))
+        }
     }
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(170.dp)) {
-        Canvas(Modifier.size(170.dp)) {
-            // Explicit center + radius (desktop lesson §5-14: a NaN center
-            // poisons the whole frame).
+    // Breathing dot while connecting.
+    val pulse = remember { Animatable(1f) }
+    LaunchedEffect(status) {
+        if (status == EngineStatus.CONNECTING || status == EngineStatus.DISCONNECTING) {
+            while (true) {
+                pulse.animateTo(1.6f, tween(500))
+                pulse.animateTo(1f, tween(500))
+            }
+        } else {
+            pulse.snapTo(1f)
+        }
+    }
+    // A soft alpha shimmer for the connected state.
+    val shimmer = remember { Animatable(0f) }
+    LaunchedEffect(connected) {
+        if (connected) {
+            while (true) {
+                shimmer.animateTo(1f, tween(1400))
+                shimmer.animateTo(0f, tween(1400))
+            }
+        } else {
+            shimmer.snapTo(0f)
+        }
+    }
+
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(190.dp)) {
+        Canvas(Modifier.size(190.dp)) {
+            val stroke = 24f
             drawArc(
                 color = Palette.GlassStrong,
                 startAngle = 0f,
                 sweepAngle = 360f,
                 useCenter = false,
-                style = Stroke(width = 24f, cap = StrokeCap.Round),
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
             )
-            drawArc(
-                brush = Brush.sweepGradient(listOf(Palette.Accent, Palette.Cyan, Palette.Accent)),
-                startAngle = -90f,
-                sweepAngle = if (status == EngineStatus.CONNECTED) 360f else 300f,
-                useCenter = false,
-                style = Stroke(width = 24f, cap = StrokeCap.Round),
+            if (connected) {
+                // Full circle + a rotating brightness band (shimmer).
+                drawArc(
+                    color = ringColor,
+                    startAngle = 0f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    style = Stroke(width = stroke, cap = StrokeCap.Round),
+                )
+                drawArc(
+                    brush = Brush.sweepGradient(
+                        0f to Palette.Ok.copy(alpha = 0f),
+                        0.12f to Color.White.copy(alpha = 0.45f + 0.3f * shimmer.value),
+                        0.24f to Palette.Ok.copy(alpha = 0f),
+                        1f to Palette.Ok.copy(alpha = 0f),
+                    ),
+                    startAngle = spin.value,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    style = Stroke(width = stroke, cap = StrokeCap.Butt),
+                )
+            } else if (busy) {
+                // Spinning 100° comet while connecting/disconnecting.
+                drawArc(
+                    brush = Brush.sweepGradient(
+                        0f to Palette.Cyan.copy(alpha = 0.15f),
+                        0.6f to Palette.Accent,
+                        1f to Palette.Cyan,
+                    ),
+                    startAngle = spin.value - 90f,
+                    sweepAngle = 100f,
+                    useCenter = false,
+                    style = Stroke(width = stroke, cap = StrokeCap.Round),
+                )
+            } else {
+                drawArc(
+                    brush = Brush.sweepGradient(listOf(Palette.Accent, Palette.Cyan, Palette.Accent)),
+                    startAngle = -90f,
+                    sweepAngle = 300f,
+                    useCenter = false,
+                    style = Stroke(width = stroke, cap = StrokeCap.Round),
+                )
+            }
+            drawCircle(
+                color = ringColor,
+                radius = 7f * pulse.value,
+                center = Offset(size.width / 2, size.height / 2 - 30f),
             )
-            drawCircle(color = color, radius = 7f, center = Offset(size.width / 2, size.height / 2 - 30f))
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                labelOfStatus(status),
+                when {
+                    connected -> "متصل"
+                    status == EngineStatus.CONNECTING -> "در حال اتصال…"
+                    status == EngineStatus.DISCONNECTING -> "در حال قطع…"
+                    status == EngineStatus.UNSUPPORTED -> "ناموجود"
+                    else -> "بزن تا وصل شود"
+                },
                 fontWeight = FontWeight.Bold,
                 fontSize = 16.sp,
                 color = Palette.TextPrimary,
@@ -321,3 +418,32 @@ private fun StatusRing(status: EngineStatus) {
         }
     }
 }
+
+/** A light usage hint while disconnected: last session totals are the core's
+ *  business, so before connecting the honest answer is the CURRENT figure —
+ *  zero — plus what the card WILL show once live. */
+@Composable
+private fun SessionUsageHint() {
+    Card {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("مصرف این سشن", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = Palette.TextPrimary)
+            Spacer(Modifier.weight(1f))
+            Text("0 B", fontSize = 13.sp, color = Palette.TextSecondary)
+            Spacer(Modifier.width(6.dp))
+            Text("— وصل شوید تا شمارش زنده شروع شود", fontSize = 10.sp, color = Palette.TextFaint)
+        }
+    }
+}
+
+private fun labelOfStatus(s: EngineStatus): String = when (s) {
+    EngineStatus.CONNECTED -> "وصل شد"
+    EngineStatus.CONNECTING -> "در حال اتصال…"
+    EngineStatus.DISCONNECTING -> "در حال قطع…"
+    EngineStatus.DISCONNECTED -> "قطع"
+    EngineStatus.UNSUPPORTED -> "این کانفیگ پشتیبانی نمی‌شود"
+}
+
+
