@@ -29,6 +29,7 @@ import kotlinx.coroutines.withContext
 import vpn.core.Awg
 import vpn.core.ConfigSort
 import vpn.core.Links
+import vpn.core.ProxyLink
 import vpn.core.ServerConfig
 import vpn.core.Subscription
 import vpn.core.VpnConfig
@@ -177,31 +178,82 @@ object AppModel {
      *  clipboard pastes) frequently flattens a multi-line paste into one
      *  space-separated line, and share links never contain spaces. */
     fun importLinks(text: String, source: String? = null): Int {
-        val existing = configs.value.mapNotNull { it.xrayLink }.toSet()
-        val added = mutableListOf<VpnConfig>()
+        val (added, updated) = ingestLinks(text, source, updateExisting = false)
+        notice.value = when {
+            added > 0 -> "$added کانفیگ اضافه شد."
+            else -> "هیچ لینک قابل‌پارسی پیدا نشد (vless/trojan/ss/hy2)."
+        }
+        return added
+    }
+
+    /**
+     * Stable identity of a subscription config: protocol+address+port+secret.
+     * Volatile params (name, Reality sni/sid, ws path, …) are excluded ON
+     * PURPOSE: this user's 3x-ui panel re-rolls the Reality dest/shortId on
+     * EVERY sub fetch (verified 2026-09-14: three fetches, three different
+     * sid/sni pairs), so a whole-link match duplicates every config instead
+     * of refreshing it — and a stored link silently dies a few minutes after
+     * import.
+     */
+    private fun stableKeyOf(link: ProxyLink): String =
+        "${link.protocol}|${link.address}|${link.port}|${link.secret}"
+
+    /**
+     * Shared ingestion for paste-import and subscription fetch/refresh.
+     * With [updateExisting] (subscription refresh) a link whose stable
+     * identity matches an existing config REPLACES that config's link —
+     * fresh handshake params, same id, same name, no duplicates.
+     *
+     * @return (added, updated) counts.
+     */
+    private fun ingestLinks(text: String, source: String?, updateExisting: Boolean): Pair<Int, Int> {
+        val current = configs.value
+        val existingRaw = current.mapNotNull { it.xrayLink }.toSet()
+        val addedList = mutableListOf<VpnConfig>()
+        val updates = mutableListOf<Pair<Int, VpnConfig>>() // (index, new config)
+        val seenKeys = mutableSetOf<String>()
         text.split(Regex("\\s+")).map { it.trim() }.filter { it.contains("://") }.forEach { raw ->
             val link = Links.parse(raw) ?: return@forEach
-            if (raw in existing || added.any { it.xrayLink == raw }) return@forEach
-            val n = configs.value.size + added.size + 1
-            added += VpnConfig(
-                id = UUID.randomUUID().toString(),
-                name = link.name.ifEmpty { "کانفیگ $n" },
-                serverIp = link.address,
-                protocol = link.protocol,
-                xrayLink = raw,
-                category = if (source != null) "subscription" else "manual",
-                source = source,
-            )
+            val key = stableKeyOf(link)
+            if (key in seenKeys) return@forEach
+            val existingIdx = current.indexOfFirst { c ->
+                c.xrayLink == raw || (c.xrayLink?.let { Links.parse(it)?.let(::stableKeyOf) } == key)
+            }
+            when {
+                existingIdx < 0 -> {
+                    seenKeys += key
+                    val n = current.size + addedList.size + 1
+                    addedList += VpnConfig(
+                        id = UUID.randomUUID().toString(),
+                        name = link.name.ifEmpty { "کانفیگ $n" },
+                        serverIp = link.address,
+                        protocol = link.protocol,
+                        xrayLink = raw,
+                        category = if (source != null) "subscription" else "manual",
+                        source = source,
+                    )
+                }
+                updateExisting && raw !in existingRaw -> {
+                    seenKeys += key
+                    updates += existingIdx to current[existingIdx].copy(
+                        serverIp = link.address,
+                        protocol = link.protocol,
+                        xrayLink = raw,
+                    )
+                }
+            }
         }
-        if (added.isEmpty()) {
-            notice.value = "هیچ لینک قابل‌پارسی پیدا نشد (vless/trojan/ss/hy2)."
-            return 0
+        if (updates.isNotEmpty()) {
+            val byIdx = updates.toMap()
+            configs.value = configs.value.mapIndexed { i, c -> byIdx[i] ?: c }
+            persist()
         }
-        configs.value = configs.value + added
-        persist()
-        if (activeConfigId.value == null) setActive(added.first().id)
-        notice.value = "${added.size} کانفیگ اضافه شد."
-        return added.size
+        if (addedList.isNotEmpty()) {
+            configs.value = configs.value + addedList
+            persist()
+            if (activeConfigId.value == null) setActive(addedList.first().id)
+        }
+        return addedList.size to updates.size
     }
 
     // ------------------------------------------------------------------
@@ -284,7 +336,7 @@ object AppModel {
             )
             subscriptions.value = subscriptions.value + sub
             persistSubs()
-            val added = importLinks(res.body, source = "subscription:${sub.id}")
+            val (added, updated) = ingestLinks(res.body, "subscription:${sub.id}", updateExisting = false)
             notice.value = if (added > 0) "اشتراک «${sub.name}»: $added کانفیگ اضافه شد."
             else "اشتراک ذخیره شد ولی هیچ لینکی داخلش پارس نشد."
         }
@@ -304,12 +356,41 @@ object AppModel {
                 notice.value = "بروزرسانی «${sub.name}» ناموفق: ${res.error}"
                 return@launch
             }
-            val added = importLinks(res.body, source = "subscription:${sub.id}")
+            val (added, updated) = ingestLinks(res.body, "subscription:${sub.id}", updateExisting = true)
             subscriptions.value = subscriptions.value.map {
                 if (it.id == sub.id) it.copy(lastUpdate = System.currentTimeMillis()) else it
             }
             persistSubs()
-            notice.value = if (added > 0) "«${sub.name}»: $added کانفیگ تازه." else "«${sub.name}» تغییری نداشت."
+            notice.value = when {
+                added > 0 || updated > 0 -> "«${sub.name}»: $added جدید، $updated بروزرسانی‌شده."
+                else -> "«${sub.name}» تغییری نداشت."
+            }
+        }
+    }
+
+    /**
+     * Blocking twin of [refreshSubscription] for the connect path: the engine
+     * must dial the FRESH link, so the fetch+merge must complete before
+     * engine.connect reads [configs]. Best-effort: any failure is logged and
+     * ignored — connect proceeds with whatever is stored.
+     */
+    private suspend fun refreshSubscriptionBlocking(sub: Subscription) {
+        try {
+            val res = withContext(Dispatchers.IO) { Subs.fetch(sub.url) }
+            if (!res.ok || res.body == null) {
+                AppLog.e("Model", "pre-connect sub refresh failed: ${res.error}")
+                return
+            }
+            val (added, updated) = ingestLinks(res.body, "subscription:${sub.id}", updateExisting = true)
+            subscriptions.value = subscriptions.value.map {
+                if (it.id == sub.id) it.copy(lastUpdate = System.currentTimeMillis()) else it
+            }
+            persistSubs()
+            AppLog.i("Model", "pre-connect sub refresh: $added added, $updated refreshed")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            AppLog.e("Model", "pre-connect sub refresh error: ${e.message}")
         }
     }
 
@@ -458,6 +539,15 @@ object AppModel {
         reconnectAllowed = true
         connectionJob = scope.launch {
             try {
+                // The active config may ride a subscription whose Reality
+                // params were re-rolled server-side after import (this 3x-ui
+                // panel re-rolls sni/sid on EVERY fetch — see ingestLinks).
+                // A silent best-effort refresh makes a minutes-old import
+                // work again without the user knowing any of this exists.
+                if (cfg.category == "subscription" && cfg.source != null) {
+                    val sub = subscriptions.value.firstOrNull { "subscription:${it.id}" == cfg.source }
+                    if (sub != null) refreshSubscriptionBlocking(sub)
+                }
                 pinger.cancelAndWait()
                 EngineBridge.setStatus(EngineStatus.CONNECTING)
                 if (!awaitTunnelService(ctx)) {

@@ -200,7 +200,14 @@ object SshService {
         val session = jsch.getSession(server.username, server.ip, server.sshPort)
         session.setPassword(server.password ?: throw IllegalArgumentException("سرور رمز SSH ندارد."))
         session.hostKeyRepository = keys
-        session.setConfig("StrictHostKeyChecking", "yes")
+        // `ask` (not `yes`): under `yes` jsch throws "reject HostKey" on the
+        // FIRST connection without ever calling add() — TOFU pinning could
+        // never happen (bug reported live 2026-09-14). Under `ask`, jsch
+        // consults TofuUserInfo.promptYesNo for an unknown host (true →
+        // pin via add()) and still hard-fails a CHANGED key before any
+        // prompt. lastMismatch==false also forces promptYesNo to refuse.
+        session.setConfig("StrictHostKeyChecking", "ask")
+        session.userInfo = TofuUserInfo(keys)
         session.setConfig("PreferredAuthentications", "password,keyboard-interactive")
         session.timeout = timeoutMs
         session.connect(timeoutMs)
