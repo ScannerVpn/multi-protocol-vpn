@@ -239,7 +239,10 @@ class BoxConfigSchemaTest {
         assertEquals("127.0.0.1", inbound["listen"]!!.jsonPrimitive.content)
         assertEquals("23456", inbound["listen_port"]!!.jsonPrimitive.content)
         assertEquals("http", inbound["type"]!!.jsonPrimitive.content)
-        val rule = root["route"]!!.jsonObject["rules"]!!.jsonArray.first().jsonObject
+        val rule = root["route"]!!.jsonObject["rules"]!!.jsonArray
+            .map { it.jsonObject }
+            .first { it["inbound"]?.jsonArray?.first()?.jsonPrimitive?.content == "verify-in" &&
+                    it.containsKey("outbound") }
         assertEquals("verify-in", rule["inbound"]!!.jsonArray.first().jsonPrimitive.content)
         assertEquals("proxy", rule["outbound"]!!.jsonPrimitive.content)
     }

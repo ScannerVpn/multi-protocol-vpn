@@ -48,7 +48,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.multivpn.android.AppModel
 import com.multivpn.android.vpn.Pinger
+import androidx.compose.ui.draw.clip
 import vpn.core.ConfigSort
+import vpn.core.Subscription
 import vpn.core.VpnConfig
 
 /**
@@ -206,20 +208,62 @@ fun ConfigsScreen() {
                 modifier = Modifier.fillMaxWidth(),
             )
         } else {
+            // PERSISTENT grouping (user request 2026-09-14): each subscription,
+            // provisioned-server batch and manual/imported set stays in its own
+            // collapsible folder — adding a sub can no longer flood one flat
+            // list. Groups always render when non-empty; sort + search still
+            // apply INSIDE each group.
+            val groups = groupConfigs(visible, subs)
+            val collapsed = AppModel.collapsedGroups.collectAsState()
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(visible, key = { it.id }) { c ->
-                    ConfigRow(
-                        config = c,
-                        selected = c.id == activeId,
-                        freshMs = fresh[c.id],
-                        cached = cached[c.id],
-                        failed = c.id in failed,
-                        onClick = { AppModel.setActive(c.id) },
-                        onRename = { renaming = c },
-                        onEditLink = { editingLink = c },
-                        onShare = { shareConfig(context, c) },
-                        onDelete = { deleting = c },
-                    )
+                groups.forEach { group ->
+                    val key = group.key
+                    val isCollapsed = collapsed.value.contains(key)
+                    item(key = "hdr-$key") {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { AppModel.toggleGroupCollapsed(key) }
+                                .padding(horizontal = 4.dp, vertical = 6.dp),
+                        ) {
+                            Text(
+                                if (isCollapsed) "▸" else "▾",
+                                color = Palette.TextFaint,
+                                fontSize = 12.sp,
+                                modifier = Modifier.width(16.dp),
+                            )
+                            Text(
+                                group.title,
+                                color = Palette.TextSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                "${group.items.size}",
+                                color = Palette.TextFaint,
+                                fontSize = 11.sp,
+                            )
+                        }
+                    }
+                    if (!isCollapsed) {
+                        items(group.items, key = { it.id }) { c ->
+                            ConfigRow(
+                                config = c,
+                                selected = c.id == activeId,
+                                freshMs = fresh[c.id],
+                                cached = cached[c.id],
+                                failed = c.id in failed,
+                                onClick = { AppModel.setActive(c.id) },
+                                onRename = { renaming = c },
+                                onEditLink = { editingLink = c },
+                                onShare = { shareConfig(context, c) },
+                                onDelete = { deleting = c },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -369,3 +413,51 @@ private fun displayName(context: android.content.Context, uri: android.net.Uri):
         if (idx >= 0 && c.moveToFirst()) c.getString(idx) else null
     } ?: uri.lastPathSegment?.substringAfterLast('/')
 }.getOrNull()
+
+// ---------------------------------------------------------------------------
+// Config folders (user request 2026-09-14): subscription / server / manual
+// ---------------------------------------------------------------------------
+
+/** One collapsible folder of the configs list. */
+data class ConfigGroup(val key: String, val title: String, val items: List<VpnConfig>)
+
+/** Suffix after the server name in auto-imported config names (e.g. "all", "at5571b66p"). */
+private val SERVER_BATCH_SUFFIX = Regex("^[a-z0-9._-]{1,24}$")
+
+/**
+ * Groups [list] (already searched + sorted) into folders by provenance:
+ *  - one folder per subscription (configs whose source == "subscription:<id>");
+ *  - one folder per provisioned server batch (configs generated through the
+ *    سرورها tab share source "server:<id>" — legacy batches before the
+ *    source field are matched by the server's generated names);
+ *  - everything else (paste-imported links, files) in one "دستی" folder.
+ * Ordering is stable: manual first, then server batches, then subscriptions
+ * in the order the user added them.
+ */
+fun groupConfigs(list: List<VpnConfig>, subs: List<Subscription>): List<ConfigGroup> {
+    val bySource = list.groupBy { it.source }
+    val groups = mutableListOf<ConfigGroup>()
+    bySource[null]?.let {
+        if (it.isNotEmpty()) groups += ConfigGroup("manual", "دستی / وارد‌شده", it)
+    }
+    // Server batches: configs carrying source "server:<serverId>" OR (legacy)
+    // generated ones whose serverId points at a known server.
+    val serverKeys = bySource.keys.filter { it != null && it.startsWith("server:") }
+    serverKeys.forEach { keyOrNull ->
+        val key = keyOrNull ?: return@forEach
+        val items = bySource[key].orEmpty()
+        val sid = key.removePrefix("server:")
+        val title = "سرور · ${AppModel.serverNameFor(sid, items)}"
+        if (items.isNotEmpty()) groups += ConfigGroup(key, title, items)
+    }
+    subs.forEach { sub ->
+        val key = "subscription:${sub.id}"
+        val items = bySource[key].orEmpty()
+        if (items.isNotEmpty()) groups += ConfigGroup(key, sub.name, items)
+    }
+    // Orphans with an unknown source string (should not happen) — show, don't hide.
+    val known = setOf<String?>(null) + serverKeys + subs.map { "subscription:${it.id}" }
+    val orphaned = list.filter { it.source !in known }
+    if (orphaned.isNotEmpty()) groups += ConfigGroup("other", "سایر", orphaned)
+    return groups
+}

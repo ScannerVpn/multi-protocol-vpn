@@ -98,6 +98,7 @@ object BoxConfigBuilder {
                 ?: "کانفیگ انتخاب‌شده وجود ندارد؛ دوباره انتخاب کنید."
         }
         val active = activeId ?: nodes.first.first().configId
+        val hasVerify = verificationPort != null
         val sb = StringBuilder()
         sb.append("{\n")
         sb.append("  \"log\": { \"level\": \"warn\", \"timestamp\": true },\n")
@@ -105,7 +106,7 @@ object BoxConfigBuilder {
         sb.append(tunInbound(settings, verificationPort, verificationToken))
         sb.append(outboundsBlock(nodes.first, selectorDefault = tagOf(active)))
         sb.append(endpointsBlock(nodes.first))
-        sb.append(routeBlock())
+        sb.append(routeBlock(hasVerify))
         sb.append("}")
         return Render(sb.toString(), nodes.first.map { it.configId }, nodes.second)
     }
@@ -318,11 +319,24 @@ object BoxConfigBuilder {
     /**
      * Route actions (1.12+). Sniffing is a rule action now; DNS is hijacked
      * rather than sent to a `dns` outbound that no longer exists.
+     *
+     * [verifyInbound] (connect-time verification only): the verify HTTP
+     * inbound's traffic gets a domain_resolver = `local` rule. Rationale —
+     * the remote/DoH resolver rides the very outbound being verified, so a
+     * cold start must complete BOTH handshakes (server + DoH) inside the
+     * probe's 3 s budget; on real mobile networks that loses the race every
+     * time ("پینگ میدهد ولی وصل نمیشد" — the probe core dials the same
+     * server fine because ITS dns.final is `local`). The device resolver is
+     * outside the tunnel, so the probe measures exactly the server.
      */
-    private fun routeBlock(): String {
+    private fun routeBlock(verifyInbound: Boolean = false): String {
         val sb = StringBuilder()
         sb.append("  \"route\": {\n")
         sb.append("    \"rules\": [\n")
+        if (verifyInbound) {
+            sb.append("      { \"inbound\": [\"verify-in\"], \"action\": \"sniff\" },\n")
+            sb.append("      { \"inbound\": [\"verify-in\"], \"domain_resolver\": \"local\" },\n")
+        }
         sb.append("      { \"inbound\": [\"verify-in\"], \"outbound\": \"$SELECTOR_TAG\" },\n")
         sb.append("      { \"action\": \"sniff\" },\n")
         sb.append("      { \"protocol\": \"dns\", \"action\": \"hijack-dns\" },\n")

@@ -102,6 +102,7 @@ fun ServersScreen() {
                         configCount = configs.count { it.serverId == server.id },
                         onTest = { AppModel.testServer(server) },
                         onSetup = { settingUp = server },
+                        onImportFromServer = { AppModel.importFromServer(server) },
                         onDelete = { deleting = server },
                     )
                 }
@@ -167,6 +168,7 @@ private fun ServerRow(
     configCount: Int,
     onTest: () -> Unit,
     onSetup: () -> Unit,
+    onImportFromServer: () -> Unit,
     onDelete: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
@@ -213,6 +215,10 @@ private fun ServerRow(
                 DropdownMenuItem(
                     text = { Text("نصب VPN روی سرور", color = Palette.TextPrimary, fontSize = 13.sp) },
                     onClick = { menuOpen = false; onSetup() },
+                )
+                DropdownMenuItem(
+                    text = { Text("وارد کردن از سرور", color = Palette.TextPrimary, fontSize = 13.sp) },
+                    onClick = { menuOpen = false; onImportFromServer() },
                 )
                 DropdownMenuItem(
                     text = { Text("حذف", color = Palette.Bad, fontSize = 13.sp) },
@@ -323,6 +329,8 @@ private fun SetupProtocolDialog(server: ServerConfig, onDismiss: () -> Unit) {
                     "vless" to "VLESS + Reality (پیشنهادی)",
                     "trojan" to "Trojan",
                     "shadowsocks" to "Shadowsocks 2022",
+                    "openvpn" to "OpenVPN (گواهی تک‌فایل ‎.ovpn)",
+                    "ikev2" to "IKEv2 (گواهی — احراز سیستم اندروید)",
                 ).forEach { (variant, label) ->
                     Row(
                         Modifier

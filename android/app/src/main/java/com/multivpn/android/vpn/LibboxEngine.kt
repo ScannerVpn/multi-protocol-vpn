@@ -295,6 +295,9 @@ class LibboxEngine : VpnEngine {
     companion object {
         const val PROBE_URL = BoxConfigBuilder.PROBE_URL
         const val PROBE_TIMEOUT_MS = 3000
+        /** Cold-start on mobile: server handshake + TLS + request. The probe
+         * core measures the same server in ~1–3 s; the verify path gets the
+         * same order of budget (its DNS now resolves OUTSIDE the tunnel). */
         const val CONNECT_TIMEOUT_MS = 20_000
     }
 }
