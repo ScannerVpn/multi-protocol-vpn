@@ -136,19 +136,27 @@ class TofuHostKeys(private val dataDir: File) : HostKeyRepository {
     }
 }
 
-/** jsch demands a UserInfo; we never prompt, so every answer is "no". */
-internal object SilentUserInfo : UserInfo {
+/**
+ * The UserInfo that makes TOFU actually work on jsch.
+ *
+ * jsch's host-key flow is: repository.check() → NOT_INCLUDED → the SESSION's
+ * `StrictHostKeyChecking` decides what happens. Under `yes` jsch throws
+ * "reject HostKey" WITHOUT ever calling add() — first-use pinning can never
+ * happen (this is exactly the "تست SSH ناموفق: reject HostKey" bug reported
+ * live 2026-09-14). Under `ask` jsch consults promptYesNo for unknown hosts
+ * and inserts via add() when it answers true; a CHANGED key throws
+ * "HostKey has been changed" BEFORE any prompt.
+ *
+ * So: answer true ONLY when the repository did not flag a mismatch —
+ * unknown host = trust & pin (TOFU), mismatch = never accept, belt-and-braces
+ * even if a jsch build ever consulted the prompt on a changed key.
+ */
+internal class TofuUserInfo(private val keys: TofuHostKeys) : UserInfo {
     override fun getPassphrase(): String? = null
     override fun getPassword(): String? = null
     override fun promptPassword(message: String?): Boolean = false
     override fun promptPassphrase(message: String?): Boolean = false
-
-    /**
-     * This is the prompt jsch shows for an unknown/changed host key. Returning
-     * false is what makes [TofuHostKeys.check]'s CHANGED verdict FINAL — a
-     * `true` here would turn the pin into decoration.
-     */
-    override fun promptYesNo(message: String?): Boolean = false
+    override fun promptYesNo(message: String?): Boolean = keys.lastMismatch == null
     override fun showMessage(message: String?) {}
 }
 
