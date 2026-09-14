@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Layers
@@ -72,6 +73,7 @@ import vpn.ui.LocalLayout
 import vpn.ui.ProvideLayout
 import vpn.ui.AuroraBackground
 import vpn.ui.ConfigsScreen
+import vpn.ui.screens.CyberHudScreen
 import vpn.ui.HomeScreen
 import vpn.ui.ServersScreen
 import vpn.ui.SettingsScreen
@@ -264,6 +266,7 @@ private val NAV_ITEMS = listOf(
     NavItem("Dashboard", Icons.Filled.Home),
     NavItem("Servers", Icons.Filled.Dns),
     NavItem("Configs", Icons.Filled.Layers),
+    NavItem("HUD", Icons.Filled.Apps),
     NavItem("Settings", Icons.Filled.Tune),
 )
 
@@ -300,6 +303,7 @@ fun App() {
                             0 -> HomeScreen()
                             1 -> ServersScreen()
                             2 -> ConfigsScreen()
+                            3 -> CyberHudScreen()
                             else -> SettingsScreen()
                         }
                     }
