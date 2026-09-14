@@ -58,6 +58,25 @@ object AppModel {
     /** Transient user-facing message (import results, engine notes). */
     val notice = MutableStateFlow<String?>(null)
 
+    /** Config-folder groups the user collapsed (session state, not persisted:
+     * a fresh open shows every folder expanded). Keys are the same source
+     * strings the configs carry ("manual", "server:<id>", "subscription:<id>"). */
+    val collapsedGroups = MutableStateFlow<Set<String>>(emptySet())
+
+    fun toggleGroupCollapsed(key: String) {
+        collapsedGroups.value = if (key in collapsedGroups.value) {
+            collapsedGroups.value - key
+        } else {
+            collapsedGroups.value + key
+        }
+    }
+
+    /** Display name for a server-batch folder; falls back to the server IP. */
+    fun serverNameFor(serverId: String, items: List<VpnConfig>): String =
+        servers.value.firstOrNull { it.id == serverId }?.name
+            ?: items.firstOrNull()?.serverIp
+            ?: serverId.take(8)
+
     /** Free-text filter for the config list. */
     val search = MutableStateFlow("")
 
@@ -267,7 +286,86 @@ object AppModel {
      * desktop uses. OpenVPN is fully supported since 0.4.0: it rides its own
      * native core ([com.multivpn.android.vpn.OpenVpnEngine]).
      */
-    fun importTunnelConf(fileName: String, text: String): Boolean {
+    /**
+     * «وارد کردن از سرور» (user request 2026-09-14): runs the read-only
+     * export-existing.sh on [server] and imports EVERYTHING it reports —
+     * share links (panel/xray configs) and .conf/.ovpn files (WG/AWG/OpenVPN)
+     * — grouped under source "server:<id>" so they land in the server's own
+     * folder. Existing links/files are skipped, so re-running is safe.
+     */
+    fun importFromServer(server: ServerConfig) {
+        if (provisioningActive.value) {
+            notice.value = "یک عملیات سرور از قبل در جریان است."
+            return
+        }
+        val script = readAsset("scripts/export-existing.sh")
+        if (script == null) {
+            notice.value = "اسکریپت خواندن سرور در بستهٔ اپ پیدا نشد."
+            return
+        }
+        provisioningActive.value = true
+        provisioningCancel.value = false
+        provisioningLog.value = listOf("خواندن کانفیگ‌های موجود روی ${server.ip}…")
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                SshService.provision(
+                    server = server,
+                    variant = "export-existing",
+                    scriptText = script,
+                    onLine = { line ->
+                        provisioningLog.value = (provisioningLog.value + line).takeLast(400)
+                    },
+                    isCancelled = { provisioningCancel.value },
+                )
+            }
+            provisioningActive.value = false
+            result.fold(
+                { r ->
+                    var links = 0
+                    var confs = 0
+                    val serverSource = "server:${server.id}"
+                    val existingRaw = configs.value.mapNotNull { it.xrayLink }.toSet()
+                    r.transcript.lineSequence()
+                        .map { it.trimStart('[', '+', ' ', '\t').trim() }
+                        .forEach { line ->
+                            when {
+                                line.startsWith("MULTIVPN-LINK: ") -> {
+                                    val raw = line.removePrefix("MULTIVPN-LINK: ").trim()
+                                    if (raw.contains("://") && raw !in existingRaw) {
+                                        ingestLinks(raw, serverSource, updateExisting = false)
+                                        links++
+                                    }
+                                }
+                                line.startsWith("MULTIVPN-CONF:") -> {
+                                    // MULTIVPN-CONF:<name>:<base64>
+                                    val body = line.removePrefix("MULTIVPN-CONF:")
+                                    val name = body.substringBefore(':')
+                                    val b64 = body.substringAfter(':', "")
+                                    val text = runCatching {
+                                        String(android.util.Base64.decode(b64, android.util.Base64.DEFAULT), Charsets.UTF_8)
+                                    }.getOrNull()
+                                    if (!name.isBlank() && !text.isNullOrBlank() &&
+                                        configs.value.none { it.tunnelConfPath?.endsWith(name) == true } &&
+                                        configs.value.none { it.name == name && it.protocol in setOf("wireguard", "amnezia", "openvpn") }
+                                    ) {
+                                        if (importTunnelConf(name, text, source = serverSource)) confs++
+                                    }
+                                }
+                            }
+                        }
+                    notice.value = "از سرور: $links لینک، $confs فایل تونل وارد شد."
+                },
+                { e ->
+                    notice.value = "خواندن سرور ناموفق: ${e.message ?: e}"
+                },
+            )
+        }
+    }
+
+    fun importTunnelConf(fileName: String, text: String): Boolean =
+        importTunnelConf(fileName, text, source = null)
+
+    fun importTunnelConf(fileName: String, text: String, source: String?): Boolean {
         val dir = confDir ?: return false
         val lower = fileName.lowercase()
         val protocol = when {
@@ -295,6 +393,7 @@ object AppModel {
             tunnelConfPath = out.absolutePath,
             ovpnPath = if (protocol == "openvpn") out.absolutePath else null,
             isGenerated = false,
+            source = source,
         )
         configs.value = configs.value + config
         persist()
@@ -525,6 +624,17 @@ object AppModel {
             notice.value = "اول یک کانفیگ انتخاب کنید."
             return
         }
+        // IKEv2 (unlike OpenVPN) has no client core on Android yet — the
+        // system keystore import is a manual device dialog. Say so plainly
+        // instead of a silent no-op.
+        if (cfg.protocol == "ikev2") {
+            EngineBridge.setFailed(
+                "IKEv2 روی اندروید هنوز اتصال درون‌اپی ندارد. فایل‌های client.p12 و ca.crt این کانفیگ ذخیره شده‌اند؛ " +
+                    "آن‌ها را از تنظیمات دستگاه (Security → Install a certificate → VPN & app user certificate) نصب کنید " +
+                    "و از اپ VPN بومی اندروید وصل شوید. پشتیبانی درون‌اپی در نسخهٔ بعدی.",
+            )
+            return
+        }
         val ctx = appContext ?: return
         try {
             if (android.net.VpnService.prepare(ctx) != null) {
@@ -734,6 +844,13 @@ object AppModel {
             notice.value = "یک نصب از قبل در جریان است."
             return
         }
+        // Tunnel transports ride their OWN setup scripts + a file download
+        // (SFTP) instead of the xray link emitter. Their VpnConfig points at
+        // the downloaded file, and they land in the server's folder.
+        if (variant == "openvpn" || variant == "ikev2") {
+            provisionTunnelTransport(server, variant)
+            return
+        }
         val script = readAsset("scripts/setup-xray.sh")
         if (script == null) {
             notice.value = "اسکریپت نصب در بستهٔ اپ پیدا نشد."
@@ -774,6 +891,7 @@ object AppModel {
                     if (links.isNotEmpty()) {
                         val existing = configs.value.mapNotNull { it.xrayLink }.toSet()
                         val fresh = links.filter { it !in existing }
+                        val serverSource = "server:${server.id}"
                         fresh.forEach { raw ->
                             val link = Links.parse(raw)
                             configs.value = configs.value + VpnConfig(
@@ -784,6 +902,7 @@ object AppModel {
                                 xrayLink = raw,
                                 category = "my_servers",
                                 serverId = server.id,
+                                source = serverSource,
                             )
                         }
                         if (fresh.isNotEmpty()) persist()
@@ -801,6 +920,122 @@ object AppModel {
                     provisioningLog.value = (provisioningLog.value + "خطا: ${e.message}").takeLast(400)
                 },
             )
+        }
+    }
+
+    /**
+     * Installs OpenVPN or IKEv2 through the SAME server scripts the desktop
+     * uses, then pulls the generated client file(s) over SFTP and registers a
+     * config in the server's folder.
+     *
+     *  - OpenVPN → single-file client.ovpn → rides [OpenVpnEngine].
+     *  - IKEv2 → client.p12 + ca.crt. NOTE the honesty contract: Android's
+     *    system VPN dialog handles certificate auth; the app stores the
+     *    files, shows where they are, and says plainly that the system
+     *    import step is manual (a system dialog the app cannot drive).
+     */
+    private fun provisionTunnelTransport(server: ServerConfig, variant: String) {
+        val scriptName = if (variant == "openvpn") "setup-openvpn.sh" else "setup-ikev2.sh"
+        val script = readAsset("scripts/$scriptName")
+        if (script == null) {
+            notice.value = "$scriptName در بستهٔ اپ پیدا نشد."
+            return
+        }
+        val p12Pass = java.util.UUID.randomUUID().toString().replace("-", "").take(16)
+        provisioningActive.value = true
+        provisioningCancel.value = false
+        provisioningLog.value = listOf("Setup $variant روی ${server.ip} شروع شد…")
+        scope.launch {
+            val installResult = withContext(Dispatchers.IO) {
+                SshService.provision(
+                    server = server,
+                    variant = variant,
+                    scriptText = if (variant == "ikev2") script + "\nset -e\ntrue\n" else script,
+                    onLine = { line ->
+                        provisioningLog.value = (provisioningLog.value + line).takeLast(400)
+                    },
+                    isCancelled = { provisioningCancel.value },
+                )
+            }
+            if (installResult.isFailure) {
+                provisioningActive.value = false
+                notice.value = "نصب $variant ناموفق: ${installResult.exceptionOrNull()?.message}"
+                return@launch
+            }
+            // Pull the generated client artifacts over SFTP.
+            val downloads: List<Pair<String, String>> = if (variant == "openvpn") {
+                listOf("/root/multivpn-openvpn/client.ovpn" to "client.ovpn")
+            } else {
+                listOf(
+                    "/root/ikev2-client/client.p12" to "client.p12",
+                    "/root/ikev2-client/ca.crt" to "ca.crt",
+                )
+            }
+            val fetched = mutableListOf<Pair<String, ByteArray>>()
+            for ((remote, local) in downloads) {
+                SshService.sftpDownload(server, remote).fold(
+                    { bytes -> fetched += local to bytes },
+                    { e ->
+                        provisioningLog.value = (provisioningLog.value + "دانلود $remote ناموفق: ${e.message}").takeLast(400)
+                    },
+                )
+            }
+            provisioningActive.value = false
+            val confDir = confDir
+            if (fetched.isEmpty() || confDir == null) {
+                notice.value = "نصب انجام شد ولی فایل کلاینت دانلود نشد — مسیر سرور را بررسی کنید."
+                return@launch
+            }
+            val saved = mutableListOf<Pair<String, String>>() // (fileName, absPath)
+            for ((fileName, bytes) in fetched) {
+                val out = File(confDir.apply { mkdirs() }, "${server.id}-$fileName")
+                runCatching { out.writeBytes(bytes) }
+                    .onSuccess { saved += fileName to out.absolutePath }
+                    .onFailure { e ->
+                        notice.value = "ذخیرهٔ $fileName ناموفق: ${e.message}"
+                    }
+            }
+            val serverSource = "server:${server.id}"
+            val ovpn = saved.firstOrNull { it.first == "client.ovpn" }
+            val p12 = saved.firstOrNull { it.first == "client.p12" }
+            val ca = saved.firstOrNull { it.first == "ca.crt" }
+            if (ovpn != null) {
+                configs.value = configs.value + VpnConfig(
+                    id = UUID.randomUUID().toString(),
+                    name = server.name.ifBlank { server.ip },
+                    serverIp = server.ip,
+                    protocol = "openvpn",
+                    ovpnPath = ovpn.second,
+                    category = "my_servers",
+                    serverId = server.id,
+                    source = serverSource,
+                )
+            } else if (p12 != null) {
+                configs.value = configs.value + VpnConfig(
+                    id = UUID.randomUUID().toString(),
+                    name = server.name.ifBlank { server.ip },
+                    serverIp = server.ip,
+                    protocol = "ikev2",
+                    authType = "certificate",
+                    caPath = ca?.second,
+                    p12Path = p12.second,
+                    p12Pass = p12Pass,
+                    category = "my_servers",
+                    serverId = server.id,
+                    source = serverSource,
+                )
+            }
+            persist()
+            servers.value = servers.value.map {
+                if (it.id == server.id) it.copy(isReady = true) else it
+            }
+            persistServers()
+            notice.value = when {
+                ovpn != null -> "OpenVPN نصب شد؛ کانفیگ آمادهٔ اتصال است."
+                p12 != null -> "IKEv2 نصب شد؛ فایل client.p12 ذخیره شد. ورود گواهی به استور سیستم اندروید از دیالوگ خود دستگاه انجام می‌شود."
+                else -> "نصب انجام شد ولی هیچ فایلی ذخیره نشد."
+            }
+            provisioningLog.value = (provisioningLog.value + "— پایان —").takeLast(400)
         }
     }
 
