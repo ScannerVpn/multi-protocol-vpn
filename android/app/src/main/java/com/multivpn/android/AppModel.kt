@@ -71,6 +71,9 @@ object AppModel {
         }
     }
 
+    /** The folder tab currently selected in the configs screen (null = همه). */
+    var selectedFolder = MutableStateFlow<String?>(null)
+
     /** Display name for a server-batch folder; falls back to the server IP. */
     fun serverNameFor(serverId: String, items: List<VpnConfig>): String =
         servers.value.firstOrNull { it.id == serverId }?.name
@@ -706,7 +709,31 @@ object AppModel {
     // ------------------------------------------------------------------
 
     /** Measures every testable config, persisting each number as it lands. */
-    fun pingAll() {
+    /** Measures every testable visible config (all folders). */
+    fun pingAll() = pingList(visibleConfigs())
+
+    /** Ping-measure every visible config in [sourceFilter] (null = all). */
+    fun pingScope(sourceFilter: String?) {
+        val scoped = visibleConfigs().filter { configInFolder(it, sourceFilter) }
+        if (scoped.isEmpty()) {
+            notice.value = "در این پوشه کانفیگی برای تست نیست."
+            return
+        }
+        pingList(scoped)
+    }
+
+    /** Force-refresh every subscription (used by the پوشه header button). */
+    fun refreshAllSubscriptions(subs: List<Subscription>) {
+        if (subs.isEmpty()) {
+            notice.value = "اشتراکی برای بروزرسانی نیست."
+            return
+        }
+        subs.forEach { refreshSubscription(it) }
+        notice.value = "بروزرسانی ${subs.size} اشتراک شروع شد."
+    }
+
+    /** Measures every testable config in [list], persisting each number. */
+    fun pingList(list: List<VpnConfig>) {
         if (connectionJob?.isActive == true) {
             notice.value = "پس از پایان عملیات اتصال، تست را شروع کنید."
             return
@@ -719,7 +746,7 @@ object AppModel {
                 return@launch
             }
             pinger.pingAll(
-                configs = visibleConfigs(),
+                configs = list,
                 onMeasured = { id, ms ->
                     pingCache?.put(id, ms)
                     cachedLatency.value = pingCache?.all() ?: emptyMap()
@@ -1056,8 +1083,24 @@ object AppModel {
     }.getOrNull()
 
     // ------------------------------------------------------------------
-    // Backup / restore
+    // Config folders (user request 2026-09-14): subscription / server / manual
     // ------------------------------------------------------------------
+
+    /** Folder key for manual + imported (non-sub, non-server) configs. */
+    const val SOURCE_MANUAL = "manual"
+
+    /**
+     * True when [config] belongs to [folderKey] — the same keys the
+     * folder headers in ConfigsScreen use.
+     */
+    fun configInFolder(config: VpnConfig, folderKey: String?): Boolean = when (folderKey) {
+        null -> true
+        // The folder header key for paste/file-imported configs is
+        // SOURCE_MANUAL, while those configs carry source == null. Accept
+        // both so the «دستی» tab filters the same rows it shows.
+        SOURCE_MANUAL -> config.source == null || config.source == SOURCE_MANUAL
+        else -> config.source == folderKey
+    }
 
     fun exportBackup(out: OutputStream, passphrase: CharArray) {
         val s = store ?: return

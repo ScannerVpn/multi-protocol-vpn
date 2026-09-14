@@ -4,6 +4,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -97,7 +99,9 @@ fun ConfigsScreen() {
         }
     }
 
+    val selectedFolder by AppModel.selectedFolder.collectAsState()
     val visible = AppModel.visibleConfigs(configs, search, settings.sortByLatency)
+        .filter { AppModel.configInFolder(it, selectedFolder) }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Spacer(Modifier.height(12.dp))
@@ -196,6 +200,64 @@ fun ConfigsScreen() {
         }
 
         Spacer(Modifier.height(10.dp))
+
+        // FOLDER TABS (user request 2026-09-14, side-by-side): one chip per
+        // folder — «همه», each provisioned server, each subscription, and
+        // «دستی». Selecting a tab scopes the list AND its ping/update
+        // actions to that folder only.
+        val groups0 = groupConfigs(visible, subs)
+        if (groups0.size > 1 || (groups0.size == 1 && groups0[0].key != "manual" && groups0[0].key != "other")) {
+            var chipRow by remember { mutableStateOf(AppModel.selectedFolder.value) }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+            ) {
+                FolderChip("همه", AppModel.selectedFolder.value == null) {
+                    AppModel.selectedFolder.value = null; chipRow = null
+                }
+                groups0.forEach { g ->
+                    FolderChip(g.title, AppModel.selectedFolder.value == g.key) {
+                        AppModel.selectedFolder.value = g.key; chipRow = g.key
+                    }
+                }
+            }
+
+            // Folder actions row: پینگ این پوشه + بروزرسانی ساب‌های همین پوشه
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    onClick = { if (pingActive) AppModel.cancelPing() else AppModel.pingScope(chipRow) },
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text(
+                        Pinger.buttonLabel(pingActive, progress.first, progress.second),
+                        fontSize = 11.5.sp,
+                        color = if (pingActive) Palette.Warn else Palette.TextPrimary,
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                val folderSubs = subs.filter { sub ->
+                    chipRow == "subscription:${sub.id}"
+                }
+                if (folderSubs.isNotEmpty() || chipRow == null && subs.isNotEmpty()) {
+                    OutlinedButton(
+                        onClick = {
+                            if (chipRow == null) AppModel.refreshAllSubscriptions(subs)
+                            else folderSubs.forEach { AppModel.refreshSubscription(it) }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Filled.Refresh, null, Modifier.size(14.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text("بروزرسانی ساب", fontSize = 11.5.sp)
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
 
         if (visible.isEmpty()) {
             Spacer(Modifier.height(30.dp))
@@ -420,6 +482,21 @@ private fun displayName(context: android.content.Context, uri: android.net.Uri):
 
 /** One collapsible folder of the configs list. */
 data class ConfigGroup(val key: String, val title: String, val items: List<VpnConfig>)
+
+/** The side-by-side folder tab chip. */
+@Composable
+fun FolderChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        label,
+        fontSize = 11.5.sp,
+        color = if (selected) Palette.Surface else Palette.TextSecondary,
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(if (selected) Palette.Cyan else Palette.Glass)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+    )
+}
 
 /** Suffix after the server name in auto-imported config names (e.g. "all", "at5571b66p"). */
 private val SERVER_BATCH_SUFFIX = Regex("^[a-z0-9._-]{1,24}$")
