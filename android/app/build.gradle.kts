@@ -17,7 +17,8 @@ android {
         applicationId = "com.multivpn.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
+        versionCode = 6
+        versionName = "0.4.1"
         // THE single source of truth for the Android version. The desktop app
         // keeps its own appVersion in desktop/build.gradle.kts — the two
         // release on different cadences.
