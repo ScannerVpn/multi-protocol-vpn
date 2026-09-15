@@ -248,6 +248,15 @@ class BoxConfigSchemaTest {
     }
 
     @Test
+    fun `verification route uses supported sing-box 1_13 rule fields`() {
+        val rules = render()["route"]!!.jsonObject["rules"]!!.jsonArray.map { it.jsonObject }
+        assertTrue(
+            "sing-box 1.13 removed per-rule domain_resolver",
+            rules.none { it.containsKey("domain_resolver") },
+        )
+    }
+
+    @Test
     fun `proxy hostnames bootstrap through local DNS rather than recursively through the proxy`() {
         assertEquals("local", render()["route"]!!.jsonObject["default_domain_resolver"]!!.jsonPrimitive.content)
     }
