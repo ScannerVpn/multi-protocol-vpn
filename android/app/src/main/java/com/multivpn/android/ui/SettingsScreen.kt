@@ -288,13 +288,14 @@ fun SettingsScreen() {
 }
 
 /**
- * The split-tunnel app picker.
+ * The split-tunnel app picker — shared by the advanced settings screen and the
+ * روتینگ tab, so both offer the same list from the same source.
  *
  * Only apps that hold INTERNET are listed (see [AppList]) — offering an app
  * that cannot use the network would be a checkbox with no effect.
  */
 @Composable
-private fun AppPickerDialog(
+fun AppPickerDialog(
     selected: Set<String>,
     onDismiss: () -> Unit,
     onConfirm: (Set<String>) -> Unit,

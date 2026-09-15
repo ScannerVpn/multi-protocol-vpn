@@ -13,8 +13,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -29,9 +35,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import vpn.core.ConfigSort
@@ -286,4 +294,301 @@ fun ConfirmDialog(
         text = { Text(body, color = Palette.TextSecondary, fontSize = 12.sp) },
         containerColor = Palette.Surface,
     )
+}
+
+/**
+ * The «افزودن کانفیگ» chooser — the mockup's add sheet, reduced to the three
+ * import paths that actually exist on Android: a share link, a subscription
+ * URL, or a tunnel file from storage. An [AlertDialog] rather than a Material
+ * bottom sheet on purpose: the module ships no `ModalBottomSheet` usage and
+ * this dialog matches the app's existing chooser ([ChoiceDialog]).
+ */
+@Composable
+fun AddConfigSheet(
+    onDismiss: () -> Unit,
+    onLink: () -> Unit,
+    onSubscription: () -> Unit,
+    onFile: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("انصراف", color = Palette.TextSecondary) }
+        },
+        title = { Text("افزودن کانفیگ", color = Palette.TextPrimary, fontSize = 15.sp) },
+        text = {
+            Column {
+                AddConfigOption(
+                    icon = Icons.Filled.Link,
+                    title = "از لینک",
+                    subtitle = "vless:// · trojan:// · ss:// · hy2:// — هر خط یک لینک",
+                    tint = Palette.Accent,
+                    onClick = onLink,
+                )
+                AddConfigOption(
+                    icon = Icons.Filled.Cloud,
+                    title = "از اشتراک",
+                    subtitle = "آدرس ساب (http/https)؛ همهٔ کانفیگ‌هایش اضافه می‌شوند",
+                    tint = Palette.Accent2,
+                    onClick = onSubscription,
+                )
+                AddConfigOption(
+                    icon = Icons.Filled.Folder,
+                    title = "از فایل",
+                    subtitle = ".conf / .ovpn / .json از حافظهٔ دستگاه",
+                    tint = Palette.Mint,
+                    onClick = onFile,
+                )
+            }
+        },
+        containerColor = Palette.Surface,
+    )
+}
+
+/** One tappable row of [AddConfigSheet]. */
+@Composable
+private fun AddConfigOption(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    tint: Color,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable { onClick(); }
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconTile(icon, tint, size = 34.dp, iconSize = 17.dp)
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = Palette.TextPrimary, fontSize = 13.sp)
+            Text(subtitle, color = Palette.TextFaint, fontSize = 10.sp)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Cyber-teal building blocks shared by the four tabs
+// (mockup round 2026-09-15 — اتصال / سرورها / تست سرعت / روتینگ)
+// ---------------------------------------------------------------------------
+
+/**
+ * A rounded icon tile: the leading visual of a card. The tint drives both the
+ * glyph and a low-alpha plate of the same hue, so a card's meaning (cyan =
+ * action, mint = safe, red = risk) is readable at a glance instead of being
+ * carried by a word.
+ */
+@Composable
+fun IconTile(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tint: Color,
+    size: Dp = 38.dp,
+    iconSize: Dp = 20.dp,
+    contentDescription: String? = null,
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(size)
+            .background(tint.copy(alpha = 0.14f), RoundedCornerShape(11.dp)),
+    ) {
+        Icon(icon, contentDescription, tint = tint, modifier = Modifier.size(iconSize))
+    }
+}
+
+/**
+ * A titled section card — the mockup's section pattern (icon + title + a mono
+ * badge, then the rows). Used by روتینگ / تست سرعت so their sections cannot
+ * drift apart visually.
+ */
+@Composable
+fun SectionCard(
+    title: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    tint: Color = Palette.Accent,
+    badge: String? = null,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(Palette.Glass, RoundedCornerShape(14.dp))
+            .border(1.dp, Palette.Border, RoundedCornerShape(14.dp))
+            .padding(14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (icon != null) {
+                Icon(icon, null, tint = tint, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(
+                title,
+                color = Palette.TextPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
+            badge?.let {
+                Text(
+                    it,
+                    color = Palette.TextFaint,
+                    fontSize = 9.5.sp,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    modifier = Modifier
+                        .background(Palette.SurfaceLow, RoundedCornerShape(6.dp))
+                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        content()
+    }
+}
+
+/**
+ * A selector/filter chip. [count] is the number of items behind it — only ever
+ * a real count (see [Telemetry.protocolFilters] on the server list).
+ */
+@Composable
+fun Chip(
+    label: String,
+    selected: Boolean,
+    count: Int? = null,
+    leadingIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    tint: Color = Palette.Cyan,
+    onClick: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(if (selected) tint else Palette.Glass)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+    ) {
+        if (leadingIcon != null) {
+            Icon(
+                leadingIcon,
+                null,
+                tint = if (selected) Palette.Surface else Palette.TextSecondary,
+                modifier = Modifier.size(13.dp),
+            )
+            Spacer(Modifier.width(5.dp))
+        }
+        Text(
+            label,
+            fontSize = 11.5.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (selected) Palette.Surface else Palette.TextSecondary,
+        )
+        if (count != null) {
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "$count",
+                fontSize = 9.5.sp,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                color = if (selected) Palette.Surface else Palette.TextFaint,
+                modifier = Modifier
+                    .background(
+                        if (selected) Palette.Surface.copy(alpha = 0.25f) else Palette.GlassStrong,
+                        RoundedCornerShape(8.dp),
+                    )
+                    .padding(horizontal = 5.dp, vertical = 1.dp),
+            )
+        }
+    }
+}
+
+/**
+ * One small telemetry box (icon, value + unit, caption). The value arrives
+ * ALREADY formatted by the screen from a real measurement — this box never
+ * invents, estimates or rounds a number of its own.
+ */
+@Composable
+fun TelemetryBox(
+    label: String,
+    value: String,
+    unit: String? = null,
+    valueColor: Color = Palette.TextPrimary,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    iconTint: Color = valueColor,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Palette.SurfaceLow, RoundedCornerShape(12.dp))
+            .padding(vertical = 9.dp, horizontal = 6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (icon != null) {
+                Icon(icon, null, tint = iconTint, modifier = Modifier.size(13.dp))
+                Spacer(Modifier.width(3.dp))
+            }
+            Text(
+                value,
+                color = valueColor,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+            )
+            unit?.let {
+                Spacer(Modifier.width(2.dp))
+                Text(it, color = Palette.TextFaint, fontSize = 9.sp)
+            }
+        }
+        Text(label, color = Palette.TextFaint, fontSize = 9.5.sp, maxLines = 1)
+    }
+}
+
+/** A status pill: dot + text in a tinted capsule. */
+@Composable
+fun StatusPill(text: String, color: Color, filled: Boolean = false) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .background(
+                if (filled) color else color.copy(alpha = 0.14f),
+                RoundedCornerShape(999.dp),
+            )
+            .padding(horizontal = 9.dp, vertical = 4.dp),
+    ) {
+        Box(
+            Modifier
+                .size(5.dp)
+                .background(if (filled) Palette.Surface else color, CircleShape),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text,
+            color = if (filled) Palette.Surface else color,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+/**
+ * A label/value fact row: statements about what the app really does (route
+ * rules, transports, addresses). The value is a description or a measured
+ * value — never a decorative gauge.
+ */
+@Composable
+fun FactRow(title: String, value: String, valueColor: Color = Palette.TextSecondary) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 5.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(title, color = Palette.TextPrimary, fontSize = 11.5.sp, modifier = Modifier.weight(1f))
+        Text(
+            value,
+            color = valueColor,
+            fontSize = 10.5.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            modifier = Modifier.weight(1.2f),
+        )
+    }
 }

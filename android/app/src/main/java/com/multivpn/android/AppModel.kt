@@ -704,6 +704,73 @@ object AppModel {
         }
     }
 
+    /**
+     * The fastest server the app has actually MEASURED, using the SAME ordering
+     * the configs list shows ([ConfigSort]: warm → fresh → cached → stale →
+     * never-measured → failed).
+     *
+     * A never-measured config is deliberately NOT a candidate: calling one of
+     * them "the fastest" would be a guess dressed up as a measurement, which is
+     * the one thing this project does not do. When nothing has been measured the
+     * caller says so and points at the speed tab.
+     */
+    fun fastestMeasured(): VpnConfig? {
+        val failedNow = pinger.failed.value
+        val freshNow = pinger.results.value
+        val cachedNow = cachedLatency.value
+        return ConfigSort.byLatency(
+            list = configs.value,
+            fresh = freshNow,
+            cached = cachedNow,
+            failed = failedNow,
+        ).firstOrNull { it.id !in failedNow && (freshNow.containsKey(it.id) || cachedNow.containsKey(it.id)) }
+    }
+
+    /**
+     * The header's ⚡ action: connect to the fastest measured server, or switch
+     * the live tunnel to it (a `selectOutbound`, no reconnect — [setActive]).
+     */
+    fun connectFastest() {
+        val best = fastestMeasured()
+        if (best == null) {
+            notice.value = "هنوز هیچ سروری اندازه‌گیری نشده است؛ از تب «تست سرعت» پینگ همه را بگیر."
+            return
+        }
+        if (best.id != activeConfigId.value) setActive(best.id)
+        when (EngineBridge.status.value.status) {
+            EngineStatus.DISCONNECTED -> connectActive()
+            EngineStatus.CONNECTED -> notice.value = "به سریع‌ترین سرور سنجیده‌شده سوییچ شد: ${best.name}"
+            else -> Unit // busy: the state machine owns the transition.
+        }
+    }
+
+    /**
+     * Re-dials so a change that is BAKED INTO the rendered config (DNS resolver,
+     * leak protection, split lists) actually takes effect — the routing screen's
+     * «اعمال» button. Disconnect completes asynchronously, so this waits for the
+     * state machine to settle instead of racing it into a lost connect.
+     */
+    fun reapplyTunnel() {
+        if (EngineBridge.status.value.status != EngineStatus.CONNECTED) {
+            connectActive()
+            return
+        }
+        scope.launch {
+            disconnectActive()
+            val deadline = System.currentTimeMillis() + 15_000
+            while (EngineBridge.status.value.status != EngineStatus.DISCONNECTED &&
+                System.currentTimeMillis() < deadline
+            ) {
+                delay(100)
+            }
+            if (EngineBridge.status.value.status == EngineStatus.DISCONNECTED) {
+                connectActive()
+            } else {
+                notice.value = "تونل در زمان مورد انتظار قطع نشد؛ یک بار دستی قطع و وصل کن."
+            }
+        }
+    }
+
     // ------------------------------------------------------------------
     // Ping
     // ------------------------------------------------------------------
@@ -1166,17 +1233,7 @@ object AppModel {
             ?.groupValues?.get(1)?.substringBeforeLast(":")
             ?: Regex("(?im)^\\s*remote\\s+(\\S+)").find(confText)?.groupValues?.get(1)
 
-    fun labelOf(protocol: String): String = when (protocol) {
-        "hysteria2" -> "Hysteria2"
-        "vless" -> "VLESS"
-        "trojan" -> "Trojan"
-        "shadowsocks" -> "SS-2022"
-        "wireguard" -> "WireGuard"
-        "amnezia" -> "AmneziaWG"
-        "ikev2" -> "IKEv2"
-        "openvpn" -> "OpenVPN"
-        else -> protocol
-    }
+    fun labelOf(protocol: String): String = com.multivpn.android.ui.Telemetry.protocolLabel(protocol)
 
     /**
      * The connect path for [config]: "openvpn" (the native core), "libbox"

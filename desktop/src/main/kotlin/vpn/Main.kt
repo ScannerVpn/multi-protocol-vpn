@@ -47,6 +47,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -334,44 +335,99 @@ fun App() {
 }
 
 /**
- * Compact-mode navigation. A bottom bar rather than a hamburger drawer: four
- * destinations is exactly the range a bar handles well, and it keeps every tab
- * one tap away instead of two.
+ * Compact-mode navigation, restyled to the user's mockup (2026-09-15) so the
+ * desktop and Android bars are the same object:
+ *
+ *  - `bg-surface-container-lowest/85 backdrop-blur-xl` → a near-opaque
+ *    [C.BgBottom] sheet that keeps the aurora faintly visible behind it;
+ *  - `shadow-[0_-4px_24px_rgba(0,0,0,0.5)]` → a top-edge elevation shadow that
+ *    lifts the bar off the scrolling content;
+ *  - `text-primary-container drop-shadow-[0_0_8px_rgba(0,240,255,0.45)]` → the
+ *    active item's cyan glow, drawn with a coloured [shadow] on its plate.
+ *
+ * A bar rather than a hamburger drawer: five destinations is exactly the range
+ * a bar handles well, and it keeps every tab one tap away instead of two.
  */
 @Composable
 private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
-    Surface(
-        color = C.BgMid,
-        border = BorderStroke(1.dp, C.Border),
-        modifier = Modifier.fillMaxWidth(),
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = 24.dp,
+                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                ambientColor = Color.Black,
+                spotColor = Color.Black,
+            )
+            .background(C.BgBottom.copy(alpha = 0.92f)),
     ) {
-        Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceAround,
+            modifier = Modifier.fillMaxWidth().height(60.dp),
+        ) {
             NAV_ITEMS.forEachIndexed { i, item ->
-                val isSelected = i == selected
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onSelect(i) }
-                        .padding(vertical = 7.dp),
-                ) {
-                    Icon(
-                        item.icon,
-                        item.label,
-                        tint = if (isSelected) C.Accent else C.TextSecondary,
-                        modifier = Modifier.size(19.dp),
-                    )
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        item.label,
-                        fontSize = 9.5.sp,
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                        color = if (isSelected) C.TextPrimary else C.TextSecondary,
-                    )
-                }
+                BottomNavItem(
+                    item = item,
+                    active = i == selected,
+                    onClick = { onSelect(i) },
+                )
             }
         }
+    }
+}
+
+/**
+ * One destination of the compact bar. The active state is a three-part signal —
+ * cyan tint, a low-alpha cyan plate, and a cyan glow — so it never depends on
+ * the label alone to read as "you are here".
+ */
+@Composable
+private fun BottomNavItem(item: NavItem, active: Boolean, onClick: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(32.dp)
+                .then(
+                    if (active) {
+                        Modifier.shadow(
+                            elevation = 10.dp,
+                            shape = RoundedCornerShape(11.dp),
+                            ambientColor = C.Accent,
+                            spotColor = C.Accent,
+                        )
+                    } else {
+                        Modifier
+                    },
+                )
+                .background(
+                    if (active) C.Accent.copy(alpha = 0.18f) else Color.Transparent,
+                    RoundedCornerShape(11.dp),
+                ),
+        ) {
+            Icon(
+                item.icon,
+                item.label,
+                tint = if (active) C.Accent else C.TextSecondary,
+                modifier = Modifier.size(19.dp),
+            )
+        }
+        Spacer(Modifier.height(3.dp))
+        Text(
+            item.label,
+            fontSize = 9.5.sp,
+            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+            color = if (active) C.Accent else C.TextSecondary,
+            maxLines = 1,
+        )
     }
 }
 
