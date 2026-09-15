@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  CyberShield brand mark — the mockup's SVG (hexagon shield + inner diamond +
+  secured node + the four connector lines) translated to a VectorDrawable.
+  The mockup's feGaussianBlur "glow" filter has no VectorDrawable equivalent,
+  so the glow is dropped (it is emitted at runtime by the header's own glow
+  background) and the geometry/colors are kept 1:1: cyan #00F0FF → blue
+  #3B82F6 gradient stroke, #0E1626 body, mint #65F2B5 node.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="44dp"
+    android:height="44dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+
+    <!-- Shield body: 50,10 → 85,25 → 85,60 → 50,90 → 15,60 → 15,25 -->
+    <path
+        android:pathData="M50,10 L85,25 L85,60 L50,90 L15,60 L15,25 Z">
+        <aapt:attr xmlns:aapt="http://schemas.android.com/aapt" name="android:fillColor">
+            <gradient
+                android:startX="0"
+                android:startY="0"
+                android:endX="100"
+                android:endY="100"
+                android:type="linear">
+                <item android:offset="0" android:color="#FF0E1626" />
+                <item android:offset="1" android:color="#FF13203A" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Hexagon outline in the brand gradient, the way the SVG strokes it. -->
+    <path
+        android:pathData="M50,10 L85,25 L85,60 L50,90 L15,60 L15,25 Z"
+        android:strokeWidth="4"
+        android:strokeLineJoin="round">
+        <aapt:attr xmlns:aapt="http://schemas.android.com/aapt" name="android:strokeColor">
+            <gradient
+                android:startX="0"
+                android:startY="0"
+                android:endX="100"
+                android:endY="100"
+                android:type="linear">
+                <item android:offset="0" android:color="#FF00F0FF" />
+                <item android:offset="1" android:color="#FF3B82F6" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Inner diamond: 50,25 → 68,45 → 50,72 → 32,45 -->
+    <path
+        android:pathData="M50,25 L68,45 L50,72 L32,45 Z"
+        android:strokeColor="#FF00F0FF"
+        android:strokeWidth="3"
+        android:strokeLineJoin="round" />
+
+    <!-- Secured node -->
+    <path android:pathData="M50,45 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" android:fillColor="#FF10B981" />
+
+    <!-- Connector lines -->
+    <path android:pathData="M50,25 L50,40" android:strokeColor="#FF00F0FF" android:strokeWidth="2.5" />
+    <path android:pathData="M32,45 L45,45" android:strokeColor="#FF00F0FF" android:strokeWidth="2.5" />
+    <path android:pathData="M68,45 L55,45" android:strokeColor="#FF00F0FF" android:strokeWidth="2.5" />
+    <path android:pathData="M50,50 L50,72" android:strokeColor="#FF00F0FF" android:strokeWidth="2.5" />
+</vector>

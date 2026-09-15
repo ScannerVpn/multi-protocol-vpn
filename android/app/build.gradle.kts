@@ -114,6 +114,10 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    // Material Symbols (shield_lock, speed, alt_route, bolt …) — the icon set
+    // the user's mockups are drawn with. R8 strips the unused ones from the
+    // release APK; only debug builds carry the whole set.
+    implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.core)
 

@@ -56,6 +56,14 @@ object BoxConfigBuilder {
     /** Tag of the selector every route ends at. */
     const val SELECTOR_TAG = "proxy"
 
+    /**
+     * The tunnel's own addresses. Declared here and used BOTH by [tunInbound]
+     * and by the routing screen's live-topology card, so the address the UI
+     * shows can never drift from the address the core assigns.
+     */
+    const val TUN_ADDRESS_V4 = "172.19.0.1/30"
+    const val TUN_ADDRESS_V6 = "fdfe:dcba:9876::1/126"
+
     /** Outbound tag for one config id — stable, so urlTest results map back. */
     fun tagOf(configId: String): String = "p-$configId"
 
@@ -249,7 +257,7 @@ object BoxConfigBuilder {
         sb.append("    {\n")
         sb.append("      \"type\": \"tun\",\n")
         sb.append("      \"tag\": \"tun-in\",\n")
-        sb.append("      \"address\": [\"172.19.0.1/30\", \"fdfe:dcba:9876::1/126\"],\n")
+        sb.append("      \"address\": [\"$TUN_ADDRESS_V4\", \"$TUN_ADDRESS_V6\"],\n")
         sb.append("      \"mtu\": 9000,\n")
         sb.append("      \"auto_route\": true,\n")
         sb.append("      \"strict_route\": true,\n")
