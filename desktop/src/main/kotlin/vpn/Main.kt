@@ -350,6 +350,10 @@ fun App() {
  */
 @Composable
 private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
+    // HUD is intentionally kept in the expanded sidebar, but it is too dense
+    // for the compact four-destination bar and was the extra tab in the phone-
+    // sized desktop layout.
+    val compactItems = NAV_ITEMS.withIndex().filter { it.index != 3 }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -363,14 +367,14 @@ private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceAround,
-            modifier = Modifier.fillMaxWidth().height(60.dp),
+            horizontalArrangement = Arrangement.Start,
+            modifier = Modifier.fillMaxWidth().height(76.dp),
         ) {
-            NAV_ITEMS.forEachIndexed { i, item ->
+            compactItems.forEach { entry ->
                 BottomNavItem(
-                    item = item,
-                    active = i == selected,
-                    onClick = { onSelect(i) },
+                    item = entry.value,
+                    active = entry.index == selected,
+                    onClick = { onSelect(entry.index) },
                 )
             }
         }
@@ -388,6 +392,7 @@ private fun BottomNavItem(item: NavItem, active: Boolean, onClick: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
         modifier = Modifier
+            .fillMaxWidth(0.25f)
             .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 6.dp),
@@ -423,9 +428,9 @@ private fun BottomNavItem(item: NavItem, active: Boolean, onClick: () -> Unit) {
         Spacer(Modifier.height(3.dp))
         Text(
             item.label,
-            fontSize = 9.5.sp,
+            fontSize = 11.sp,
             fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
-            color = if (active) C.Accent else C.TextSecondary,
+            color = if (active) C.Accent else C.TextPrimary,
             maxLines = 1,
         )
     }
