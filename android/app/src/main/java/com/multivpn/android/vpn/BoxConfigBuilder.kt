@@ -329,13 +329,9 @@ object BoxConfigBuilder {
      * rather than sent to a `dns` outbound that no longer exists.
      *
      * [verifyInbound] (connect-time verification only): the verify HTTP
-     * inbound's traffic gets a domain_resolver = `local` rule. Rationale —
-     * the remote/DoH resolver rides the very outbound being verified, so a
-     * cold start must complete BOTH handshakes (server + DoH) inside the
-     * probe's 3 s budget; on real mobile networks that loses the race every
-     * time ("پینگ میدهد ولی وصل نمیشد" — the probe core dials the same
-     * server fine because ITS dns.final is `local`). The device resolver is
-     * outside the tunnel, so the probe measures exactly the server.
+     * inbound is routed directly to the selector. Hostname resolution already
+     * uses the top-level default_domain_resolver, so no per-rule resolver
+     * override is emitted; sing-box 1.13 rejects that removed rule field.
      */
     private fun routeBlock(verifyInbound: Boolean = false): String {
         val sb = StringBuilder()
@@ -343,7 +339,6 @@ object BoxConfigBuilder {
         sb.append("    \"rules\": [\n")
         if (verifyInbound) {
             sb.append("      { \"inbound\": [\"verify-in\"], \"action\": \"sniff\" },\n")
-            sb.append("      { \"inbound\": [\"verify-in\"], \"domain_resolver\": \"local\" },\n")
         }
         sb.append("      { \"inbound\": [\"verify-in\"], \"outbound\": \"$SELECTOR_TAG\" },\n")
         sb.append("      { \"action\": \"sniff\" },\n")
