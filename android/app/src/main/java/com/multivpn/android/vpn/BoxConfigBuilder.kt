@@ -535,9 +535,14 @@ object BoxConfigBuilder {
     private fun transportBlock(l: ProxyLink): String = when (l.network) {
         "ws", "websocket" -> {
             val path = l.params["path"] ?: "/"
-            val host = l.params["host"] ?: ""
-            ",\n      \"transport\": { \"type\": \"ws\", \"path\": \"${j(path)}\", " +
-                "\"headers\": { \"Host\": \"${j(host)}\" } }"
+            val host = l.params["host"]?.trim().orEmpty()
+            // NO host param → no headers block at all. Emitting {"Host": ""}
+            // would send a literally empty Host header on the wire and break
+            // the WebSocket handshake; with no entry the core defaults the
+            // Host to the server address, which is the correct behavior.
+            ",\n      \"transport\": { \"type\": \"ws\", \"path\": \"${j(path)}\"" +
+                (if (host.isNotEmpty()) ", \"headers\": { \"Host\": \"${j(host)}\" }" else "") +
+                " }"
         }
         "grpc", "gun" -> {
             val svc = l.params["serviceName"] ?: ""
@@ -545,9 +550,10 @@ object BoxConfigBuilder {
         }
         "httpupgrade" -> {
             val path = l.params["path"] ?: "/"
-            val host = l.params["host"] ?: ""
-            ",\n      \"transport\": { \"type\": \"httpupgrade\", \"path\": \"${j(path)}\", " +
-                "\"host\": \"${j(host)}\" }"
+            val host = l.params["host"]?.trim().orEmpty()
+            ",\n      \"transport\": { \"type\": \"httpupgrade\", \"path\": \"${j(path)}\"" +
+                (if (host.isNotEmpty()) ", \"host\": \"${j(host)}\"" else "") +
+                " }"
         }
         "tcp", "raw", "" -> ""
         else -> throw IllegalArgumentException("Transport ${l.network} در هستهٔ اندروید این نسخه پشتیبانی نمی‌شود.")

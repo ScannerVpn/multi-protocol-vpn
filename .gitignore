@@ -60,3 +60,12 @@ desktop/src/main/resources/bin/
 # Banner drafts: intermediate renders stay local; the source HTML and the
 # final PNG are tracked.
 desktop/banners/drafts/*.png
+
+# Local debug/scratch artifacts — never commit (contain live server data)
+/mv-*.json
+/mv-*.txt
+/t1.txt
+/baseline-tests.txt
+/release-assets/
+/ui-preview.html
+/ui-themes-proposal.html

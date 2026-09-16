@@ -36,6 +36,10 @@ object OpenVpnEngine {
     var connection: OpenVPNConnection? = null
         private set
 
+    /** Identity token of the CURRENT session — its lambda may write status. */
+    @Volatile
+    private var activeToken: Any? = null
+
     /**
      * Starts the `.ovpn` transport. [context] must be the application
      * context — the service runs in the library's own `:openvpn` process.
@@ -54,7 +58,13 @@ object OpenVpnEngine {
             return
         }
         EngineBridge.setStatus(EngineStatus.CONNECTING)
+        val token = Any()
         val conn = OpenVPNConnection(context.applicationContext) { state ->
+            // A stopped or replaced session must not write status. The library
+            // keeps firing this lambda after conn.stop() — a DISCONNECTING can
+            // arrive after disconnect() already reported DISCONNECTED, which
+            // regressed the UI into a permanent "در حال قطع…".
+            if (activeToken !== token) return@OpenVPNConnection
             AppLog.i("OpenVPN", "state -> $state")
             when (state) {
                 ConnectionState.CONNECTED -> EngineBridge.setStatus(EngineStatus.CONNECTED)
@@ -63,10 +73,16 @@ object OpenVpnEngine {
                 ConnectionState.DISCONNECTING -> EngineBridge.setStatus(EngineStatus.DISCONNECTING)
                 ConnectionState.PERMISSION_NOT_GRANTED ->
                     EngineBridge.setFailed("دسترسی VPN برای OpenVPN داده نشد.")
-                ConnectionState.DISCONNECTED, ConnectionState.IDLE ->
+                ConnectionState.DISCONNECTED, ConnectionState.IDLE -> {
+                    // The core ended the session on its own: forget the
+                    // connection object too, or the next start() would be
+                    // refused with "تونل از قبل فعال است" while nothing runs.
+                    connection = null
                     EngineBridge.setStatus(EngineStatus.DISCONNECTED)
+                }
             }
         }
+        activeToken = token
         connection = conn
         conn.start(VpnConfiguration(config, emptySet(), null, null))
         AppLog.i("OpenVPN", "start requested (${ovpnText.length} chars of config)")
@@ -74,6 +90,9 @@ object OpenVpnEngine {
 
     /** Stops the OpenVPN transport if one is up. Safe to call repeatedly. */
     fun stop() {
+        // Retire the token BEFORE stopping so late callbacks are ignored from
+        // this point on (disconnect() owns the DISCONNECTED transition).
+        activeToken = null
         connection?.let { conn ->
             runCatching { conn.stop() }
             AppLog.i("OpenVPN", "stop requested")

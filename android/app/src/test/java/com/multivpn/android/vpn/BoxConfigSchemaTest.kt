@@ -391,6 +391,29 @@ class BoxConfigSchemaTest {
     }
 
     @Test
+    fun `websocket transport without a host param sends no empty Host header`() {
+        // An emitted {"Host": ""} would put a literally empty Host header on
+        // the wire and break the handshake; the core must pick the default.
+        val root = render(
+            "vless://5c8d12e3-e55e-4428-ae49-00a4c2e271e3@1.2.3.4:443" +
+                "?security=tls&type=ws&path=%2Fabc#W",
+        )
+        val tr = outbounds(root).first { it["type"]!!.jsonPrimitive.content == "vless" }["transport"]!!.jsonObject
+        assertEquals("ws", tr["type"]!!.jsonPrimitive.content)
+        assertNull("no headers block may be emitted without a host param", tr["headers"])
+    }
+
+    @Test
+    fun `httpupgrade transport without a host param sends no empty host`() {
+        val root = render(
+            "trojan://secret@1.2.3.4:443?security=tls&type=httpupgrade&path=%2Fh#H",
+        )
+        val tr = outbounds(root).first { it["type"]!!.jsonPrimitive.content == "trojan" }["transport"]!!.jsonObject
+        assertEquals("httpupgrade", tr["type"]!!.jsonPrimitive.content)
+        assertNull(tr["host"])
+    }
+
+    @Test
     fun `hysteria2 renders password, obfs and the h3 alpn`() {
         val cfg = VpnConfig(
             id = "h", name = "h", serverIp = "1.2.3.4", protocol = "hysteria2",
