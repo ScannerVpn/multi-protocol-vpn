@@ -29,18 +29,26 @@ object PingCache {
     @Volatile
     private var entries: MutableMap<String, Entry>? = null
 
+    // P3-16 fix: the map + persist used to be touched with no lock at all —
+    // safe only by the accident that every current caller resumes on the
+    // Main dispatcher. A lock costs nothing and makes the contract real.
+    private val lock = Any()
+
     private fun load(): MutableMap<String, Entry> {
         entries?.let { return it }
-        val map = runCatching {
-            if (file.exists()) {
-                Storage.json.decodeFromString(serializer, file.readText())
-            } else {
-                emptyMap()
-            }
-        }.getOrDefault(emptyMap())
-        val mutable = map.toMutableMap()
-        entries = mutable
-        return mutable
+        synchronized(lock) {
+            entries?.let { return it }
+            val map = runCatching {
+                if (file.exists()) {
+                    Storage.json.decodeFromString(serializer, file.readText())
+                } else {
+                    emptyMap()
+                }
+            }.getOrDefault(emptyMap())
+            val mutable = map.toMutableMap()
+            entries = mutable
+            return mutable
+        }
     }
 
     /** @return the cached value for [configId], or null when there is none. */
@@ -53,22 +61,28 @@ object PingCache {
     /** Records a fresh measurement (also invoked with stale-cleaned maps). */
     fun put(configId: String, ms: Int) {
         val map = load()
-        map[configId] = Entry(ms, System.currentTimeMillis())
-        persist(map)
+        synchronized(lock) {
+            map[configId] = Entry(ms, System.currentTimeMillis())
+            persist(map)
+        }
     }
 
     /** Removes entries for config ids that no longer exist. */
     fun retainAll(ids: Set<String>) {
         val map = load()
-        val before = map.size
-        map.keys.retainAll(ids)
-        if (map.size != before) persist(map)
+        synchronized(lock) {
+            val before = map.size
+            map.keys.retainAll(ids)
+            if (map.size != before) persist(map)
+        }
     }
 
     /** Drops one config's cached number (deleted config, failed re-test). */
     fun remove(configId: String) {
         val map = load()
-        if (map.remove(configId) != null) persist(map)
+        synchronized(lock) {
+            if (map.remove(configId) != null) persist(map)
+        }
     }
 
     private fun persist(map: Map<String, Entry>) {

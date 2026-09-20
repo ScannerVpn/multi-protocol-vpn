@@ -39,9 +39,28 @@ object Links {
         }
         if (proto == "shadowsocks") return parseShadowsocks(link)
 
-        val uri = URI(link)
+        // P3-7 fix: java.net.URI throws on raw spaces / non-ASCII in the
+        // fragment ("#My Server" — common in third-party subscriptions),
+        // killing the whole link. Normalize the fragment to a strictly
+        // percent-encoded form first: decode what is already escaped, then
+        // re-encode everything — so both "My Server" and "My%20Server"
+        // parse, and the decoded name comes back identical.
+        val hash = link.indexOf('#')
+        val uriLink = if (hash >= 0) {
+            link.substring(0, hash) + "#" + enc(pct(link.substring(hash + 1)))
+        } else link
+        val uri = URI(uriLink)
         val params = queryParams(uri.rawQuery)
-        val port = uri.port.takeIf { it > 0 && it <= 65535 } ?: return null
+        // P3-3 fix: a portless hysteria2 link ("hysteria2://pass@host?...")
+        // used to be rejected outright — URI.port is -1 when absent. 443 is
+        // the de-facto default for hy2 specifically (every hy2 client
+        // assumes it); vless/trojan stay STRICT (a portless trojan is a
+        // damaged row — LatencyRoutingTest pins that contract).
+        val port = when {
+            uri.port > 0 && uri.port <= 65535 -> uri.port
+            uri.port < 0 && proto == "hysteria2" -> 443
+            else -> return null
+        }
         ProxyLink(
             protocol = proto,
             // java.net.URI keeps IPv6 literals bracketed — normalize here so
@@ -67,6 +86,10 @@ object Links {
         // produce a saved-but-broken config instead of a clean null.
         val body = link.replaceFirst(Regex("(?i)^ss://"), "")
         val name = pct(body.substringAfter('#', ""))
+        // P3-5 fix: the transport/plugin query used to be thrown away with
+        // substringBefore('?') — keep it so type=ws & friends survive into
+        // the generated config.
+        val queryPart = body.substringBefore('#').substringAfter('?', "")
         val core = body.substringBefore('#').substringBefore('?')
 
         // Standard format (ss://base64(method:pass)@host:port): the first '@'
@@ -99,12 +122,22 @@ object Links {
         // host:port pair through splitHostPort, which understands brackets.
         val (address, port) = splitHostPort(hostPort) ?: return null
 
+        // Transport params (type=ws&path=…&host=…) reach the cores through
+        // the same params map vless/trojan use. Plugin parameters (obfs) are
+        // not supported by xray's shadowsocks outbound — log their presence
+        // instead of failing silently later.
+        val params = queryParams(queryPart.ifBlank { null })
+        params["plugin"]?.let {
+            AppLog.i("Links", "ss:// plugin parameter ignored (not supported): $it")
+        }
+
         ProxyLink(
             protocol = "shadowsocks",
             address = address,
             port = port,
             secret = secret,
             method = method,
+            params = params,
             name = name,
         )
     }.getOrNull()
@@ -189,6 +222,7 @@ object Links {
             "amnezia" -> Awg.label(awgVersion)
             "openvpn" -> "OpenVPN"
             "ikev2" -> "IKEv2"
+            "aether" -> "Aether"
             else -> protocol.uppercase()
         }
         return base
@@ -201,7 +235,11 @@ object Links {
             .filter { it.contains('=') }
             .associate {
                 val i = it.indexOf('=')
-                dec(it.substring(0, i)) to dec(it.substring(i + 1))
+                // P3-4 fix: URLDecoder turned every '+' into a space — a kcp
+                // "seed=ab+cd/==" or any base64-ish value corrupted on parse
+                // (handshake failed with no hint). Query strings are not
+                // form data; use the percent-only decoder here too.
+                pct(it.substring(0, i)) to pct(it.substring(i + 1))
             }
 
     private fun query(params: Map<String, String>): String =
@@ -209,6 +247,8 @@ object Links {
             .filter { it.value.isNotEmpty() }
             .joinToString("&") { "${enc(it.key)}=${enc(it.value)}" }
 
+    /** Legacy form-decoder, kept ONLY for the legacy ss:// credential
+     * fallback where the "base64" was actually URL-encoded text. */
     private fun dec(s: String) = runCatching { URLDecoder.decode(s, Charsets.UTF_8.name()) }.getOrDefault(s)
 
     /**

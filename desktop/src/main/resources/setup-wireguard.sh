@@ -41,7 +41,10 @@ esac
 # Randomized per-install values: no two servers share the same signature.
 # H1..H4 get disjoint "min-max" ranges (amneziawg-go picks one value from
 # the range per packet; truncating the range silently breaks the handshake).
-rand30() { echo $(( (RANDOM * 32768 + RANDOM) % 400000000 )); }
+# P3-23: bash $RANDOM is PID/time-seeded — not cryptographic. The AWG
+# obfuscation parameters are not key material, but predictability across
+# installs weakens them needlessly; /dev/urandom costs nothing.
+rand30() { echo $(( $(od -An -N4 -tu4 /dev/urandom | tr -d ' ') % 400000000 )); }
 header_range() { # header_range <index 1..4>
     local lo span
     lo=$(( $(rand30) + $1 * 400000000 ))

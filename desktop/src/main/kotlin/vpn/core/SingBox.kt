@@ -95,15 +95,23 @@ object SingBox {
         val url = latestCoreUrl() ?: return null
         AppLog.i("SingBox", "Downloading ${url.substringAfterLast('/')}")
         val tmp = File.createTempFile("multivpn_core_", ".tar.gz")
-        runCatching {
-            val req = HttpRequest.newBuilder(URI.create(url))
-                .timeout(Duration.ofSeconds(600)).GET().build()
-            val resp = httpClient.send(req, HttpResponse.BodyHandlers.ofFile(tmp.toPath()))
-            if (resp.statusCode() !in 200..299 || tmp.length() < 1_000_000) return null
-            extractTarGz(tmp, dir)
-        }.onFailure { AppLog.e("SingBox", "core download failed: ${it.message}") }
-        tmp.delete()
-        return exe()
+        try {
+            runCatching {
+                val req = HttpRequest.newBuilder(URI.create(url))
+                    .timeout(Duration.ofSeconds(600)).GET().build()
+                val resp = httpClient.send(req, HttpResponse.BodyHandlers.ofFile(tmp.toPath()))
+                // P3-1 fix: the non-local return inside runCatching skipped
+                // tmp.delete() — the partial archive leaked into %TEMP%.
+                if (resp.statusCode() !in 200..299 || tmp.length() < 1_000_000) {
+                    AppLog.e("SingBox", "core download failed: HTTP ${resp.statusCode()}")
+                    return null
+                }
+                extractTarGz(tmp, dir)
+            }.onFailure { AppLog.e("SingBox", "core download failed: ${it.message}") }
+            return exe()
+        } finally {
+            runCatching { tmp.delete() }
+        }
     }
 
     /**
@@ -228,8 +236,19 @@ object SingBox {
     // Config building
     // ------------------------------------------------------------------
 
-    private fun q(s: String?) =
-        "\"" + (s ?: "").replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+    private fun q(s: String?): String {
+        val t = (s ?: "")
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            // P3-6 fix: control characters from encoded link secrets must not
+            // reach the JSON as raw bytes — sing-box refuses such configs.
+            .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+        val sb = StringBuilder("\"")
+        for (c in t) {
+            if (c < ' ') sb.append("\\u%04x".format(c.code)) else sb.append(c)
+        }
+        return sb.append('"').toString()
+    }
 
     /**
      * Normalizes a picker/list entry into the image name sing-box actually
@@ -596,27 +615,27 @@ $route
             // § placeholder for $, replaced at the end (same trick as VpnService).
             scriptFile.writeText(
                 """
-                §ErrorActionPreference = "Continue"
-                §ResultFile = "${resultFile.absolutePath.replace("`", "``").replace("$", "`$")}"
-                §isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-                if (-not §isAdmin) {
+                ${VpnScripts.PS}ErrorActionPreference = "Continue"
+                ${VpnScripts.PS}ResultFile = "${resultFile.absolutePath.replace("`", "``").replace("$", "`$")}"
+                ${VpnScripts.PS}isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+                if (-not ${VpnScripts.PS}isAdmin) {
                     try {
-                        §script = §MyInvocation.MyCommand.Path
-                        Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"§script`"" -Wait
+                        ${VpnScripts.PS}script = ${VpnScripts.PS}MyInvocation.MyCommand.Path
+                        Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"${VpnScripts.PS}script`"" -Wait
                     } catch {
-                        "DECLINED" | Out-File -FilePath §ResultFile -Encoding utf8
+                        "DECLINED" | Out-File -FilePath ${VpnScripts.PS}ResultFile -Encoding utf8
                     }
                     exit 0
                 }
                 try {
-                    taskkill /IM "${core.name}" /F 2>§null | Out-Null
+                    taskkill /IM "${core.name}" /F 2>${VpnScripts.PS}null | Out-Null
                     Start-Process "${core.absolutePath.replace("`", "``").replace("$", "`$")}" -WorkingDirectory "${dir.absolutePath.replace("`", "``").replace("$", "`$")}" -ArgumentList "$args","-c","${conf.absolutePath.replace("`", "``").replace("$", "`$")}" -WindowStyle Hidden
                     Start-Sleep -Seconds 3
-                    "OK" | Out-File -FilePath §ResultFile -Encoding utf8
+                    "OK" | Out-File -FilePath ${VpnScripts.PS}ResultFile -Encoding utf8
                 } catch {
-                    "ERROR: §(§_.Exception.Message)" | Out-File -FilePath §ResultFile -Encoding utf8
+                    "ERROR: ${VpnScripts.PS}(${VpnScripts.PS}_.Exception.Message)" | Out-File -FilePath ${VpnScripts.PS}ResultFile -Encoding utf8
                 }
-                """.trimIndent().replace('§', '$'),
+                """.trimIndent().replace(VpnScripts.PS, "$"),
             )
             val exit = HiddenRun.runAndWaitCancellable(
                 listOf(

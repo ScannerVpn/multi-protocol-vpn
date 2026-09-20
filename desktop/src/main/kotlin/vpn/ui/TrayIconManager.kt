@@ -56,10 +56,17 @@ object TrayIconManager {
 
                 val toggleItem = MenuItem("Connect / Disconnect")
                 toggleItem.addActionListener {
-                    when (AppState.vpnStatus) {
-                        VpnStatus.CONNECTED -> AppState.disconnectActive()
-                        VpnStatus.DISCONNECTED, VpnStatus.ERROR -> AppState.connectActive()
-                        else -> Unit // mid-flight: let the in-flight flow finish
+                    // P2-9 fix: this handler ran connectActive()/disconnectActive()
+                    // DIRECTLY on the AWT thread — the sibling items marshal via
+                    // EventQueue.invokeLater, and so must this one: connectActive
+                    // writes vpnStatus and the connectJob/pollJob handles that
+                    // Main-thread readers race on.
+                    EventQueue.invokeLater {
+                        when (AppState.vpnStatus) {
+                            VpnStatus.CONNECTED -> AppState.disconnectActive()
+                            VpnStatus.DISCONNECTED, VpnStatus.ERROR -> AppState.connectActive()
+                            else -> Unit // mid-flight: let the in-flight flow finish
+                        }
                     }
                 }
                 add(toggleItem)

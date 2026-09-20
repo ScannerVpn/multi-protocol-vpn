@@ -34,6 +34,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
@@ -76,6 +77,7 @@ import vpn.ui.LayoutMode
 import vpn.ui.LocalLayout
 import vpn.ui.ProvideLayout
 import vpn.ui.AuroraBackground
+import vpn.ui.AetherScreen
 import vpn.ui.ConfigsScreen
 import vpn.ui.HomeScreen
 import vpn.ui.ServersScreen
@@ -153,7 +155,14 @@ fun main() {
         var askOnClose by remember { mutableStateOf(false) }
         val applyOutcome: (vpn.core.CloseOutcome) -> Unit = { outcome ->
             val hide = hideToTray.value
-            if (outcome == vpn.core.CloseOutcome.HIDE_TO_TRAY && hide != null) hide() else quit()
+            if (outcome == vpn.core.CloseOutcome.HIDE_TO_TRAY && hide != null) {
+                // P2-9b fix: mirror CloseBehavior.outcomeFor's degradation —
+                // when no tray icon is available (SystemTray unsupported or
+                // install failed), "minimize to tray" must fall back to quit.
+                // Hiding with no tray icon left the app unreachable except
+                // through Task Manager.
+                if (vpn.ui.TraySettings.trayAvailable) hide() else quit()
+            } else quit()
         }
         val requestClose: () -> Unit = {
             when (vpn.ui.TraySettings.outcome()) {
@@ -257,6 +266,7 @@ fun main() {
                     vpn.ui.CloseChoiceDialog(
                         appName = "MultiVPN",
                         tunnelActive = AppState.vpnStatus == vpn.core.VpnStatus.CONNECTED,
+                        trayAvailable = vpn.ui.TraySettings.trayAvailable,
                         onChoice = { outcome, remember ->
                             askOnClose = false
                             vpn.core.CloseBehavior.persistedChoice(outcome, remember)?.let {
@@ -283,6 +293,8 @@ private val NAV_ITEMS = listOf(
     NavItem("Dashboard", Icons.Filled.Home),
     NavItem("Servers", Icons.Filled.Dns),
     NavItem("Configs", Icons.Filled.Layers),
+    // The Aether section: censorship circumvention (MASQUE/Gool/Zero Trust/Tor).
+    NavItem("Aether", Icons.Filled.Public),
     NavItem("Settings", Icons.Filled.Tune),
 )
 
@@ -319,6 +331,7 @@ fun App() {
                             0 -> HomeScreen()
                             1 -> ServersScreen()
                             2 -> ConfigsScreen()
+                            3 -> AetherScreen()
                             else -> SettingsScreen()
                         }
                     }

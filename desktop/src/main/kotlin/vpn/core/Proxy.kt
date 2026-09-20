@@ -46,9 +46,13 @@ object Proxy {
         if (f.exists()) return // already captured this session — never overwrite
         val enabled = if (isEnabled()) "1" else "0"
         val server = proxyServer() ?: ""
+        // P3-9(Proxy) fix: the bypass list is captured too — enable() overwrites
+        // ProxyOverride with our own list, and a corporate user's intranet
+        // exceptions used to be lost forever after one VPN session.
+        val override = proxyOverride() ?: ""
         runCatching {
             f.parentFile?.mkdirs()
-            f.writeText("$enabled$SEP$server")
+            f.writeText("$enabled$SEP$server$SEP$override")
         }
         AppLog.i("Proxy", "Saved previous system proxy state (enabled=$enabled)")
     }
@@ -81,21 +85,34 @@ object Proxy {
             val parts = raw.split(SEP)
             val enabled = parts.getOrNull(0) ?: "0"
             val server = parts.getOrNull(1).orEmpty()
+            val override = parts.getOrNull(2) // legacy files have no third field
             if (server.isNotEmpty()) {
-                HiddenRun.runAndWait(
-                    listOf("reg", "add", KEY, "/v", "ProxyServer", "/t", "REG_SZ", "/d", server, "/f"),
-                    timeoutMs = 10_000,
-                )
+                regAdd("ProxyServer", server, "REG_SZ")
             }
-            HiddenRun.runAndWait(
-                listOf("reg", "add", KEY, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", enabled, "/f"),
-                timeoutMs = 10_000,
-            )
+            // Restore the user's own bypass list, but ONLY when we captured
+            // one and the current value is ours: if a v1 state file exists
+            // (no override recorded) our BYPASS list stays — losing intranet
+            // exceptions is worse than keeping ours for one more session.
+            if (override != null && override.isNotEmpty()) {
+                regAdd("ProxyOverride", override, "REG_SZ")
+            }
+            regAdd("ProxyEnable", enabled, "REG_DWORD")
             refresh()
         }
         runCatching { f.delete() }
         runCatching { legacyStateFile().delete() }
         AppLog.i("Proxy", "Restored previous system proxy state")
+    }
+
+    /** One `reg add` with its exit code checked and logged (was: ignored). */
+    private fun regAdd(value: String, data: String, type: String = "REG_SZ") {
+        val exit = HiddenRun.runAndWait(
+            listOf("reg", "add", KEY, "/v", value, "/t", type, "/d", data, "/f"),
+            timeoutMs = 10_000,
+        )
+        if (exit != null && exit != 0) {
+            AppLog.e("Proxy", "reg add $value failed with exit code $exit")
+        }
     }
 
     fun enable(port: Int) {
@@ -157,6 +174,20 @@ object Proxy {
         )
         return runCatching {
             f.readLines().firstOrNull { it.contains("ProxyServer") }
+                ?.substringAfter("REG_SZ")?.trim()?.takeIf { it.isNotEmpty() }
+        }.getOrNull()
+    }
+
+    /** Current ProxyOverride (bypass list), null when unset/unreadable. */
+    fun proxyOverride(): String? {
+        val f = File(System.getProperty("java.io.tmpdir"), "multivpn_proxyoverride.txt")
+        runCatching { f.delete() }
+        HiddenRun.runRawAndWait(
+            "cmd.exe /c reg query \"$KEY\" /v ProxyOverride > \"${f.absolutePath}\"",
+            timeoutMs = 8000,
+        )
+        return runCatching {
+            f.readLines().firstOrNull { it.contains("ProxyOverride") }
                 ?.substringAfter("REG_SZ")?.trim()?.takeIf { it.isNotEmpty() }
         }.getOrNull()
     }

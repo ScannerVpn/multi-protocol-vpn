@@ -79,8 +79,21 @@ object Storage {
 
     val generatedDir: File get() = File(dataDir, "generated")
 
-    fun generatedConfigDir(serverId: String): File =
-        File(generatedDir, serverId).apply { mkdirs() }
+    /**
+     * P2-6 guard: serverId becomes a PATH component. Ids reaching this from
+     * an imported backup are sanitized there, but this is the chokepoint —
+     * resolve-and-check so no `..`/absolute id can ever escape the generated
+     * directory (or hit the directory itself with mkdirs).
+     */
+    fun generatedConfigDir(serverId: String): File {
+        val root = generatedDir.canonicalFile
+        val dir = File(root, serverId).canonicalFile
+        if (!dir.path.startsWith(root.path + File.separator)) {
+            AppLog.e("Storage", "Refusing generated dir outside root for id: $serverId")
+            return File(root, java.util.UUID.randomUUID().toString()).apply { mkdirs() }
+        }
+        return dir.apply { mkdirs() }
+    }
 
     fun loadServers(): List<ServerConfig> =
         loadList("servers.json", ServerConfig.serializer())
@@ -263,7 +276,13 @@ object Storage {
             saveSettings(s)
         }
         s
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        // P3-11 fix: a corrupt settings.json used to be reset to defaults
+        // silently — and the NEXT saveSettings overwrote the file, so the
+        // user's close-action/mode/split settings were destroyed without a
+        // trace. Quarantine it like every other store (the file survives in
+        // .corrupt-* and defaults apply for this session only).
+        quarantine("settings.json", e)
         AppSettings()
     }
 

@@ -282,6 +282,33 @@ if (-not $Force -and (Complete-Set $ovDir $ovFiles)) {
     Info 'extracted openvpn'
 }
 
+# -------------------------------------------------------------- aether
+Step 'aether (MASQUE / Gool / Zero Trust / Tor)'
+$aetherDir = Join-Path $binRoot 'aether'
+# lyrebird.exe is the obfs4 pluggable transport for the Tor chain; the
+# runtime degrades gracefully when it is missing (no bridges).
+$aetherFiles = @('aether.exe', 'lyrebird.exe')
+if (-not $Force -and (Complete-Set $aetherDir $aetherFiles)) {
+    Info 'already present, skipping'
+} else {
+    New-Item -ItemType Directory -Force -Path $aetherDir | Out-Null
+    $tag = Resolve-LatestTag 'CluvexStudio/Aether'
+    Info "release $tag"
+    $zip = Join-Path $temp 'aether.zip'
+    Invoke-WebRequest -Uri "https://github.com/CluvexStudio/Aether/releases/download/$tag/aether-windows-x86_64.zip" -OutFile $zip
+    Assert-PinnedSha256 $zip 'aether-windows-x86_64.zip'
+    Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $temp 'aether') -Force
+    foreach ($n in $aetherFiles) {
+        $src = Get-ChildItem -Recurse (Join-Path $temp 'aether') -Filter $n | Select-Object -First 1
+        if (-not $src) {
+            if ($n -eq 'lyrebird.exe') { Warn "archive did not contain $n (Tor bridges will be unavailable)"; continue }
+            throw "aether archive did not contain $n"
+        }
+        Copy-Item $src.FullName (Join-Path $aetherDir $n) -Force
+    }
+    Info "extracted $($aetherFiles.Count) files"
+}
+
 # ----------------------------------------------------------- wireproxy
 Step 'wireproxy (WireGuard / AmneziaWG, AWG 3.x patched)'
 $wpDir = Join-Path $binRoot 'wireproxy'

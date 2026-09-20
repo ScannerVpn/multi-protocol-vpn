@@ -131,6 +131,7 @@ object SshService {
         command: String,
         timeoutSec: Long,
         onLine: (String) -> Unit = {},
+        stdinBody: String? = null,
     ): String = withContext(Dispatchers.IO) {
         connect(server).use { client ->
             val session = client.startSession()
@@ -147,6 +148,13 @@ object SshService {
                 // then close session + client, which unblocks the reader.
                 try {
                     val cmd = session.exec(command)
+                    // P3-13 fix: secrets can arrive through STDIN instead of
+                    // the remote argv — `ps`/proc on the VPS exposes every
+                    // argument byte, so the p12 passphrase used to sit in the
+                    // process table for the whole provisioning run.
+                    if (stdinBody != null) {
+                        cmd.outputStream.use { it.write(stdinBody.toByteArray(Charsets.UTF_8)); it.flush() }
+                    }
                     val output = StringBuilder()
                     val reader = cmd.inputStream.bufferedReader(Charsets.UTF_8)
                     while (true) {
@@ -196,11 +204,13 @@ object SshService {
 
         val prefix = if (server.username == "root") "" else "sudo "
         val ipQuoted = shQuote(server.ip)
-        val passQuoted = shQuote(p12Pass)
-        val command = "${prefix}bash -s -- $ipQuoted $passQuoted <<'__VPN_SETUP_SCRIPT__'\n" +
-            script + "\n__VPN_SETUP_SCRIPT__"
+        // P3-13 fix: the passphrase now reaches the script through stdin (a
+        // prepended export line) instead of $2 — it is no longer visible in
+        // the remote process table for the duration of provisioning.
+        val command = "${prefix}bash -s -- $ipQuoted"
+        val scriptBody = "CLIENT_P12_PASS=${shQuote(p12Pass)}\n" + script
 
-        runCommandStreaming(server, command, timeoutSec = 600, onLine = onLine)
+        runCommandStreaming(server, command, timeoutSec = 600, onLine = onLine, stdinBody = scriptBody)
 
         return withContext(Dispatchers.IO) {
             connect(server).use { client ->

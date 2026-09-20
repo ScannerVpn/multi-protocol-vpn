@@ -117,9 +117,27 @@ class SourceEncodingTest {
             '\u2192', // → in KDoc/comments
             '\u203A', // › breadcrumb in ServersScreen
             '\u2713', '\u2717', // ✓ ✗ status marks
-            '\u00A7', // § the '$' placeholder in the PowerShell script builders
+            '\u00A7', // former '§' placeholder (replaced by U+0001 VpnScripts.PS)
             // Locale-tolerant ipconfig/rasdial parsing (French/German wording).
             '\u00C9', '\u00E9', '\u00E0',
+            // P3-8: the localized "Media state" label/value matchers cover
+            // ru/es/pt/it/tr/nl/pl/fa/zh/ja/ko — these are their letters.
+            '\u00ED', // í (Estado da mídia, pt)
+            '\u015B', '\u0142', // ś ł (Stan nośnika, pl)
+            '\u0421', '\u043E', '\u0441', '\u0442', '\u044F', '\u043D', '\u0438', '\u0435', '\u0440', '\u0434', '\u044B', // Состояние среды (ru)
+            '\u043A', '\u043B', '\u044E', '\u0447', '\u0433', '\u0439', // отключен (ru)
+            '\u011F', '\u0131', // Bağlı değil (tr)
+            '\u062A', // ت (fa label)
+            '\u5A92', '\u4F53', '\u72B6', '\u6001', // 媒体状态 (zh label)
+            '\u30E1', '\u30C7', '\u30A3', '\u30A2', '\u306E', '\u614B', // メディアの状態 (ja label)
+            '\u0430', // а (ru отключена)
+            '\uC5F0', '\uAC04', '\uB428', // 연간428 (ko value)
+            '\u0105', // ą (pl — poączon)
+            '\u0648', '\u0636', '\u0639', '\u06CC', '\u0631', '\u0633', '\u0627', '\u0646', '\u0647', // وضعیت رسانه (fa)
+            '\u0642', '\u0637', '\u0634', '\u062F', '\u0647', // قطع شده (fa)
+            '\u5DF2', '\u65AD', '\u5F00', // 已断开 (zh)
+            '\u5207', '\u3055', '\u308C', // 切断され (ja)
+            '\uBBF8', '\uB514', '\uC5B4', '\uC0C1', '\uD0DC', // 미디어 상태 (ko)
         )
         val offenders = kotlinSources().flatMap { f ->
             f.readText(Charsets.UTF_8).toCharArray()

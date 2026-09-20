@@ -41,7 +41,8 @@ ESP_PROPOSAL="aes256-sha256-modp2048,aes256-sha256,aes256gcm16,aes128-sha256"
 # passes a RANDOM per-install passphrase as $2 (see SshService.generateP12Password);
 # it is only used for `openssl pkcs12 -export` on THIS box and stored DPAPI-
 # encrypted in the client app. Manual runs default to the legacy fixed value.
-CLIENT_P12_PASS="${2:-ikev2}"
+# passphrase arrives via stdin as an export line (never in remote argv)
+CLIENT_P12_PASS="${CLIENT_P12_PASS:-ikev2}"
 
 export DEBIAN_FRONTEND=noninteractive
 

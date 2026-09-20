@@ -41,8 +41,12 @@ object KillSwitchCleanup {
         if (doneMarker.exists()) return
 
         // A previous detached run may have succeeded after all (late UAC
-        // acceptance) — trust its receipt instead of prompting again.
-        if (readReceipt() == "OK") {
+        // acceptance) — trust its receipt INSTEAD OF PROMPTING AGAIN only
+        // when the machine actually looks clean (P3-10 fix: a leftover
+        // receipt from a partially-failed run used to tombstone the probe
+        // forever while stale rules survived). Receipt says OK but rules
+        // are still present → fall through to a real cleanup pass.
+        if (readReceipt() == "OK" && !staleRulesPresent()) {
             runCatching { legacyMarker.delete() }
             markDone()
             AppLog.i("KillSwitchCleanup", "previous cleanup confirmed OK — tombstone written")
@@ -120,18 +124,18 @@ object KillSwitchCleanup {
     internal fun buildCleanupScript(resultFile: String, legacyMarkerPath: String, doneMarkerPath: String): String {
         fun psEscape(s: String) = s.replace("`", "``").replace("$", "`$").replace("\"", "`\"")
         return """
-§ErrorActionPreference = "Stop"
-§ResultFile = "${psEscape(resultFile)}"
+${VpnScripts.PS}ErrorActionPreference = "Stop"
+${VpnScripts.PS}ResultFile = "${psEscape(resultFile)}"
 
-function Write-Result(§status, §message) {
-    "§status`n§message" | Out-File -FilePath §ResultFile -Encoding utf8
+function Write-Result(${VpnScripts.PS}status, ${VpnScripts.PS}message) {
+    "${VpnScripts.PS}status`n${VpnScripts.PS}message" | Out-File -FilePath ${VpnScripts.PS}ResultFile -Encoding utf8
 }
 
-§isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not §isAdmin) {
+${VpnScripts.PS}isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not ${VpnScripts.PS}isAdmin) {
     try {
-        §script = §MyInvocation.MyCommand.Path
-        Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `\"§script`\"" -Wait
+        ${VpnScripts.PS}script = ${VpnScripts.PS}MyInvocation.MyCommand.Path
+        Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `\"${VpnScripts.PS}script`\"" -Wait
     } catch {
         Write-Result "ERROR" "Admin elevation was declined"
     }
@@ -151,8 +155,8 @@ try {
 
     Write-Result "OK" "kill switch leftovers removed"
 } catch {
-    Write-Result "ERROR" §_.Exception.Message
+    Write-Result "ERROR" ${VpnScripts.PS}_.Exception.Message
 }
-""".trimIndent().replace('§', '$')
+""".trimIndent().replace(VpnScripts.PS, "$")
     }
 }

@@ -65,7 +65,7 @@ object SingleInstance {
         runCatching {
             JOptionPane.showMessageDialog(
                 null,
-                "MultiVPN is already running.\nClose the other window first.",
+                "MultiVPN is already running.\nUse its tray icon to open it\n(right-click the shield icon → Open MultiVPN).",
                 "MultiVPN",
                 JOptionPane.INFORMATION_MESSAGE,
             )

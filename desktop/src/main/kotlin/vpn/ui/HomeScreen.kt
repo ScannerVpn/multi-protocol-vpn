@@ -1331,8 +1331,14 @@ private fun SplitAppsDialog(onDismiss: () -> Unit) {
     }
     val rows = pseudoCustom + filtered
 
+    // P3-18 fix: process names on Windows are case-insensitive — membership
+    // tests used exact case while the "Add" guard and the engine treat them
+    // case-insensitively, so "chrome.exe" + "Chrome.exe" produced two rules
+    // for one process.
+    fun hasSelected(proc: String) = selected.any { it.equals(proc, ignoreCase = true) }
     fun toggle(proc: String) {
-        if (proc in selected) selected.remove(proc) else selected.add(proc)
+        val existing = selected.firstOrNull { it.equals(proc, ignoreCase = true) }
+        if (existing != null) selected.remove(existing) else selected.add(proc)
     }
 
     AlertDialog(
@@ -1446,7 +1452,7 @@ private fun SplitAppsDialog(onDismiss: () -> Unit) {
                             val proc = app.exeName
                             AppPickerRow(
                                 app = app,
-                                checked = proc != null && proc in selected,
+                                checked = proc != null && hasSelected(proc),
                                 onClick = { if (proc != null) toggle(proc) },
                             )
                         }

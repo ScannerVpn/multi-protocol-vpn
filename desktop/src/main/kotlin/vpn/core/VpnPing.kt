@@ -1,5 +1,6 @@
 package vpn.core
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
@@ -423,10 +424,25 @@ internal object VpnPing {
             return@withPermit RealPingResult.Failed
         }
 
-        val ports = claimScratchPorts()
-            ?: return@withPermit RealPingResult.Skipped // pool exhausted — caller retries later
+        val ports = try {
+            claimScratchPorts()
+                ?: return@withPermit RealPingResult.Skipped // pool exhausted — caller retries later
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            return@withPermit RealPingResult.Skipped
+        }
         val conf = File.createTempFile("multivpn_xping_", ".json")
-        conf.writeText(Xray.buildClientJson(parsed, socksPort = ports.first, httpPort = ports.second))
+        // P3-2 fix: conf.writeText used to run OUTSIDE the try — an IOException
+        // here escaped without releasing the scratch ports or the temp file,
+        // and the slot stayed claimed until the 20 s TTL stole it back.
+        try {
+            conf.writeText(Xray.buildClientJson(parsed, socksPort = ports.first, httpPort = ports.second))
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            conf.delete()
+            releaseScratchPorts(ports)
+            return@withPermit RealPingResult.Skipped
+        }
         var myPid: Int? = null
         try {
             val pid = HiddenRun.startDetached(
@@ -461,7 +477,12 @@ internal object VpnPing {
             // tunnel does not carry traffic at all.
             val measured = TrafficProbe.latencyThroughProxy(ports.second, timeoutMs)
             return@withPermit warmOutcome(warmUp, measured)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            // P2-2 fix: cancellation is not a failed measurement. This catch
+            // used to swallow CancellationException and return Failed, so
+            // cancelling a wave painted every in-flight row red AND deleted
+            // their persisted cache entries in measureConfig.
+            if (e is CancellationException) throw e
             return@withPermit RealPingResult.Failed
         } finally {
             // Kill OUR core only — never the image-wide sweep, which would
@@ -480,6 +501,25 @@ internal object VpnPing {
     internal fun warmOutcome(warmUp: Int?, measured: Int?): RealPingResult = when {
         warmUp == null || measured == null -> RealPingResult.Failed
         else -> RealPingResult.Ok(measured)
+    }
+
+    /**
+     * P3-9: a foreign process on our default base port (v2rayN and friends
+     * share the 10808 default) silently Skipped every hysteria/wg ping with
+     * no explanation anywhere. Log it ONCE per minute so app.log carries the
+     * reason without spamming a 16-wide wave.
+     */
+    private var foreignListenerExplainedAt = 0L
+    internal fun explainForeignListener() {
+        val now = System.currentTimeMillis()
+        if (now - foreignListenerExplainedAt < 60_000) return
+        foreignListenerExplainedAt = now
+        AppLog.i(
+            "Ping",
+            "Another program is listening on local port ${ProxyPorts.socks} " +
+                "(v2rayN and other proxies use this default too). Hysteria2/WireGuard " +
+                "latency tests are skipped until it is closed or the base port is changed in Settings.",
+        )
     }
 
     /** Port probe against an arbitrary local port (the fixed-port variants
@@ -502,7 +542,13 @@ internal object VpnPing {
         if (isSessionLive() || Xray.isRunning() || WireProxy.isRunning()) {
             return@withLock RealPingResult.Skipped // shared base port / family kills
         }
-        if (SingBox.isRunning()) return@withLock RealPingResult.Skipped
+        if (SingBox.isRunning()) {
+            // P3-9: a FOREIGN listener on the default base port (v2rayN uses
+            // 10808, this app's default too) used to silence ALL hysteria/wg
+            // pings with zero explanation. Say so, once per wave.
+            explainForeignListener()
+            return@withLock RealPingResult.Skipped
+        }
 
         val core = SingBox.ensureCore(allowDownload = false)
             ?: return@withLock RealPingResult.Skipped
@@ -543,7 +589,10 @@ internal object VpnPing {
         if (isSessionLive() || Xray.isRunning() || SingBox.isRunning()) {
             return@withLock RealPingResult.Skipped
         }
-        if (WireProxy.isRunning()) return@withLock RealPingResult.Skipped
+        if (WireProxy.isRunning()) {
+            explainForeignListener()
+            return@withLock RealPingResult.Skipped
+        }
 
         val conf = config.tunnelConfPath?.let(::File) ?: return@withLock RealPingResult.Skipped
         if (!conf.exists()) return@withLock RealPingResult.Skipped

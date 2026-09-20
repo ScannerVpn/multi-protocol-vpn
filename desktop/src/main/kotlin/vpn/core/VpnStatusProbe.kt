@@ -99,8 +99,12 @@ internal object VpnStatusProbe {
      * disconnected and ignores VPN-looking addresses inside them. A block
      * runs from one adapter heading to the next; ipconfig prints "Media
      * State" right after the adapter name when the adapter is down.
-     * Locale-tolerant: looks for the bare address lines rather than trusting
-     * localized labels, and resets at every adapter heading.
+     *
+     * P3-8 fix: the "Media State" label is localized — the old explicit list
+     * only covered EN/DE/FR, so on ru/tr/fa/… Windows a lingering 10.8.0.x on
+     * a DISCONNECTED adapter passed as live. Detection is now label-list +
+     * shape-based (see [isMediaStateLine]) and the disconnected VALUE match
+     * covers every major locale (see [isMediaDisconnectedValue]).
      */
     fun hasLiveTunnelAddress(ipconfigText: String): Boolean {
         var mediaDisconnected = false
@@ -118,12 +122,11 @@ internal object VpnStatusProbe {
                 heading = line
                 continue
             }
-            if (line.startsWith("Media State", ignoreCase = true) ||
-                line.startsWith("Medienstatus", ignoreCase = true) ||
-                line.startsWith("État du média", ignoreCase = true)) {
-                mediaDisconnected = line.contains("disconnected", ignoreCase = true) ||
-                    line.contains("getrennt", ignoreCase = true) || // German
-                    line.contains("déconnecté", ignoreCase = true)  // French
+            if (isMediaStateLine(line)) {
+                // Latch: ANY disconnected-valued label line in the block
+                // marks the whole block dead for its lifetime — later prose
+                // lines ("NetBIOS over Tcpip: Enabled") must not un-set it.
+                if (isMediaDisconnectedValue(line)) mediaDisconnected = true
                 continue
             }
             ADDR_REGEX.findAll(line).forEach { m ->
@@ -132,6 +135,53 @@ internal object VpnStatusProbe {
         }
         return live
     }
+
+    /**
+     * P3-8 fix: the "Media State" label is LOCALIZED and the old explicit
+     * list only covered EN/DE/FR — on ru/tr/fa/… Windows a lingering
+     * 10.8.0.x on a DISCONNECTED adapter passed as live. Match the label by
+     * SHAPE instead of language: the localized media-state line is always
+     * the same UI resource — a short label, the dots filler, a colon, and a
+     * value that is NOT an IP address — and it never carries addresses.
+     * Combined with the per-language labels below this covers every locale
+     * in practice; the value-side check (isMediaDisconnectedValue) then
+     * keeps the language list honest.
+     */
+    private val MEDIA_STATE_LABEL = Regex(
+        "^(Media State|Medienstatus|État du média|Estado de los medios|Stato supporto|" +
+            "Estado da mídia|Состояние среды|Medya durumu|وضعیت رسانه|" +
+            "媒体状态|メディアの状態|미디어 상태|Mediastatus|Stan nośnika|Medietilstand|Mediastatus)" +
+            "[^:]*:",
+    )
+
+    private fun isMediaStateLine(line: String): Boolean {
+        if (MEDIA_STATE_LABEL.containsMatchIn(line)) return true
+        // Shape fallback for locales not listed: a dots-filler label whose
+        // value is neither empty nor numeric (media values are prose), while
+        // every data line ipconfig prints (address/mask/gateway/DNS) carries
+        // digits. "IPv4 Address. . . : 10.8.0.6(Preferred)" → numeric, kept
+        // out; "Medya durumu. . . : Bağlı değil" → prose, caught here.
+        if (!line.contains(":")) return false
+        val label = line.substringBefore(':')
+        if (!label.contains(". .")) return false
+        val value = line.substringAfter(':', "").trim()
+        return value.isNotEmpty() && !value.any { it.isDigit() }
+    }
+
+    private fun isMediaDisconnectedValue(line: String): Boolean =
+        line.contains("disconnected", ignoreCase = true) ||
+            line.contains("getrennt", ignoreCase = true) || // de
+            line.contains("déconnecté", ignoreCase = true) || // fr
+            line.contains("desconectad", ignoreCase = true) || // es/pt
+            line.contains("disconness", ignoreCase = true) || // it
+            line.contains("отключен", ignoreCase = true) || // ru (отключена/отключено)
+            line.contains("bağlı değil", ignoreCase = true) || // tr
+            line.contains("قطع شده", ignoreCase = true) || // fa
+            line.contains("已断开", ignoreCase = true) || // zh
+            line.contains("切断され", ignoreCase = true) || // ja
+            line.contains("연간됨", ignoreCase = true) || // ko
+            line.contains("verbroken", ignoreCase = true) || // nl
+            line.contains("odłączon", ignoreCase = true) // pl
 
     private val ADAPTER_SECTION_START =
         Regex("^[^\\s].*(adapter|Adapter|Connection|Verbindung|Connexion|connessione).*:\\s*$")

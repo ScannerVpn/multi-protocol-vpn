@@ -44,7 +44,7 @@ class KillSwitchCleanupScriptTest {
     @Test
     fun `no placeholder markers leak into the generated script`() {
         val s = script()
-        assertTrue('§' !in s, "internal § placeholder leaked — dollarize() was not applied")
+        assertTrue('\u0001' !in s, "internal U+0001 placeholder leaked — dollarize() was not applied")
         assertTrue("\$_.Exception.Message" in s, "PowerShell error variable malformed")
     }
 

@@ -428,6 +428,15 @@ private fun AddServerDialog(onDismiss: () -> Unit) {
     var keyPath by remember { mutableStateOf("") }
     var testing by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<String?>(null) }
+    // P3-19 fix: the SSH port used to be saved unvalidated — "99999" stored
+    // as-is, letters silently became 22 with no feedback and the failure only
+    // surfaced later as a confusing SSH error.
+    val portError = when {
+        port.isBlank() -> null
+        port.toIntOrNull() == null -> "Port must be a number"
+        port.toInt() !in 1..65535 -> "Port must be 1–65535"
+        else -> null
+    }
 
     fun pickKeyFile() {
         val dialog = object : Frame() {}
@@ -454,6 +463,10 @@ private fun AddServerDialog(onDismiss: () -> Unit) {
                         )
                     }
                     Box(Modifier.weight(0.6f)) { AppTextField(username, { username = it }, "Username") }
+                }
+                portError?.let {
+                    Spacer(Modifier.height(4.dp))
+                    Text(it, fontSize = 11.sp, color = C.Error)
                 }
                 Spacer(Modifier.height(10.dp))
                 AppTextField(password, { password = it }, "Password", password = true)
@@ -504,11 +517,18 @@ private fun AddServerDialog(onDismiss: () -> Unit) {
         },
         confirmButton = {
             TextButton(onClick = {
-                if (ip.isNotBlank()) {
+                // P3-19: refuse an invalid port instead of silently saving it.
+                if (ip.isNotBlank() && portError == null) {
                     AppState.addServer(name, ip, port.toIntOrNull() ?: 22, username, password, keyPath)
                     onDismiss()
                 }
-            }) { Text("Add", color = C.Accent2, fontWeight = FontWeight.SemiBold) }
+            }) {
+                Text(
+                    "Add",
+                    color = if (portError == null) C.Accent2 else C.Accent2.copy(alpha = 0.4f),
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel", color = C.TextSecondary) }

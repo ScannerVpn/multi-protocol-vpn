@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import vpn.core.AppLog
 import vpn.core.Storage
 import vpn.core.VpnService
@@ -326,15 +327,19 @@ private fun BackupRows() {
                 } else {
                     busy = true
                     AppState.scope.launch {
-                        val res = vpn.core.Backup.export(
-                            java.io.File(target),
-                            passphrase.toCharArray(),
-                            AppState.servers,
-                            AppState.configs,
-                            AppState.subscriptions,
-                            AppState.settings,
-                            AppState.activeConfigId,
-                        )
+                        // P2-7 fix: PBKDF2 + AES + file IO ran on the MAIN
+                        // dispatcher and froze the UI for the whole derivation.
+                        val res = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            vpn.core.Backup.export(
+                                java.io.File(target),
+                                passphrase.toCharArray(),
+                                AppState.servers,
+                                AppState.configs,
+                                AppState.subscriptions,
+                                AppState.settings,
+                                AppState.activeConfigId,
+                            )
+                        }
                         message = res.ok to res.message
                         busy = false
                     }
@@ -347,8 +352,21 @@ private fun BackupRows() {
                 } else {
                     busy = true
                     AppState.scope.launch {
-                        val res = vpn.core.Backup.import(java.io.File(src), passphrase.toCharArray())
+                        // P2-7 fix: crypto + IO off the main thread.
+                        val res = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            vpn.core.Backup.import(java.io.File(src), passphrase.toCharArray())
+                        }
                         message = res.ok to res.message
+                        if (res.ok) {
+                            // P2-7 fix: the restored files used to be clobbered
+                            // by the still-running in-memory state — the next
+                            // save (selectConfig, a settings toggle, the 12 h
+                            // subscription refresh) wrote the PRE-restore data
+                            // over the freshly restored JSON. Reload everything
+                            // the AppState holds from disk right now.
+                            AppState.reloadFromDisk()
+                            message = res.ok to res.message + " Applied to the running app."
+                        }
                         busy = false
                     }
                 }

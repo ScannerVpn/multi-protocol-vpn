@@ -15,6 +15,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeoutOrNull
 import vpn.core.AppList
 import vpn.core.AppLog
@@ -211,6 +212,11 @@ object AppState {
             when (val rp = runCatching {
                 VpnService.configLatencyResult(config, sshPort)
             }.getOrElse { e ->
+                // P2-2 fix: cancellation is NOT an infrastructure failure.
+                // Swallowing CancellationException here made a user-pressed
+                // Cancel paint in-flight rows red AND delete their persisted
+                // cache numbers. Re-throw so structured cancellation works.
+                if (e is CancellationException) throw e
                 // An exception is an infrastructure failure (thread pool
                 // rejected, socket stack blew up, OOM, ...), NOT proof the
                 // endpoint is dead. Mapping it to Failed painted the row
@@ -344,11 +350,19 @@ object AppState {
             .sortedBy { latency[it.id] }
             .take(WARM_CONFIRM_TOP_N)
         if (candidates.isEmpty()) return
-        candidates.forEach { cfg ->
-            scope.launch {
+        // P3-9 fix: warm measurements run as CHILDREN of the wave job (this
+        // suspend fun executes inside pingWaveJob) and are JOINED before the
+        // wave ends. Previously they were detached on `scope`, so (a) Cancel
+        // never reached them — cores kept spawning after "Cancel", (b)
+        // pingAllActive flipped false while warm pings visibly ran, and a
+        // second "Ping all" stacked on top of them.
+        coroutineScope {
+        candidates.map { cfg ->
+            launch {
                 when (val rp = runCatching {
                     VpnService.warmLatencyResult(cfg)
                 }.getOrElse { e ->
+                    if (e is CancellationException) throw e
                     AppLog.e("Ping", "warm infra error: ${e.message}")
                     RealPingResult.Skipped
                 }) {
@@ -362,12 +376,61 @@ object AppState {
                     else -> {}
                 }
             }
+        }.joinAll()
         }
     }
 
     private var pollJob: Job? = null
     @Volatile
     private var loaded = false
+
+    /**
+     * P2-7: re-reads every persisted store into the running AppState after a
+     * backup restore, so the in-memory state can never clobber the freshly
+     * restored JSON with pre-restore data. Must run on the Main dispatcher
+     * (snapshot-state writes) — callers already ensure that.
+     */
+    fun reloadFromDisk() {
+        servers = Storage.loadServers()
+        configs = Storage.loadConfigs()
+        subscriptions = Storage.loadSubscriptions()
+        settings = Storage.loadSettings()
+        ProxyPorts.base = settings.proxyPort
+        activeConfigId = Storage.loadActiveConfigId()
+        if (activeConfig == null && configs.isNotEmpty()) {
+            activeConfigId = configs.first().id
+            Storage.saveActiveConfigId(activeConfigId)
+        }
+        latency = emptyMap()
+        latencyFailed = emptySet()
+        warmLatency = emptyMap()
+        latencyCached = configs.mapNotNull { c -> PingCache.get(c.id)?.let { c.id to it } }.toMap()
+        runCatching { PingCache.retainAll(configs.map { it.id }.toSet()) }
+        TraySettings.closeAction = vpn.core.CloseBehavior.sanitize(settings.closeAction)
+        seedAetherConfig()
+        AppLog.i("App", "State reloaded from disk: ${servers.size} servers, ${configs.size} configs")
+    }
+
+    /**
+     * The Aether section is a first-class protocol: its single virtual config
+     * row always exists so the connect orb / Configs list / latency pipeline
+     * treat it like any other protocol. Deleted by the user → re-seeded on
+     * the next launch (never while the app runs, to not fight an explicit
+     * deletion).
+     */
+    private fun seedAetherConfig() {
+        if (configs.any { it.protocol == "aether" }) return
+        val row = VpnConfig(
+            id = UUID.randomUUID().toString(),
+            name = "Aether",
+            serverIp = "aether",
+            protocol = "aether",
+            isGenerated = false,
+        )
+        configs = configs + row
+        saveConfigs()
+        AppLog.i("App", "Seeded the Aether config row")
+    }
 
     fun load() {
         if (loaded) return
@@ -393,6 +456,7 @@ object AppState {
         runCatching { PingCache.retainAll(configs.map { it.id }.toSet()) }
         // Mirror the persisted close/tray preference into its Compose holder.
         TraySettings.closeAction = vpn.core.CloseBehavior.sanitize(settings.closeAction)
+        seedAetherConfig()
         // ONE-TIME cleanup of the RETIRED kill switch (removed in 3.6.5):
         // a machine that ran an older build may still be firewall
         // default-deny with no internet. Fire a detached elevated cleanup.
@@ -502,15 +566,34 @@ object AppState {
 
     fun deleteServer(server: ServerConfig) {
         val generated = configs.filter { it.isGenerated && it.serverIp == server.ip }
+        val removedIds = generated.map { it.id }.toSet()
+        // P2-4 fix: capture the LIVE config BEFORE re-pointing activeConfigId,
+        // so a connected server can be torn down instead of orphaned.
+        val liveConfig = generated.firstOrNull { it.id == activeConfigId }
+        val wasConnected = liveConfig != null && vpnStatus == VpnStatus.CONNECTED
         servers = servers.filter { it.id != server.id }
         configs = configs.filter { c -> generated.none { it.id == c.id } }
-        if (activeConfigId in generated.map { it.id }) {
+        if (liveConfig != null) {
             activeConfigId = configs.firstOrNull()?.id
             Storage.saveActiveConfigId(activeConfigId)
         }
+        // Purge stale latency bookkeeping for every removed row.
+        latency = latency - removedIds
+        latencyFailed = latencyFailed - removedIds
+        warmLatency = warmLatency - removedIds
         saveServers()
         saveConfigs()
-        File(Storage.dataDir, "generated/${server.id}").deleteRecursively()
+        // P2-6 guard: server.id can come from an imported backup — never
+        // deleteRecursively() outside generated/, whatever the id contains.
+        runCatching {
+            val root = File(Storage.dataDir, "generated").canonicalFile
+            val dir = File(root, server.id).canonicalFile
+            if (dir.path.startsWith(root.path + File.separator) && dir != root) {
+                dir.deleteRecursively()
+            } else {
+                AppLog.e("Servers", "Refusing to delete outside generated/: ${server.id}")
+            }
+        }.onFailure { AppLog.e("Servers", "cleanup failed: ${it.message}") }
         AppLog.i("Servers", "Deleted ${server.name}; cleaning ${generated.size} profiles")
         // One UAC prompt to remove leftover Windows profiles + certificates —
         // only when the deleted profiles actually need Windows-side cleanup.
@@ -518,6 +601,15 @@ object AppState {
         // nothing in Windows, so prompting would be pure noise.
         val needsWindowsCleanup = generated.any {
             VpnService.isIkev2Like(it) || it.protocol == "openvpn"
+        }
+        if (wasConnected) {
+            // P2-4: the tunnel belonged to the deleted server — it MUST go
+            // down now, with the same state transitions disconnectActive
+            // performs. Previously the UI stayed CONNECTED on a live tunnel
+            // whose config no longer existed.
+            userDisconnected = true
+            pollJob?.cancel()
+            vpnStatus = VpnStatus.DISCONNECTING
         }
         if (needsWindowsCleanup) {
             scope.launch {
@@ -528,6 +620,23 @@ object AppState {
                         false,
                     )
                 }
+            }
+        }
+        if (wasConnected) {
+            val live = liveConfig ?: return
+            scope.launch {
+                val done = withTimeoutOrNull(30_000) {
+                    runCatching { VpnService.disconnect(live) }
+                    true
+                }
+                if (done == null) {
+                    AppLog.e("VPN", "deleteServer disconnect timed out — sweeping cores")
+                    withContext(Dispatchers.IO) { runCatching { VpnService.killAllCores() } }
+                    runCatching { Proxy.restoreState() }
+                }
+                vpnStatus = VpnStatus.DISCONNECTED
+                sessionStartedAt = 0L
+                resetTraffic()
             }
         }
     }
@@ -943,9 +1052,18 @@ object AppState {
 
     /** Manual import of an OpenVPN .ovpn file. */
     fun addManualOvpn(name: String, serverIp: String, ovpnPath: String): Boolean {
+        // P3-13 fix: an unreadable file used to produce a config with a BLANK
+        // serverIp that only failed at connect with no actionable message —
+        // addManualTunnel already refuses; this does the same.
+        val file = File(ovpnPath)
+        val fileText = runCatching { file.readText() }.getOrNull()
+        if (!file.exists() || fileText == null) {
+            AppLog.e("Configs", "Could not read .ovpn file: $ovpnPath")
+            return false
+        }
         val ip = serverIp.ifBlank {
             runCatching {
-                Regex("(?im)^\\s*remote\\s+(\\S+)").find(File(ovpnPath).readText())?.groupValues?.get(1)
+                Regex("(?im)^\\s*remote\\s+(\\S+)").find(fileText)?.groupValues?.get(1)
             }.getOrNull() ?: ""
         }
         val config = VpnConfig(
@@ -1025,23 +1143,39 @@ object AppState {
      */
     suspend fun importSubscription(url: String, name: String): Int {
         if (url.isBlank()) return 0
-        val body = fetchSubscriptionBody(url) ?: return 0
-        val links = extractSubLinks(body)
-        if (links.isEmpty()) return 0
-        val sub = Subscription(
-            id = UUID.randomUUID().toString(),
-            url = url.trim(),
-            name = name.ifBlank { URI(url.trim()).host ?: "Subscription" },
-            lastUpdate = System.currentTimeMillis(),
-        )
-        val newConfigs = links.mapNotNull { linkToConfig(it, "", category = "subscription", source = "subscription:${sub.id}") }
-        subscriptions = subscriptions + sub
-        configs = configs + newConfigs
-        saveSubscriptions()
-        saveConfigs()
-        AppLog.i("Subs", "Imported ${newConfigs.size} config(s) from ${sub.name}")
-        return newConfigs.size
+        // P2-8 fix: re-entry guard keyed by the normalized URL. A double-click
+        // on "Import" used to run two imports concurrently (the button is not
+        // disabled until recomposition), creating two Subscription objects and
+        // importing every link twice under different sub ids.
+        val key = url.trim().lowercase()
+        if (!importingSubs.add(key)) {
+            AppLog.i("Subs", "Import already in progress for this URL — ignored duplicate")
+            return 0
+        }
+        try {
+            val body = fetchSubscriptionBody(url) ?: return 0
+            val links = extractSubLinks(body)
+            if (links.isEmpty()) return 0
+            val sub = Subscription(
+                id = UUID.randomUUID().toString(),
+                url = url.trim(),
+                name = name.ifBlank { URI(url.trim()).host ?: "Subscription" },
+                lastUpdate = System.currentTimeMillis(),
+            )
+            val newConfigs = links.mapNotNull { linkToConfig(it, "", category = "subscription", source = "subscription:${sub.id}") }
+            subscriptions = subscriptions + sub
+            configs = configs + newConfigs
+            saveSubscriptions()
+            saveConfigs()
+            AppLog.i("Subs", "Imported ${newConfigs.size} config(s) from ${sub.name}")
+            return newConfigs.size
+        } finally {
+            importingSubs.remove(key)
+        }
     }
+
+    /** In-flight subscription imports (P2-8 re-entry guard). */
+    private val importingSubs = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
     /**
      * Re-downloads a subscription, replacing all of its previous configs.
@@ -1155,16 +1289,29 @@ object AppState {
         return true
     }
 
-    /** Selects the best measured config: warm/stable latency wins, then name. */
-    fun autoSelectBestServer(): Boolean {
+    /**
+     * Selects the best measured config: warm/stable latency wins, then name.
+     *
+     * P1-2 fix: the retry is ONE-SHOT. When nothing measures Ok (offline,
+     * all servers dead, or a list of protocols that always Skip — Skipped
+     * removes the id from `latency`, so candidates can never fill up), the
+     * old self-relaunching loop re-pinged the entire list forever, burning
+     * CPU/network on wave after wave with no UI indication.
+     */
+    fun autoSelectBestServer(retried: Boolean = false): Boolean {
         if (connectedOrBusy || pingAllActive) return false
         val candidates = configs.filter { it.id in latency && it.id !in latencyFailed }
         if (candidates.isEmpty()) {
+            if (retried) {
+                AppLog.i("Configs", "Auto-select: no measurable config produced a result")
+                return false
+            }
             pingAllConfigs()
-            // Complete the user action after the initial measurements arrive.
+            // Complete the user action after the initial measurements arrive —
+            // exactly once; a second empty wave must not loop.
             scope.launch {
                 pingWaveJob?.join()
-                autoSelectBestServer()
+                autoSelectBestServer(retried = true)
             }
             return false
         }
@@ -1211,6 +1358,11 @@ object AppState {
         // Deleting the config that is currently connected must move the UI out
         // of CONNECTED immediately, not wait for the 3s poller to notice.
         if (wasConnected) {
+            // P2-5 fix: a deletion is a user-initiated disconnect — arm the
+            // latch so the watchdog cannot silently reconnect to whatever
+            // config activeConfigId was re-pointed to, and reset the session
+            // facts (the traffic card must not keep the frozen last sample).
+            userDisconnected = true
             pollJob?.cancel()
             vpnStatus = VpnStatus.DISCONNECTING
         }
@@ -1220,6 +1372,8 @@ object AppState {
                 VpnService.cleanupProfiles(listOf(VpnService.profileName(config.name)), false)
             }
             if (wasConnected) {
+                sessionStartedAt = 0L
+                resetTraffic()
                 vpnStatus = VpnStatus.DISCONNECTED
             }
         }
@@ -1267,10 +1421,25 @@ object AppState {
     }
 
     fun setSplitApps(apps: List<String>) {
-        val clean = apps.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        // P3-18 fix: dedupe case-insensitively — Windows process names are
+        // case-insensitive and the engine would otherwise receive two rules
+        // for the same binary.
+        val clean = apps.map { it.trim() }.filter { it.isNotEmpty() }
+            .distinctBy { it.lowercase() }
         settings = settings.copy(splitApps = clean)
         Storage.saveSettings(settings)
         AppLog.i("App", "Split tunneling list updated (${settings.splitApps.size} app(s))")
+    }
+
+    /**
+     * ONE writer for every Aether setting: the UI passes a transform, the
+     * result persists atomically. Refused mid-session for the fields the
+     * running core cannot re-read (same contract as setMode/setProxyPort).
+     */
+    fun updateAetherSettings(transform: (vpn.core.AetherSettings) -> vpn.core.AetherSettings) {
+        val next = transform(settings.aether)
+        settings = settings.copy(aether = next)
+        Storage.saveSettings(settings)
     }
 
     /**
@@ -1376,6 +1545,12 @@ object AppState {
         }
         pollJob?.cancel()
         connectJob?.cancel()
+        // P2-1 fix: an in-flight ping wave races the connect. Connect's
+        // family-wide kill (lastPid==0 paths) murders temp ping cores, and
+        // fixed-port families would collide with the session core. Cancel
+        // the wave here — measureConfig re-throws CancellationException, so
+        // rows stop cleanly without being painted Failed.
+        cancelPingAll()
         // Assign CONNECTING synchronously before launching — avoids a race
         // where refreshVpnStatus() could flip us back to DISCONNECTED while
         // the connection attempt is already in flight.
@@ -1426,6 +1601,18 @@ object AppState {
                 lastError = ""
                 vpnStatus = VpnStatus.DISCONNECTED
                 throw e
+            } catch (e: Exception) {
+                // P3-10 fix: an unexpected exception mid-connect (temp file
+                // creation, disk full, ...) used to skip every status write:
+                // the spinner ran forever and Cancel became a no-op because
+                // the finally had already cleared connectJob. Resolve to a
+                // real terminal state.
+                AppLog.e("VPN", "Connect crashed: ${e.javaClass.simpleName}: ${e.message}")
+                withContext(NonCancellable) {
+                    withTimeoutOrNull(15_000) { runCatching { VpnService.abort(cfg) } }
+                }
+                lastError = e.message ?: "Connection failed unexpectedly."
+                vpnStatus = VpnStatus.ERROR
             } finally {
                 // Clear connectJob ONLY if it's still the job we launched.
                 // Prevents the stale-null race where a late finally of a

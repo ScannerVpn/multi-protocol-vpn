@@ -302,6 +302,36 @@ internal object JnaHiddenRun : ProcessRunner {
         }
     }
 
-    private fun quoteArg(arg: String): String =
-        if (arg.isEmpty() || arg.contains(' ')) "\"$arg\"" else arg
+    /**
+     * Windows argv quoting (P3-13 fix): the old quoteArg only wrapped spaces
+     * — an embedded `"` broke out of the argument and a trailing `\\`
+     * escaped the closing quote, corrupting the command line (real path:
+     * `reg add /d <captured ProxyServer value>` where the value contained a
+     * quote). Implements the MS C runtime rules: double the backslashes
+     * BEFORE a quote, escape the quote, and wrap when the argument contains
+     * space/tab/quote or is empty.
+     */
+    private fun quoteArg(arg: String): String {
+        if (arg.isNotEmpty() && !arg.contains(' ') && !arg.contains('\t') && !arg.contains('"')) {
+            return arg
+        }
+        val sb = StringBuilder("\"")
+        var backslashes = 0
+        for (c in arg) {
+            when {
+                c == '\\' -> backslashes++
+                c == '"' -> {
+                    sb.append("\\".repeat(backslashes * 2 + 1)).append('"')
+                    backslashes = 0
+                }
+                else -> {
+                    sb.append("\\".repeat(backslashes)).append(c)
+                    backslashes = 0
+                }
+            }
+        }
+        // Backslashes before the CLOSING quote must be doubled.
+        sb.append("\\".repeat(backslashes * 2)).append('"')
+        return sb.toString()
+    }
 }

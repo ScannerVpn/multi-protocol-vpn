@@ -41,6 +41,16 @@ Built with **Compose Multiplatform (Kotlin)**, packaged as a self-contained app
   several independent providers and only accepts a genuine no-content answer, so
   a captive portal or DPI middlebox cannot certify a dead tunnel. A config that
   cannot carry traffic shows no latency instead of a misleading green number.
+- **Aether section** (new in 3.6.19): a built-in censorship-circumvention
+  tunnel powered by the [Aether core](https://github.com/CluvexStudio/Aether)
+  — MASQUE over HTTP/3 & HTTP/2 (with TLS ClientHello fragmentation and ECH),
+  WireGuard, Gool (WARP-in-WARP), MASQUE-in-MASQUE, and Cloudflare Zero Trust.
+  Optional **Tor chain** (inside tunnel / tunnel through Tor / Tor only) with
+  automatic BridgeDB bridges and pluggable transports, five scan modes,
+  traffic-obfuscation (noise) profiles, upstream-proxy chaining, per-rule
+  routing (block/direct lists), and full userspace operation — no admin rights.
+  The section lives in its own tab; latency is measured through the live
+  session core, consistent with the real-traffic ping contract.
 - Cancel a stuck connection attempt, share/edit configs, **reset the system
   proxy** when a crash left it dangling, modern dark UI, local app log,
   one-click server log viewer.
@@ -166,6 +176,10 @@ and installs nothing. Each core has exactly one job:
 - **`openvpn.exe`** + OpenSSL DLLs + `wintun.dll` — OpenVPN. wintun refuses to
   load from a merely elevated process, so the app runs it as SYSTEM via a
   one-off scheduled task.
+- **`aether.exe`** + `lyrebird.exe` (obfs4 transport) — the Aether
+  censorship-circumvention core (MASQUE / WG / Gool / MiM / Zero Trust / Tor
+  chain), fetched from the pinned CluvexStudio release and SHA256-verified
+  like every other core.
 
 Two constraints worth knowing before you change versions:
 

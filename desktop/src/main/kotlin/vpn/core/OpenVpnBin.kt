@@ -365,10 +365,15 @@ internal object OpenVpn {
         val cleaned = sanitizeOvpn(conf, File(exe.parentFile, "current.ovpn"))
         runCatching { logFile.delete() }
         runCatching { marker.writeText(TASK_NAME) }
+        // TOCTOU guard: hash the binary NOW (same read the signature check
+        // covered) and have the ELEVATED script re-verify it right before
+        // staging — a file swapped in the UAC-wait window fails on the admin
+        // side instead of executing as SYSTEM.
+        val exeSha256 = sha256(exe)
         val result = VpnScripts.runElevatedScript(120) { f ->
             VpnScripts.buildOvpnConnectScript(
                 f, exe.absolutePath, cleaned.absolutePath, logFile.absolutePath,
-                TASK_NAME, secureDir.absolutePath,
+                TASK_NAME, secureDir.absolutePath, exeSha256,
             )
         }
         if (result.ok) {
@@ -456,6 +461,20 @@ internal object OpenVpn {
                 "-File", script.absolutePath,
             ),
         )
+    }
+
+    /** SHA-256 of a file, lowercase hex (TOCTOU guard for the SYSTEM staging). */
+    private fun sha256(file: File): String {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                md.update(buf, 0, n)
+            }
+        }
+        return md.digest().joinToString("") { "%02x".format(it) }
     }
 }
 

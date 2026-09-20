@@ -121,70 +121,70 @@ object AppList {
         val out = psQuote(outPath)
         return buildScript(
             """
-            §ErrorActionPreference = 'SilentlyContinue'
-            §rows = New-Object 'System.Collections.Generic.List[string]'
-            §seen = @{}
-            function Add-Row(§name, §exe, §icon) {
-                if ([string]::IsNullOrWhiteSpace(§name)) { §name = §exe }
-                if ([string]::IsNullOrWhiteSpace(§name)) { return }
-                §key = ''
-                if (§exe) { §key = ([IO.Path]::GetFileName(§exe)).ToLower() } else { §key = ('n:' + §name.ToLower()) }
-                if (§seen.ContainsKey(§key)) { return }
-                §seen[§key] = §true
-                §n = §name -replace "`t", ' ' -replace "`r`n", ' ' -replace "`n", ' '
-                §rows.Add(("" + §n + "`t" + §exe + "`t" + §icon))
+            ${VpnScripts.PS}ErrorActionPreference = 'SilentlyContinue'
+            ${VpnScripts.PS}rows = New-Object 'System.Collections.Generic.List[string]'
+            ${VpnScripts.PS}seen = @{}
+            function Add-Row(${VpnScripts.PS}name, ${VpnScripts.PS}exe, ${VpnScripts.PS}icon) {
+                if ([string]::IsNullOrWhiteSpace(${VpnScripts.PS}name)) { ${VpnScripts.PS}name = ${VpnScripts.PS}exe }
+                if ([string]::IsNullOrWhiteSpace(${VpnScripts.PS}name)) { return }
+                ${VpnScripts.PS}key = ''
+                if (${VpnScripts.PS}exe) { ${VpnScripts.PS}key = ([IO.Path]::GetFileName(${VpnScripts.PS}exe)).ToLower() } else { ${VpnScripts.PS}key = ('n:' + ${VpnScripts.PS}name.ToLower()) }
+                if (${VpnScripts.PS}seen.ContainsKey(${VpnScripts.PS}key)) { return }
+                ${VpnScripts.PS}seen[${VpnScripts.PS}key] = ${VpnScripts.PS}true
+                ${VpnScripts.PS}n = ${VpnScripts.PS}name -replace "`t", ' ' -replace "`r`n", ' ' -replace "`n", ' '
+                ${VpnScripts.PS}rows.Add(("" + ${VpnScripts.PS}n + "`t" + ${VpnScripts.PS}exe + "`t" + ${VpnScripts.PS}icon))
             }
 
             # 1) Classic installed programs from the Uninstall registry.
-            §roots = @(
+            ${VpnScripts.PS}roots = @(
                 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
                 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
                 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
             )
-            foreach (§root in §roots) {
-                Get-ChildItem §root -ErrorAction SilentlyContinue | ForEach-Object {
-                    §p = Get-ItemProperty -LiteralPath §_.PSPath -ErrorAction SilentlyContinue
-                    §name = §p.DisplayName
-                    if ([string]::IsNullOrWhiteSpace(§name)) { return }
+            foreach (${VpnScripts.PS}root in ${VpnScripts.PS}roots) {
+                Get-ChildItem ${VpnScripts.PS}root -ErrorAction SilentlyContinue | ForEach-Object {
+                    ${VpnScripts.PS}p = Get-ItemProperty -LiteralPath ${VpnScripts.PS}_.PSPath -ErrorAction SilentlyContinue
+                    ${VpnScripts.PS}name = ${VpnScripts.PS}p.DisplayName
+                    if ([string]::IsNullOrWhiteSpace(${VpnScripts.PS}name)) { return }
                     # Skip Windows-internal noise (updaters, runtimes, hardware drivers).
-                    if (§name -match '^(Update for|Security Update|Hotfix|Service Pack|Microsoft Visual C\+\+|Microsoft \.NET|\.NET |MSI Afterburner Runtime|Microsoft Edge ?(Update|Setup)|Windows PC Health|Windows Update Health|Windows SDK|Windows Driver|Java|OpenJDK|NVIDIA |Intel|AMD |Realtek |Microsoft Visual Studio)') { return }
-                    §icon = ''
-                    if (§p.DisplayIcon) {
-                        §icon = [string]§p.DisplayIcon -replace ',\d+$', ''
-                        §icon = [Environment]::ExpandEnvironmentVariables(§icon.Trim().Trim('"'))
-                        if (§icon -notmatch '\.(exe|ico)$') { §icon = '' }
+                    if (${VpnScripts.PS}name -match '^(Update for|Security Update|Hotfix|Service Pack|Microsoft Visual C\+\+|Microsoft \.NET|\.NET |MSI Afterburner Runtime|Microsoft Edge ?(Update|Setup)|Windows PC Health|Windows Update Health|Windows SDK|Windows Driver|Java|OpenJDK|NVIDIA |Intel|AMD |Realtek |Microsoft Visual Studio)') { return }
+                    ${VpnScripts.PS}icon = ''
+                    if (${VpnScripts.PS}p.DisplayIcon) {
+                        ${VpnScripts.PS}icon = [string]${VpnScripts.PS}p.DisplayIcon -replace ',\d+$', ''
+                        ${VpnScripts.PS}icon = [Environment]::ExpandEnvironmentVariables(${VpnScripts.PS}icon.Trim().Trim('"'))
+                        if (${VpnScripts.PS}icon -notmatch '\.(exe|ico)$') { ${VpnScripts.PS}icon = '' }
                     }
-                    §exe = ''
-                    §loc = [string]§p.InstallLocation
-                    if (§loc) {
-                        §loc = [Environment]::ExpandEnvironmentVariables(§loc.Trim().Trim('"'))
-                        if (Test-Path -LiteralPath §loc -PathType Container) {
-                            §f = Get-ChildItem -LiteralPath §loc -Filter *.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-                            if (§f) { §exe = §f.FullName }
+                    ${VpnScripts.PS}exe = ''
+                    ${VpnScripts.PS}loc = [string]${VpnScripts.PS}p.InstallLocation
+                    if (${VpnScripts.PS}loc) {
+                        ${VpnScripts.PS}loc = [Environment]::ExpandEnvironmentVariables(${VpnScripts.PS}loc.Trim().Trim('"'))
+                        if (Test-Path -LiteralPath ${VpnScripts.PS}loc -PathType Container) {
+                            ${VpnScripts.PS}f = Get-ChildItem -LiteralPath ${VpnScripts.PS}loc -Filter *.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+                            if (${VpnScripts.PS}f) { ${VpnScripts.PS}exe = ${VpnScripts.PS}f.FullName }
                         }
                     }
-                    if (-not §exe -and §icon -match '\.exe$') { §exe = §icon }
-                    Add-Row §name §exe §icon
+                    if (-not ${VpnScripts.PS}exe -and ${VpnScripts.PS}icon -match '\.exe$') { ${VpnScripts.PS}exe = ${VpnScripts.PS}icon }
+                    Add-Row ${VpnScripts.PS}name ${VpnScripts.PS}exe ${VpnScripts.PS}icon
                 }
             }
 
             # 2) Start Menu shortcuts → real targets (covers AppX/Store apps).
-            §wsh = New-Object -ComObject WScript.Shell
-            §dirs = @("§env:ProgramData\Microsoft\Windows\Start Menu\Programs", "§env:APPDATA\Microsoft\Windows\Start Menu\Programs")
-            foreach (§d in §dirs) {
-                Get-ChildItem -LiteralPath §d -Recurse -Filter *.lnk -ErrorAction SilentlyContinue | ForEach-Object {
+            ${VpnScripts.PS}wsh = New-Object -ComObject WScript.Shell
+            ${VpnScripts.PS}dirs = @("${VpnScripts.PS}env:ProgramData\Microsoft\Windows\Start Menu\Programs", "${VpnScripts.PS}env:APPDATA\Microsoft\Windows\Start Menu\Programs")
+            foreach (${VpnScripts.PS}d in ${VpnScripts.PS}dirs) {
+                Get-ChildItem -LiteralPath ${VpnScripts.PS}d -Recurse -Filter *.lnk -ErrorAction SilentlyContinue | ForEach-Object {
                     try {
-                        §s = §wsh.CreateShortcut(§_.FullName)
-                        §t = [string]§s.TargetPath
-                        if (§t -match '\.exe$' -and (Test-Path -LiteralPath §t)) {
-                            §t = [Environment]::ExpandEnvironmentVariables(§t.Trim().Trim('"'))
-                            Add-Row (§_.BaseName) §t §t
+                        ${VpnScripts.PS}s = ${VpnScripts.PS}wsh.CreateShortcut(${VpnScripts.PS}_.FullName)
+                        ${VpnScripts.PS}t = [string]${VpnScripts.PS}s.TargetPath
+                        if (${VpnScripts.PS}t -match '\.exe$' -and (Test-Path -LiteralPath ${VpnScripts.PS}t)) {
+                            ${VpnScripts.PS}t = [Environment]::ExpandEnvironmentVariables(${VpnScripts.PS}t.Trim().Trim('"'))
+                            Add-Row (${VpnScripts.PS}_.BaseName) ${VpnScripts.PS}t ${VpnScripts.PS}t
                         }
                     } catch { }
                 }
             }
 
-            [IO.File]::WriteAllLines(${out}, §rows.ToArray(), (New-Object System.Text.UTF8Encoding(§false)))
+            [IO.File]::WriteAllLines(${out}, ${VpnScripts.PS}rows.ToArray(), (New-Object System.Text.UTF8Encoding(${VpnScripts.PS}false)))
             """,
         )
     }
@@ -195,16 +195,16 @@ object AppList {
         val dst = psQuote(outPng)
         return buildScript(
             """
-            §ErrorActionPreference = 'Stop'
+            ${VpnScripts.PS}ErrorActionPreference = 'Stop'
             Add-Type -AssemblyName System.Drawing
             try {
-                §srcPath = [Environment]::ExpandEnvironmentVariables(${src})
-                §icon = [System.Drawing.Icon]::ExtractAssociatedIcon(§srcPath)
-                if (§icon) {
-                    §bmp = §icon.ToBitmap()
-                    §bmp.Save(${dst}, [System.Drawing.Imaging.ImageFormat]::Png)
-                    §bmp.Dispose()
-                    §icon.Dispose()
+                ${VpnScripts.PS}srcPath = [Environment]::ExpandEnvironmentVariables(${src})
+                ${VpnScripts.PS}icon = [System.Drawing.Icon]::ExtractAssociatedIcon(${VpnScripts.PS}srcPath)
+                if (${VpnScripts.PS}icon) {
+                    ${VpnScripts.PS}bmp = ${VpnScripts.PS}icon.ToBitmap()
+                    ${VpnScripts.PS}bmp.Save(${dst}, [System.Drawing.Imaging.ImageFormat]::Png)
+                    ${VpnScripts.PS}bmp.Dispose()
+                    ${VpnScripts.PS}icon.Dispose()
                     exit 0
                 }
             } catch {

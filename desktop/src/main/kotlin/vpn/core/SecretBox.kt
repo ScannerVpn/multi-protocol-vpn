@@ -33,6 +33,16 @@ object SecretBox {
     val isWindows: Boolean =
         System.getProperty("os.name")?.lowercase()?.contains("windows") == true
 
+    /**
+     * P3-12: set when a protect() failed and the value had to be stored as
+     * PLAINTEXT (fail-open preserves function; a hard failure would make the
+     * whole store unusable). Settings → Maintenance surfaces it so the user
+     * knows at-rest protection is degraded instead of finding out never.
+     */
+    @Volatile
+    var lastProtectFailed: Boolean = false
+        private set
+
     /** Encrypts [plain]; returns the dpapi:v1:… blob (or plain off-Windows). */
     fun protect(plain: String?): String? {
         if (plain.isNullOrEmpty()) return plain
@@ -48,6 +58,7 @@ object SecretBox {
             )
         }.getOrElse {
             AppLog.e("SecretBox", "protect failed (${it.message}) — storing plaintext")
+            lastProtectFailed = true
             plain
         }
     }

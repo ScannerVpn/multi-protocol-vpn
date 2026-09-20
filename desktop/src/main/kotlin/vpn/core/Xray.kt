@@ -37,8 +37,24 @@ object Xray {
 
     // ------------------------------------------------------------- config
 
-    private fun q(s: String?) =
-        "\"" + (s ?: "").replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+    private fun q(s: String?): String {
+        val t = (s ?: "")
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            // P3-6 fix: a link secret carrying an encoded control character
+            // (%0A/%09/%0D) used to reach the JSON as a RAW newline/tab,
+            // which xray refuses with "bad link?". Escape them properly.
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t")
+            .replace("\u0008", "\\b")
+            .replace("\u000C", "\\f")
+        val sb = StringBuilder("\"")
+        for (c in t) {
+            if (c < ' ') sb.append("\\u%04x".format(c.code)) else sb.append(c)
+        }
+        return sb.append('"').toString()
+    }
 
     /**
      * Builds the xray client config JSON for a parsed share link.
@@ -114,13 +130,33 @@ $stream
 $stream
                }}
             """.trimIndent()
-            else -> """
+            else -> {
+                // P3-5 fix: an ss:// link's transport used to be dropped
+                // silently ("ss://...?type=ws&path=/x" connected as plain
+                // tcp and failed with "server did not answer"). xray's
+                // shadowsocks outbound accepts streamSettings, so any
+                // non-tcp transport now renders like vless/trojan's.
+                if (network == "tcp" && link.params.isEmpty()) {
+                    """
               {"protocol": "shadowsocks",
                "settings": {"servers": [{
                  "address": ${q(link.address)}, "port": ${link.port},
                  "method": ${q(link.method)}, "password": ${q(link.secret)}
                }]}}
-            """.trimIndent()
+                    """.trimIndent()
+                } else {
+                    """
+              {"protocol": "shadowsocks",
+               "settings": {"servers": [{
+                 "address": ${q(link.address)}, "port": ${link.port},
+                 "method": ${q(link.method)}, "password": ${q(link.secret)}
+               }]},
+               "streamSettings": {
+$stream
+               }}
+                    """.trimIndent()
+                }
+            }
         }
 
         return """
@@ -276,25 +312,34 @@ $outbound,
         val url = latestXrayZipUrl() ?: return null
         AppLog.i("Xray", "Downloading ${url.substringAfterLast('/')}")
         val zip = File.createTempFile("xray_", ".zip")
-        runCatching {
-            val req = HttpRequest.newBuilder(URI.create(url))
-                .timeout(Duration.ofSeconds(300)).GET().build()
-            val resp = httpClient.send(req, HttpResponse.BodyHandlers.ofFile(zip.toPath()))
-            if (resp.statusCode() !in 200..299) return null
-            java.util.zip.ZipFile(zip).use { zf ->
-                zf.entries().asSequence()
-                    .filter { it.name.endsWith("xray.exe") || it.name.endsWith(".dat") }
-                    .forEach { e ->
-                        Files.copy(
-                            zf.getInputStream(e),
-                            File(xrayDir, File(e.name).name).toPath(),
-                            StandardCopyOption.REPLACE_EXISTING,
-                        )
-                    }
-            }
-        }.onFailure { AppLog.e("Xray", "download failed: ${it.message}") }
-        zip.delete()
-        return exe()
+        try {
+            runCatching {
+                val req = HttpRequest.newBuilder(URI.create(url))
+                    .timeout(Duration.ofSeconds(300)).GET().build()
+                val resp = httpClient.send(req, HttpResponse.BodyHandlers.ofFile(zip.toPath()))
+                // P3-1 fix: the non-local `return null` inside runCatching
+                // used to skip the zip.delete() below — a multi-MB archive
+                // stayed in %TEMP% after every failed download.
+                if (resp.statusCode() !in 200..299) {
+                    AppLog.e("Xray", "download failed: HTTP ${resp.statusCode()}")
+                    return null
+                }
+                java.util.zip.ZipFile(zip).use { zf ->
+                    zf.entries().asSequence()
+                        .filter { it.name.endsWith("xray.exe") || it.name.endsWith(".dat") }
+                        .forEach { e ->
+                            Files.copy(
+                                zf.getInputStream(e),
+                                File(xrayDir, File(e.name).name).toPath(),
+                                StandardCopyOption.REPLACE_EXISTING,
+                            )
+                        }
+                }
+            }.onFailure { AppLog.e("Xray", "download failed: ${it.message}") }
+            return exe()
+        } finally {
+            runCatching { zip.delete() }
+        }
     }
 
     /**

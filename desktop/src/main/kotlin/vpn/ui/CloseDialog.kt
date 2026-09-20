@@ -65,6 +65,7 @@ fun CloseChoiceDialog(
     tunnelActive: Boolean,
     onChoice: (CloseOutcome, Boolean) -> Unit,
     onDismiss: () -> Unit,
+    trayAvailable: Boolean = true,
 ) {
     // NOT named `remember`: a local of that name shadows the Compose
     // `remember` function for the rest of the scope.
@@ -120,6 +121,10 @@ fun CloseChoiceDialog(
                     } else {
                         "Keep $appName running in the background"
                     },
+                    // P2-9b fix: never offer a hiding place that does not
+                    // exist — without a tray icon the choice used to leave
+                    // the app unreachable.
+                    enabled = trayAvailable,
                     onClick = { onChoice(CloseOutcome.HIDE_TO_TRAY, rememberChoice) },
                 )
                 Spacer(Modifier.height(10.dp))
@@ -184,9 +189,11 @@ private fun CloseOptionRow(
     title: String,
     subtitle: String,
     onClick: () -> Unit,
+    enabled: Boolean = true,
 ) {
     Surface(
         onClick = onClick,
+        enabled = enabled,
         shape = RoundedCornerShape(10.dp),
         color = C.Glass,
         border = BorderStroke(1.dp, C.Border),

@@ -111,6 +111,70 @@ object SplitModes {
 }
 
 @Serializable
+data class AetherSettings(
+    /** masque | wg | gool | mim | zt (see Aether.PROTOCOLS). */
+    var protocol: String = "masque",
+    /** MASQUE over HTTP/2 (TCP) instead of HTTP/3 (QUIC). */
+    var h2: Boolean = false,
+    /** turbo | balanced | thorough | stealth | ironclad. */
+    var scan: String = "balanced",
+    /** "" = core default (firewall for MASQUE, balanced for WG/gool). */
+    var noise: String = "",
+    /** auto | v4 | v6 | dual. */
+    var ipMode: String = "auto",
+    var ech: Boolean = false,
+    var noDataCheck: Boolean = false,
+    var quickReconnect: Boolean = true,
+    /** Fragment the TLS ClientHello on the HTTP/2 transport. */
+    var fragment: Boolean = false,
+    var fragmentSize: String = "16-32",
+    var fragmentDelay: String = "2-10",
+    /** Gool manual hops (ip:port); empty = scan. */
+    var wiwOuter: String = "",
+    var wiwInner: String = "",
+    var wiwScan: Boolean = true,
+    /** MASQUE-in-MASQUE manual hops (ip:port); empty = auto. */
+    var mimOuter: String = "",
+    var mimInner: String = "",
+    /** WireGuard persistent keepalive seconds (0 = off). */
+    var keepalive: Int = 5,
+    /** Custom in-tunnel DNS resolvers (CSV), empty = core default. */
+    var dns: String = "",
+    /** Upstream proxy URL, e.g. socks5://127.0.0.1:1080 — dial out through it. */
+    var upstream: String = "",
+    /** Also expose an HTTP CONNECT proxy on Aether.HTTP_PORT. */
+    var httpProxy: Boolean = true,
+    // --- Zero Trust (Cloudflare for Organizations) ---
+    var team: String = "",
+    var accessToken: String = "",
+    var accessId: String = "",
+    var accessSecret: String = "",
+    var accessEmail: String = "",
+    /** Route web traffic through the organization's gateway (logs browsing). */
+    var ztGateway: Boolean = false,
+    // --- Tor chain ---
+    /** off | chain (inside tunnel) | reverse (tunnel through Tor) | only. */
+    var torMode: String = "off",
+    /** auto | force | off — BridgeDB bridges. */
+    var torBridges: String = "auto",
+    /** Manual bridge lines, ';'-separated. */
+    var torBridgeLines: String = "",
+    /** Ask BridgeDB for bridges in this country (e.g. "de"). */
+    var torCountry: String = "",
+    // --- Routing rules ---
+    /** comma/newline separated: domain, full:, keyword:, regexp:, CIDR, port:, private */
+    var routeBlock: String = "",
+    var routeDirect: String = "",
+    // --- Performance / diagnostics ---
+    /** "" = auto | low | medium | high. */
+    var perf: String = "",
+    /** error | warn | info | debug | trace. */
+    var logLevel: String = "info",
+    var validateSecs: Int = 10,
+    var reconnectSecs: Int = 2,
+)
+
+@Serializable
 data class AppSettings(
     var autoConnect: Boolean = false,
     var dnsLeakProtection: Boolean = true,
@@ -144,6 +208,8 @@ data class AppSettings(
     var animationsEnabled: Boolean = true,
     /** Animation intensity: "full", "reduced", or "off". */
     var animationLevel: String = "full",
+    /** The Aether section's persisted configuration (censorship circumvention). */
+    var aether: AetherSettings = AetherSettings(),
 )
 
 /**

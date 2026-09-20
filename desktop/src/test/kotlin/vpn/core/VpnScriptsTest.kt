@@ -51,11 +51,12 @@ class VpnScriptsTest {
 
     @Test
     fun `no script leaks the internal placeholder`() {
-        // '§' stands in for '$' so Kotlin templates do not clash. If
+        // The VpnScripts.PS placeholder (U+0001) stands in for '$'. If
         // dollarize() is ever skipped, the script becomes syntactic garbage
         // that fails at runtime with no useful message.
         allScripts().forEach { (name, s) ->
-            assertFalse('§' in s, "$name: § placeholder leaked — dollarize() not applied")
+            assertFalse('\u0001' in s, "$name: U+0001 placeholder leaked — dollarize() not applied")
+            assertTrue('$' in s, "$name: dollarize() produced no '$' at all")
         }
     }
 

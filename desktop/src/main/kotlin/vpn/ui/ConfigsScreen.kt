@@ -823,6 +823,10 @@ private fun AddConfigDialog(onDismiss: () -> Unit) {
                             error = "Subscription URL is required"
                             return@TextButton
                         }
+                        // P2-8 fix: re-entry guard — a second click before the
+                        // recomposition disabled the button used to launch a
+                        // second import and duplicate the whole subscription.
+                        if (importing) return@TextButton
                         importing = true
                         error = null
                         val url = subUrl
@@ -860,8 +864,13 @@ private fun AddConfigDialog(onDismiss: () -> Unit) {
                         name.isBlank() -> error = "Name is required"
                         conf.isBlank() -> error = "Select the .ovpn file"
                         else -> {
-                            AppState.addManualOvpn(name, ip, conf)
-                            onDismiss()
+                            // P3-13 fix: surface an unreadable file instead of
+                            // saving a config that can never connect.
+                            if (AppState.addManualOvpn(name, ip, conf)) {
+                                onDismiss()
+                            } else {
+                                error = "Could not read the .ovpn file"
+                            }
                         }
                     }
                     AddMode.IKEV2 -> when {
@@ -876,7 +885,7 @@ private fun AddConfigDialog(onDismiss: () -> Unit) {
             }) {
                 Text(
                     if (mode == AddMode.SUBSCRIPTION) "Import" else "Add",
-                    color = C.Accent2,
+                    color = C.Accent2.copy(alpha = if (importing && mode == AddMode.SUBSCRIPTION) 0.5f else 1f),
                     fontWeight = FontWeight.SemiBold,
                 )
             }
