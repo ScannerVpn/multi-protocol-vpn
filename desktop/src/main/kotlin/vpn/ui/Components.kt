@@ -59,8 +59,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -85,37 +87,67 @@ fun Modifier.pressScale(interaction: MutableInteractionSource): Modifier {
 }
 
 /**
- * Animated aurora backdrop: three drifting radial blobs (violet/cyan/mint)
- * on the base vertical gradient. Runs one infinite transition for all blobs.
+ * Carbon Pro backdrop (v3.9): graphite base gradient + a faint amber data
+ * grid + two very subtle drifting glows + a slow horizontal scanline sweep.
+ * Runs one infinite transition for all moving layers.
  */
 @Composable
 fun AuroraBackground(modifier: Modifier = Modifier) {
-    val t = rememberInfiniteTransition(label = "aurora")
-    val p1 by t.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(16_000, easing = LinearEasing), RepeatMode.Reverse),
-        label = "p1",
-    )
-    val p2 by t.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(21_000, easing = LinearEasing), RepeatMode.Reverse),
-        label = "p2",
-    )
-    val p3 by t.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(26_000, easing = LinearEasing), RepeatMode.Reverse),
-        label = "p3",
-    )
-    Canvas(modifier.fillMaxSize()) {
-        drawRect(Brush.verticalGradient(listOf(C.BgTop, C.BgMid, C.BgBottom)))
-        fun blob(x: Float, y: Float, radius: Float, color: Color) {
-            drawCircle(Brush.radialGradient(listOf(color, Color.Transparent), center = Offset(x, y), radius = radius), radius = radius, center = Offset(x, y))
-        }
-        val w = size.width; val h = size.height
-        blob(w * (0.05f + 0.25f * p1), h * (0.02f + 0.10f * (1 - p1)), w * 0.75f, C.Accent.copy(alpha = 0.20f))
-        blob(w * (0.95f - 0.30f * p2), h * (0.55f + 0.18f * p2), w * 0.80f, C.Accent2.copy(alpha = 0.14f))
-        blob(w * (0.15f + 0.55f * p3), h * (0.98f - 0.12f * p3), w * 0.70f, C.Accent3.copy(alpha = 0.10f))
+    if (!C.animationsEnabled) {
+        val base = if (C.lightMode) C.BgBottom else C.BgMid
+        Box(modifier.fillMaxSize().background(base)) {}
+        return
     }
+    val t = rememberInfiniteTransition(label = "carbon")
+    val scan by t.animateFloat(
+        0f, 1f,
+        infiniteRepeatable(tween(7_000, easing = LinearEasing)),
+        label = "scan",
+    )
+    Box(modifier.fillMaxSize().drawWithCache {
+        val w = size.width
+        val h = size.height
+        val step = 36.dp.toPx()
+        val grid = C.Accent.copy(alpha = 0.045f)
+        val base = Brush.verticalGradient(listOf(C.BgTop, C.BgMid, C.BgBottom))
+        val glowTop = Brush.radialGradient(
+            listOf(C.Accent.copy(alpha = 0.10f), Color.Transparent),
+            center = Offset(w * 0.76f, h * 0.08f),
+            radius = w * 0.56f,
+        )
+        val glowBottom = Brush.radialGradient(
+            listOf(C.Accent2.copy(alpha = 0.07f), Color.Transparent),
+            center = Offset(w * 0.22f, h * 0.90f),
+            radius = w * 0.62f,
+        )
+        onDrawBehind {
+            drawRect(base)
+            drawRect(glowTop)
+            drawRect(glowBottom)
+            var gx = 0f
+            while (gx < w) {
+                drawLine(grid, Offset(gx, 0f), Offset(gx, h), strokeWidth = 1.dp.toPx())
+                gx += step
+            }
+            var gy = 0f
+            while (gy < h) {
+                drawLine(grid, Offset(0f, gy), Offset(w, gy), strokeWidth = 1.dp.toPx())
+                gy += step
+            }
+            val bandH = h * 0.16f
+            val bandY = if (C.animationLevel == "reduced") h * 0.5f else -bandH + (h + 2 * bandH) * scan
+            val scanAlpha = if (C.animationLevel == "reduced") 0.025f else 0.07f
+            drawRect(
+                Brush.verticalGradient(
+                    listOf(Color.Transparent, C.Accent.copy(alpha = scanAlpha), Color.Transparent),
+                    startY = bandY,
+                    endY = bandY + bandH,
+                ),
+                topLeft = Offset(0f, bandY),
+                size = Size(w, bandH),
+            )
+        }
+    }) {}
 }
 
 /** Delays [visible] by index*60ms then plays a slide+fade entrance. */
@@ -169,9 +201,9 @@ fun GlassCard(
         },
         tween(180),
     )
-    val shape = RoundedCornerShape(22.dp)
+    val shape = RoundedCornerShape(16.dp)
     val border = if (accent) {
-        BorderStroke(1.dp, Brush.linearGradient(listOf(C.Accent.copy(alpha = 0.9f), C.Accent2.copy(alpha = 0.75f))))
+        BorderStroke(1.dp, Brush.linearGradient(listOf(C.Accent.copy(alpha = 0.72f), C.Accent2.copy(alpha = 0.56f))))
     } else {
         BorderStroke(1.dp, borderColor)
     }
@@ -186,8 +218,10 @@ fun GlassCard(
             .then(if (accent) Modifier.background(C.AccentGlow, shape) else Modifier),
         shape = shape,
         color = bg,
+        tonalElevation = if (hovered || accent) 2.dp else 0.dp,
+        shadowElevation = if (hovered && onClick != null) 4.dp else 0.dp,
         border = border,
-    ) { Column(Modifier.padding(16.dp), content = content) }
+    ) { Column(Modifier.padding(18.dp), content = content) }
 }
 
 /** Rounded icon tile used as a leading avatar on cards. */
@@ -202,7 +236,7 @@ fun IconTile(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .size(size.dp)
-            .clip(RoundedCornerShape((size / 3).dp))
+            .clip(RoundedCornerShape((size / 4).dp))
             .then(
                 if (gradient) {
                     Modifier.background(Brush.linearGradient(listOf(C.Accent, C.Accent2)))
@@ -276,7 +310,7 @@ fun AppButton(
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
     val alpha by animateFloatAsState(if (hovered && enabled) 1f else 0.88f, tween(150))
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(if (compact) 12.dp else 14.dp)
     val fg = when {
         gradient -> C.OnAccent
         danger -> C.Error
@@ -290,13 +324,14 @@ fun AppButton(
         color = when {
             gradient -> Color.Transparent
             danger -> C.ErrorDim
-            else -> C.GlassStrong
+            else -> if (hovered) C.SurfaceHigh else C.GlassStrong
         },
         contentColor = fg,
+        shadowElevation = if (hovered && enabled) 3.dp else 0.dp,
         border = when {
             gradient -> null
             danger -> BorderStroke(1.dp, C.Error.copy(alpha = 0.35f))
-            else -> BorderStroke(1.dp, C.BorderStrong)
+            else -> BorderStroke(1.dp, if (hovered) C.BorderStrong else C.Border)
         },
         modifier = modifier
             .pressScale(interaction)
@@ -359,7 +394,7 @@ fun IconAction(
 ) {
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(11.dp),
+        shape = RoundedCornerShape(8.dp),
         color = bg,
         modifier = Modifier.size(34.dp),
     ) {
@@ -380,9 +415,9 @@ fun EmptyState(icon: ImageVector, text: String, modifier: Modifier = Modifier) {
             contentAlignment = Alignment.Center,
             modifier = Modifier
                 .size(64.dp)
-                .clip(RoundedCornerShape(22.dp))
+                .clip(RoundedCornerShape(12.dp))
                 .background(C.Glass)
-                .border(1.dp, C.Border, RoundedCornerShape(22.dp)),
+                .border(1.dp, C.Border, RoundedCornerShape(12.dp)),
         ) {
             Icon(icon, null, tint = C.TextFaint, modifier = Modifier.size(28.dp))
         }
@@ -420,7 +455,7 @@ fun AppTextField(
         label = { Text(label, fontSize = 12.sp) },
         singleLine = singleLine,
         minLines = minLines,
-        shape = RoundedCornerShape(13.dp),
+        shape = RoundedCornerShape(8.dp),
         visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = keyboardOptions,
         colors = OutlinedTextFieldDefaults.colors(
@@ -543,7 +578,7 @@ fun FolderHeader(
     val arrowRotation by animateFloatAsState(if (expanded) 0f else -90f, tween(200))
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(10.dp),
         color = C.Glass,
         border = BorderStroke(1.dp, C.Border),
         modifier = modifier.fillMaxWidth(),

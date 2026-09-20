@@ -86,7 +86,7 @@ internal object VpnPing {
 
     /** Closed-port fail-fast budget. A blocked port usually refuses in ms;
      * an silently-dropped one waits this long — much better than 5 s. */
-    internal const val TCP_PRECHECK_MS = 1500
+    internal const val TCP_PRECHECK_MS = 900
 
     /** Per-test budgets. A healthy server answers in <1.5 s through its
      * tunnel; 2.5 s is generous headroom while keeping dead endpoints from
@@ -214,27 +214,37 @@ internal object VpnPing {
     }
 
     /**
-     * Locale-independent ping (Test-Connection averages the latency itself).
-     * The host comes from user-supplied share links, so it is validated
-     * against a strict allow-list BEFORE it ever reaches a shell command —
-     * otherwise a crafted link like `vless://x@$(calc):443` executes code.
-     * @return average round-trip in ms, or null on timeout/failure.
+     * Extracts the first Windows ping latency from English or localized output.
+     * The `time=42ms` / `time<1ms` token is stable across Windows locales,
+     * unlike the surrounding summary text.
+     */
+    internal fun parseWindowsPingOutput(output: String): Int? {
+        val match = Regex("\\btime\\s*[=<]\\s*(\\d+)\\s*ms\\b", RegexOption.IGNORE_CASE)
+            .find(output)
+            ?: return null
+        return match.groupValues[1].toIntOrNull()?.coerceAtLeast(1)
+    }
+
+    /**
+     * Fast host ping for the Servers screen. This is diagnostic ICMP only;
+     * proxy latency still uses the real traffic path below.
      */
     suspend fun pingMs(host: String): Int? = withContext(Dispatchers.IO) {
         val safe = safeHost(host) ?: return@withContext null
+        val outputFile = runCatching { File.createTempFile("multivpn_icmp_", ".txt") }.getOrNull()
+            ?: return@withContext null
         try {
-            runCatching { pingFile.delete() }
-            HiddenRun.runRawAndWait(
-                "cmd.exe /c powershell -NoProfile -Command \"(Test-Connection -Count 3 " +
-                    "-ComputerName $safe -ErrorAction SilentlyContinue | " +
-                    "Measure-Object -Property ResponseTime -Average).Average\" > \"${pingFile.absolutePath}\"",
-                timeoutMs = 20_000,
-            )
-            pingFile.takeIf { it.exists() }?.readText()?.trim()
-                ?.takeIf { it.isNotEmpty() && it[0].isDigit() }
-                ?.let { localeAwareDouble(it) }?.let { Math.round(it).toInt() }
+            val pingExe = File(
+                System.getenv("SystemRoot") ?: "C:\\Windows",
+                "System32\\PING.EXE",
+            ).absolutePath
+            val command = "cmd.exe /c \"\"$pingExe\" -n 1 -w 1000 $safe > \"${outputFile.absolutePath}\"\""
+            HiddenRun.runRawAndWait(command, timeoutMs = 2500)
+            parseWindowsPingOutput(outputFile.takeIf { it.exists() }?.readText().orEmpty())
         } catch (_: Exception) {
             null
+        } finally {
+            runCatching { outputFile.delete() }
         }
     }
 

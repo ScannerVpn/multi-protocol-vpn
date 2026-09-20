@@ -523,9 +523,9 @@ class AuditRegressionTest {
     @Test
     fun `tcp precheck budget is the short one`() {
         // The fail-fast that screens dead endpoints before a core spins up
-        // must keep its 1.5s budget — if someone raises it back to 5s the
+        // must keep its sub-second budget — if someone raises it back to 5s the
         // "dead server" list case regresses to the old slowness.
-        assertEquals(1500, VpnPingInternals.tcpPrecheckMs())
+        assertEquals(900, VpnPingInternals.tcpPrecheckMs())
         assertTrue(VpnPingInternals.pingTimeoutMs() <= 2500, "ping budget must stay tight")
         assertTrue(VpnPingInternals.coreWaitMs() <= 2000, "core wait must stay tight")
     }

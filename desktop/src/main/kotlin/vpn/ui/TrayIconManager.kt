@@ -135,7 +135,7 @@ object TrayIconManager {
         g.color = Color(argb, true)
         g.fillRoundRect(0, 0, size, size, 6, 6)
         // Dark "M" glyph colour as RGBA ints (the Color(Long, ...) overload does not exist).
-        g.color = Color(0x04, 0x12, 0x1E)
+        g.color = Color(0x10, 0x11, 0x14)
         g.font = g.font.deriveFont(java.awt.Font.BOLD, 11f)
         val fm = g.fontMetrics
         val x = ((size - fm.stringWidth("M")) / 2).toInt()

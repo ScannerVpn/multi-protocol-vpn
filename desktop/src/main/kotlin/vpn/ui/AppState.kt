@@ -91,6 +91,12 @@ object AppState {
     var trafficRate by mutableStateOf<vpn.core.TrafficStats.Rate?>(null)
         private set
 
+    /** Recent rate samples for the animated traffic graph (oldest first). */
+    var trafficHistory by mutableStateOf<List<vpn.core.TrafficStats.Rate>>(emptyList())
+        private set
+
+    private const val TRAFFIC_HISTORY_SIZE = 32
+
     /** Kept out of snapshot state — it is only the input to the next rate. */
     @Volatile
     private var previousTraffic: vpn.core.TrafficStats.Sample? = null
@@ -100,7 +106,11 @@ object AppState {
         val s = withContext(Dispatchers.IO) {
             runCatching { vpn.core.TrafficStats.sample() }.getOrNull()
         } ?: return
-        trafficRate = vpn.core.TrafficStats.rate(previousTraffic, s)
+        val newRate = vpn.core.TrafficStats.rate(previousTraffic, s)
+        trafficRate = newRate
+        if (newRate != null) {
+            trafficHistory = (trafficHistory + newRate).takeLast(TRAFFIC_HISTORY_SIZE)
+        }
         previousTraffic = s
         traffic = s.takeIf { it.hasData }
     }
@@ -110,6 +120,7 @@ object AppState {
         previousTraffic = null
         traffic = null
         trafficRate = null
+        trafficHistory = emptyList()
     }
 
     /** configId → latency ms (null while measuring, absent = never measured). */
@@ -1144,14 +1155,34 @@ object AppState {
         return true
     }
 
+    /** Selects the best measured config: warm/stable latency wins, then name. */
+    fun autoSelectBestServer(): Boolean {
+        if (connectedOrBusy || pingAllActive) return false
+        val candidates = configs.filter { it.id in latency && it.id !in latencyFailed }
+        if (candidates.isEmpty()) {
+            pingAllConfigs()
+            // Complete the user action after the initial measurements arrive.
+            scope.launch {
+                pingWaveJob?.join()
+                autoSelectBestServer()
+            }
+            return false
+        }
+        val best = candidates.minWithOrNull(
+            compareBy<VpnConfig> { warmLatency[it.id] ?: latency[it.id] ?: Int.MAX_VALUE }
+                .thenBy { it.name.lowercase() },
+        ) ?: return false
+        selectConfig(best.id)
+        AppLog.i("Configs", "Auto-selected ${best.name} at ${warmLatency[best.id] ?: latency[best.id]}ms")
+        return true
+    }
+
     fun selectConfig(id: String) {
         activeConfigId = id
         Storage.saveActiveConfigId(id)
     }
 
     /**
-     * Persists what the X button should do ([vpn.core.CloseActions]).
-     *
      * ONE writer for both entry points — the Settings picker and the "remember
      * my choice" box in the close dialog — so the disk value and the Compose
      * mirror can never disagree (3.6.15's bug was a mirror with no disk write).
@@ -1516,7 +1547,7 @@ object AppState {
             // samples, so without this the card shows no speed for 3 seconds.
             sampleTraffic()
             while (isActive) {
-                delay(3000)
+                delay(1000)
                 // If a new connect attempt started, stop polling — it will
                 // manage its own status transitions.
                 if (connectJob != null) break

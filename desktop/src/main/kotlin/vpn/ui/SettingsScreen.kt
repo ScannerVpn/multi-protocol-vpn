@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,6 +23,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.SettingsEthernet
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -58,15 +60,16 @@ fun SettingsScreen() {
     var cleanResult by remember { mutableStateOf<String?>(null) }
 
     val layout = LocalLayout.current
+    val compact = layout.compact
     Column(
         Modifier
             .fillMaxSize()
             .wrapContentWidth(Alignment.CenterHorizontally)
             .verticalScroll(rememberScrollState())
             .widthIn(max = 880.dp)
-            .padding(horizontal = layout.screenPadding),
+            .padding(horizontal = if (compact) 12.dp else layout.screenPadding),
     ) {
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(if (compact) 14.dp else 20.dp))
         ScreenHeader("Settings", "App behaviour and maintenance")
         Spacer(Modifier.height(16.dp))
 
@@ -109,6 +112,49 @@ fun SettingsScreen() {
                 color = C.TextFaint,
                 fontSize = 10.5.sp,
             )
+        }
+
+        Spacer(Modifier.height(16.dp))
+        SectionTitle("Appearance")
+        GlassCard {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Filled.Palette, null, tint = C.Accent, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Theme", color = C.TextPrimary, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
+                    Text(
+                        if (AppState.settings.theme == "light") "Arctic Light" else "Carbon Pro",
+                        color = C.TextSecondary,
+                        fontSize = 11.sp,
+                    )
+                }
+                SegmentedChip("Carbon", AppState.settings.theme != "light") {
+                    AppState.settings = AppState.settings.copy(theme = "carbon")
+                    Storage.saveSettings(AppState.settings)
+                }
+                Spacer(Modifier.width(6.dp))
+                SegmentedChip("Light", AppState.settings.theme == "light") {
+                    AppState.settings = AppState.settings.copy(theme = "light")
+                    Storage.saveSettings(AppState.settings)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text("Motion intensity", color = C.TextSecondary, fontSize = 11.sp)
+            Spacer(Modifier.height(5.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                SegmentedChip("Full", AppState.settings.animationLevel == "full" && AppState.settings.animationsEnabled) {
+                    AppState.settings = AppState.settings.copy(animationsEnabled = true, animationLevel = "full")
+                    Storage.saveSettings(AppState.settings)
+                }
+                SegmentedChip("Reduced", AppState.settings.animationLevel == "reduced" && AppState.settings.animationsEnabled) {
+                    AppState.settings = AppState.settings.copy(animationsEnabled = true, animationLevel = "reduced")
+                    Storage.saveSettings(AppState.settings)
+                }
+                SegmentedChip("Off", !AppState.settings.animationsEnabled || AppState.settings.animationLevel == "off") {
+                    AppState.settings = AppState.settings.copy(animationsEnabled = false, animationLevel = "off")
+                    Storage.saveSettings(AppState.settings)
+                }
+            }
         }
 
         Spacer(Modifier.height(16.dp))
@@ -217,13 +263,13 @@ private fun AppLogDialog(onDismiss: () -> Unit) {
                     Spacer(Modifier.weight(1f))
                 }
                 Surface(
-                    color = Color(0xFF080C16),
-                    shape = RoundedCornerShape(13.dp),
+                    color = C.SurfaceLow,
+                    shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
                         text,
-                        color = Color(0xFFA5F3D0),
+                        color = C.AccentDim,
                         fontFamily = FontFamily.Monospace,
                         fontSize = 10.5.sp,
                         modifier = Modifier.padding(11.dp).height(340.dp).verticalScroll(rememberScrollState()),
@@ -368,7 +414,7 @@ private fun ProxyPortRow() {
                 value = text,
                 onValueChange = { text = it.filter { c -> c.isDigit() }.take(5) },
                 singleLine = true,
-                shape = RoundedCornerShape(11.dp),
+                shape = RoundedCornerShape(8.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = C.TextPrimary,
                     unfocusedTextColor = C.TextPrimary,
@@ -489,7 +535,7 @@ private fun ToggleRow(title: String, subtitle: String, checked: Boolean, onChang
 private fun ActionRow(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(10.dp),
         color = Color.Transparent,
         modifier = Modifier.fillMaxWidth(),
     ) {

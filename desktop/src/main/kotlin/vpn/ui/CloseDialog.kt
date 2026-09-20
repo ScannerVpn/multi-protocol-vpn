@@ -171,7 +171,7 @@ fun CloseChoiceDialog(
         },
         containerColor = C.Surface,
         titleContentColor = C.TextPrimary,
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(12.dp),
     )
 }
 
@@ -187,7 +187,7 @@ private fun CloseOptionRow(
 ) {
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(10.dp),
         color = C.Glass,
         border = BorderStroke(1.dp, C.Border),
         modifier = Modifier.fillMaxWidth(),

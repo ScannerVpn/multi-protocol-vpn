@@ -138,6 +138,12 @@ data class AppSettings(
      * explicitly turned the old boolean on.
      */
     var closeAction: String? = null,
+    /** Visual theme: "carbon" (dark) or "light". */
+    var theme: String = "carbon",
+    /** Whether decorative motion is enabled. */
+    var animationsEnabled: Boolean = true,
+    /** Animation intensity: "full", "reduced", or "off". */
+    var animationLevel: String = "full",
 )
 
 /**

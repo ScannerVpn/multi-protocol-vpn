@@ -13,6 +13,8 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -29,7 +31,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Layers
@@ -40,6 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -74,7 +77,6 @@ import vpn.ui.LocalLayout
 import vpn.ui.ProvideLayout
 import vpn.ui.AuroraBackground
 import vpn.ui.ConfigsScreen
-import vpn.ui.screens.CyberHudScreen
 import vpn.ui.HomeScreen
 import vpn.ui.ServersScreen
 import vpn.ui.SettingsScreen
@@ -127,7 +129,10 @@ fun main() {
         CompositionLocalProvider(
             LocalWindowExceptionHandlerFactory provides loggingExceptionHandlerFactory,
         ) {
-        val windowState = rememberWindowState(width = 430.dp, height = 780.dp)
+        val windowState = rememberWindowState(width = 1100.dp, height = 760.dp)
+        val themeLight by remember {
+            derivedStateOf { AppState.settings.theme == "light" }
+        }
         val quit: () -> Unit = {
             // Closing the window must fully quit the app: kill the proxy
             // cores and clear the system proxy so nothing is left running
@@ -184,10 +189,15 @@ fun main() {
             // that an undecorated+resizable window keeps (measured: 7px at the
             // top, client origin sits at window+7). Its default is a LIGHT
             // system colour, which is the white hairline visible above the
-            // title bar. Paint it the same navy as the title bar so the seam
+            // title bar. Paint it the same graphite as the title bar so the seam
             // disappears whether DWM composites it or PrintWindow captures it.
-            window.background = java.awt.Color(0x05, 0x07, 0x0E)
-            runCatching { window.contentPane.background = java.awt.Color(0x05, 0x07, 0x0E) }
+            val windowBg = if (themeLight) {
+                java.awt.Color(0xF7, 0xF8, 0xFC)
+            } else {
+                java.awt.Color(0x0B, 0x10, 0x20)
+            }
+            window.background = windowBg
+            runCatching { window.contentPane.background = windowBg }
             // undecorated=true also strips WS_THICKFRAME, i.e. the OS resize
             // border — `resizable = true` alone does NOT bring it back. Put the
             // style bit back so edge/corner dragging and Aero snap keep working
@@ -218,14 +228,20 @@ fun main() {
             }
             // When a second monitor is attached, open the window there (handy
             // while testing on a separate display).
-            runCatching {
-                val devices = GraphicsEnvironment.getLocalGraphicsEnvironment().screenDevices
-                if (devices.size > 1) {
-                    val bounds = devices[1].defaultConfiguration.bounds
-                    window.setLocation(bounds.x + 50, bounds.y + 50)
+            LaunchedEffect(Unit) {
+                runCatching {
+                    val devices = GraphicsEnvironment.getLocalGraphicsEnvironment().screenDevices
+                    if (devices.size > 1) {
+                        val bounds = devices[1].defaultConfiguration.bounds
+                        window.setLocation(bounds.x + 50, bounds.y + 50)
+                    }
                 }
             }
-            MultiVpnTheme {
+        MultiVpnTheme(
+                light = AppState.settings.theme == "light",
+                animations = AppState.settings.animationsEnabled,
+                level = AppState.settings.animationLevel,
+            ) {
                 Column(Modifier.fillMaxSize()) {
                     AppTitleBar(
                         state = windowState,
@@ -267,7 +283,6 @@ private val NAV_ITEMS = listOf(
     NavItem("Dashboard", Icons.Filled.Home),
     NavItem("Servers", Icons.Filled.Dns),
     NavItem("Configs", Icons.Filled.Layers),
-    NavItem("HUD", Icons.Filled.Apps),
     NavItem("Settings", Icons.Filled.Tune),
 )
 
@@ -304,7 +319,6 @@ fun App() {
                             0 -> HomeScreen()
                             1 -> ServersScreen()
                             2 -> ConfigsScreen()
-                            3 -> CyberHudScreen()
                             else -> SettingsScreen()
                         }
                     }
@@ -345,36 +359,29 @@ fun App() {
  *  - `text-primary-container drop-shadow-[0_0_8px_rgba(0,240,255,0.45)]` → the
  *    active item's cyan glow, drawn with a coloured [shadow] on its plate.
  *
- * A bar rather than a hamburger drawer: five destinations is exactly the range
- * a bar handles well, and it keeps every tab one tap away instead of two.
+ * A bar rather than a hamburger drawer: four primary destinations fit the
+ * compact width. The diagnostic HUD was removed entirely from this client.
  */
 @Composable
 private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
-    // HUD is intentionally kept in the expanded sidebar, but it is too dense
-    // for the compact four-destination bar and was the extra tab in the phone-
-    // sized desktop layout.
-    val compactItems = NAV_ITEMS.withIndex().filter { it.index != 3 }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(
-                elevation = 24.dp,
-                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
-                ambientColor = Color.Black,
-                spotColor = Color.Black,
-            )
-            .background(C.BgBottom.copy(alpha = 0.92f)),
+    val compactItems = NAV_ITEMS.withIndex()
+    Surface(
+        color = C.Surface.copy(alpha = 0.98f),
+        border = BorderStroke(1.dp, C.Border),
+        shadowElevation = 8.dp,
+        modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Start,
-            modifier = Modifier.fillMaxWidth().height(76.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            modifier = Modifier.fillMaxWidth().height(72.dp).padding(horizontal = 4.dp),
         ) {
             compactItems.forEach { entry ->
                 BottomNavItem(
                     item = entry.value,
                     active = entry.index == selected,
                     onClick = { onSelect(entry.index) },
+                    modifier = Modifier.weight(1f),
                 )
             }
         }
@@ -383,52 +390,67 @@ private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
 
 /**
  * One destination of the compact bar. The active state is a three-part signal —
- * cyan tint, a low-alpha cyan plate, and a cyan glow — so it never depends on
- * the label alone to read as "you are here".
+ * amber tint, a low-alpha amber plate, and an amber glow — so it never depends
+ * on the label alone to read as "you are here".
  */
 @Composable
-private fun BottomNavItem(item: NavItem, active: Boolean, onClick: () -> Unit) {
+private fun BottomNavItem(
+    item: NavItem,
+    active: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by androidx.compose.animation.core.animateFloatAsState(
+        if (pressed) 0.92f else 1f,
+        androidx.compose.animation.core.spring(dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy),
+        label = "navScale",
+    )
+    val activeScale by androidx.compose.animation.core.animateFloatAsState(
+        if (active) 1f else 0.94f,
+        tween(220),
+        label = "navActiveScale",
+    )
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
-        modifier = Modifier
-            .fillMaxWidth(0.25f)
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .graphicsLayer(scaleX = scale * activeScale, scaleY = scale * activeScale)
+            .padding(horizontal = 2.dp, vertical = 5.dp),
     ) {
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(32.dp)
+                .size(if (active) 34.dp else 30.dp)
                 .then(
                     if (active) {
                         Modifier.shadow(
                             elevation = 10.dp,
-                            shape = RoundedCornerShape(11.dp),
+                            shape = RoundedCornerShape(8.dp),
                             ambientColor = C.Accent,
                             spotColor = C.Accent,
                         )
-                    } else {
-                        Modifier
-                    },
+                    } else Modifier
                 )
                 .background(
-                    if (active) C.Accent.copy(alpha = 0.18f) else Color.Transparent,
-                    RoundedCornerShape(11.dp),
-                ),
+                if (active) C.Accent.copy(alpha = if (C.lightMode) 0.12f else 0.18f) else Color.Transparent,
+                RoundedCornerShape(12.dp),
+            ),
         ) {
             Icon(
                 item.icon,
                 item.label,
                 tint = if (active) C.Accent else C.TextSecondary,
-                modifier = Modifier.size(19.dp),
+                modifier = Modifier.size(if (active) 20.dp else 18.dp),
             )
         }
-        Spacer(Modifier.height(3.dp))
+        Spacer(Modifier.height(2.dp))
         Text(
             item.label,
-            fontSize = 11.sp,
+            fontSize = 10.sp,
             fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
             color = if (active) C.Accent else C.TextPrimary,
             maxLines = 1,
@@ -458,8 +480,8 @@ private fun Sidebar(selected: Int, onSelect: (Int) -> Unit) {
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(36.dp)
-                        .clip(RoundedCornerShape(11.dp))
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
                         .background(Brush.linearGradient(listOf(C.Accent, C.Accent2))),
                 ) {
                     BrandMark(36.dp)
@@ -494,14 +516,10 @@ private fun Sidebar(selected: Int, onSelect: (Int) -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(12.dp))
                         .background(
-                            when {
-                                isSelected -> Brush.linearGradient(
-                                    listOf(C.Accent.copy(alpha = 0.16f), C.Accent.copy(alpha = 0.04f)),
-                                )
-                                else -> Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
-                            },
+                            if (isSelected) C.Accent.copy(alpha = if (C.lightMode) 0.12f else 0.18f) else Color.Transparent,
+                            RoundedCornerShape(12.dp),
                         )
                         .clickable { onSelect(i) }
                         .padding(horizontal = 12.dp, vertical = 11.dp),
@@ -537,7 +555,7 @@ private fun Sidebar(selected: Int, onSelect: (Int) -> Unit) {
             Spacer(Modifier.weight(1f))
             // Footer: app identity + live status dot
             Surface(
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(10.dp),
                 color = C.SurfaceLow,
                 border = BorderStroke(1.dp, C.Border),
                 modifier = Modifier.fillMaxWidth(),

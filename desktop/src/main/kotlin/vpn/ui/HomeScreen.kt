@@ -64,10 +64,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -150,13 +153,19 @@ fun HomeScreen() {
         // server/protocol/ping line under the ring) and the traffic card
         // directly below. The old side-by-side hero + three stat cards
         // wasted half the window on duplicated information.
-        ConnectionCard(
-            status = state.vpnStatus,
-            config = state.activeConfig,
-            onToggle = onToggle,
-            onPickConfig = { showPicker = true },
+        Surface(
+            color = Color.Transparent,
+            shape = RoundedCornerShape(24.dp),
             modifier = Modifier.fillMaxWidth(),
-        )
+        ) {
+            ConnectionCard(
+                status = state.vpnStatus,
+                config = state.activeConfig,
+                onToggle = onToggle,
+                onPickConfig = { showPicker = true },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         Spacer(Modifier.height(layout.cardGap))
         TrafficCard(state)
 
@@ -330,7 +339,7 @@ private fun HeaderChip(
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(10.dp),
-        color = if (highlight) C.Accent.copy(alpha = 0.12f) else C.Surface,
+        color = if (highlight) C.Accent.copy(alpha = if (C.lightMode) 0.10f else 0.16f) else C.SurfaceLow,
         border = BorderStroke(1.dp, if (highlight) C.Accent.copy(alpha = 0.55f) else C.Border),
         modifier = modifier,
     ) {
@@ -523,9 +532,10 @@ private fun SessionTimer(startedAt: Long) {
 private fun LocationRow(config: VpnConfig?, onPick: () -> Unit, modifier: Modifier = Modifier) {
     Surface(
         onClick = onPick,
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(14.dp),
         color = C.SurfaceLow,
         border = BorderStroke(1.dp, C.Border),
+        shadowElevation = 2.dp,
         modifier = modifier.fillMaxWidth(),
     ) {
         Row(
@@ -621,10 +631,10 @@ private fun ErrorCard(
             IconAction(Icons.Filled.Close, "Dismiss", onDismiss, tint = C.TextFaint)
         }
         Spacer(Modifier.height(8.dp))
-        Surface(color = C.ErrorDim, shape = RoundedCornerShape(13.dp), modifier = Modifier.fillMaxWidth()) {
+        Surface(color = C.ErrorDim, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
             Text(
                 message,
-                color = Color(0xFFFFC9D4),
+                color = C.Error,
                 fontSize = 11.5.sp,
                 lineHeight = 15.sp,
                 maxLines = 8,
@@ -710,6 +720,12 @@ private fun TrafficCard(state: AppState) {
                     )
                 }
                 Spacer(Modifier.height(8.dp))
+                TrafficGraph(
+                    history = state.trafficHistory,
+                    perDirection = true,
+                    modifier = Modifier.fillMaxWidth().height(112.dp),
+                )
+                Spacer(Modifier.height(8.dp))
                 InfoRow("Adapter", sample.via)
             }
 
@@ -722,6 +738,12 @@ private fun TrafficCard(state: AppState) {
                     rate = rate?.let { TrafficStats.formatRate(it.rxPerSec) },
                     tint = C.Accent,
                     modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                TrafficGraph(
+                    history = state.trafficHistory,
+                    perDirection = false,
+                    modifier = Modifier.fillMaxWidth().height(112.dp),
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
@@ -838,6 +860,86 @@ private fun HealthCard(state: AppState) {
     }
 }
 
+@Composable
+private fun TrafficGraph(
+    history: List<TrafficStats.Rate>,
+    perDirection: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val transition = rememberInfiniteTransition(label = "trafficGraph")
+    val pulse by transition.animateFloat(
+        0.86f,
+        1.08f,
+        infiniteRepeatable(tween(1200, easing = LinearEasing), RepeatMode.Reverse),
+        label = "trafficPulse",
+    )
+    val values = history.takeLast(32)
+    val rx = values.map { it.rxPerSec.toFloat().coerceAtLeast(0f) }
+    val tx = values.map { it.txPerSec.toFloat().coerceAtLeast(0f) }
+    val all = if (perDirection) rx + tx else rx
+    val maxValue = (all.maxOrNull() ?: 1f).coerceAtLeast(1f)
+    Surface(
+        color = C.SurfaceLow.copy(alpha = 0.82f),
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(1.dp, C.Border),
+        modifier = modifier,
+    ) {
+        Box(Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp)) {
+            Column(Modifier.fillMaxSize()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("LIVE THROUGHPUT", fontSize = 8.5.sp, letterSpacing = 1.2.sp, color = C.TextFaint)
+                    Spacer(Modifier.weight(1f))
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(C.Accent).alpha((pulse * 0.8f).coerceIn(0f, 1f)))
+                    Spacer(Modifier.width(5.dp))
+                    Text("1s", fontSize = 9.sp, color = C.TextSecondary, fontFamily = FontFamily.Monospace)
+                }
+                Spacer(Modifier.height(5.dp))
+                Canvas(Modifier.fillMaxSize().weight(1f)) {
+                    val left = 2.dp.toPx()
+                    val right = size.width - 2.dp.toPx()
+                    val top = 3.dp.toPx()
+                    val bottom = size.height - 2.dp.toPx()
+                    val width = (right - left).coerceAtLeast(1f)
+                    val height = (bottom - top).coerceAtLeast(1f)
+                    for (i in 1..3) {
+                        val y = top + height * i / 4f
+                        drawLine(C.Border.copy(alpha = 0.55f), Offset(left, y), Offset(right, y), 1.dp.toPx())
+                    }
+                    fun pathFor(series: List<Float>): Path? {
+                        if (series.isEmpty()) return null
+                        val path = Path()
+                        series.forEachIndexed { index, value ->
+                            val x = if (series.size == 1) left else left + width * index / (series.size - 1)
+                            val y = bottom - (value / maxValue).coerceIn(0f, 1f) * height
+                            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                        }
+                        return path
+                    }
+                    pathFor(rx)?.let { drawPath(it, C.Success, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)) }
+                    if (perDirection) {
+                        pathFor(tx)?.let { drawPath(it, C.Accent2, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)) }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    LegendDot(C.Success, if (perDirection) "Download" else "Traffic")
+                    if (perDirection) LegendDot(C.Accent2, "Upload")
+                    Spacer(Modifier.weight(1f))
+                    Text(TrafficStats.formatRate((all.maxOrNull() ?: 0f).toLong()), fontSize = 9.sp, color = C.TextSecondary, fontFamily = FontFamily.Monospace)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LegendDot(color: Color, text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(6.dp).clip(CircleShape).background(color))
+        Spacer(Modifier.width(4.dp))
+        Text(text, fontSize = 9.sp, color = C.TextSecondary)
+    }
+}
+
 /** One direction's readout: big total, small rate underneath. */
 @Composable
 private fun TrafficMetric(
@@ -907,7 +1009,7 @@ private fun ConfigPickerDialog(onDismiss: () -> Unit) {
                                 AppState.selectConfig(cfg.id)
                                 onDismiss()
                             },
-                            shape = RoundedCornerShape(14.dp),
+                            shape = RoundedCornerShape(10.dp),
                             color = if (selected) C.Accent.copy(alpha = 0.16f) else C.Glass,
                             border = if (selected) {
                                 androidx.compose.foundation.BorderStroke(1.dp, C.Accent)
@@ -972,10 +1074,10 @@ fun ServerLogDialog(onDismiss: () -> Unit) {
         title = { Text("Server log", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
         text = {
             Column {
-                Surface(color = Color(0xFF080C16), shape = RoundedCornerShape(13.dp), modifier = Modifier.fillMaxWidth()) {
+                Surface(color = C.SurfaceLow, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
                     Text(
                         log,
-                        color = Color(0xFFA5F3D0),
+                        color = C.AccentDim,
                         fontFamily = FontFamily.Monospace,
                         fontSize = 10.5.sp,
                         modifier = Modifier.padding(11.dp).height(320.dp).verticalScroll(scroll),
@@ -1148,7 +1250,7 @@ private fun ModeAndSplitControls(onManageApps: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             Surface(
                 onClick = { onManageApps() },
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(10.dp),
                 color = C.Accent.copy(alpha = 0.12f),
                 border = BorderStroke(1.dp, C.Accent.copy(alpha = 0.35f)),
                 modifier = Modifier.fillMaxWidth(),
@@ -1250,7 +1352,7 @@ private fun SplitAppsDialog(onDismiss: () -> Unit) {
                     onValueChange = { query = it },
                     placeholder = { Text("Search installed apps", fontSize = 12.sp) },
                     singleLine = true,
-                    shape = RoundedCornerShape(13.dp),
+                    shape = RoundedCornerShape(8.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = C.TextPrimary,
                         unfocusedTextColor = C.TextPrimary,
@@ -1297,7 +1399,7 @@ private fun SplitAppsDialog(onDismiss: () -> Unit) {
                         onValueChange = { customName = it },
                         placeholder = { Text("Add by process name (e.g. chrome.exe)", fontSize = 11.sp) },
                         singleLine = true,
-                        shape = RoundedCornerShape(13.dp),
+                        shape = RoundedCornerShape(8.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = C.TextPrimary,
                             unfocusedTextColor = C.TextPrimary,

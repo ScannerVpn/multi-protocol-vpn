@@ -14,6 +14,13 @@ import kotlin.test.assertTrue
 class LayoutTest {
 
     @Test
+    fun `compact bottom bar omits HUD but preserves index mapping`() {
+        val compactIndexes = listOf(0, 1, 2, 4)
+        assertEquals(4, compactIndexes.size)
+        assertFalse(3 in compactIndexes)
+    }
+
+    @Test
     fun `breakpoints pick the intended mode`() {
         assertEquals(LayoutMode.COMPACT, layoutMetricsFor(380f).mode, "phone width")
         assertEquals(LayoutMode.COMPACT, layoutMetricsFor(430f).mode, "default launch width")

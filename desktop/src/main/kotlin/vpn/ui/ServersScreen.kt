@@ -397,7 +397,7 @@ private fun ProtocolOption(
 ) {
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         color = if (recommended) C.Accent.copy(alpha = 0.12f) else C.Glass,
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
@@ -564,15 +564,15 @@ fun GrabAllDialog(server: ServerConfig, onDismiss: () -> Unit) {
         text = {
             Column {
                 Surface(
-                    color = Color(0xFF080C16),
-                    shape = RoundedCornerShape(13.dp),
+                    color = C.SurfaceLow,
+                    shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     LazyColumn(state = listState, modifier = Modifier.padding(10.dp).height(330.dp)) {
                         items(lines.size) { i ->
                             Text(
                                 lines[i],
-                                color = Color(0xFF9FE8C4),
+                                color = C.AccentDim,
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 10.5.sp,
                                 lineHeight = 14.sp,
@@ -652,15 +652,15 @@ fun SetupDialog(server: ServerConfig, protocol: String, onDismiss: () -> Unit) {
         text = {
             Column {
                 Surface(
-                    color = Color(0xFF080C16),
-                    shape = RoundedCornerShape(13.dp),
+                    color = C.SurfaceLow,
+                    shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     LazyColumn(state = listState, modifier = Modifier.padding(10.dp).height(330.dp)) {
                         items(lines) { line ->
                             Text(
                                 line,
-                                color = Color(0xFF9FE8C4),
+                                color = C.AccentDim,
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 10.5.sp,
                                 lineHeight = 14.sp,

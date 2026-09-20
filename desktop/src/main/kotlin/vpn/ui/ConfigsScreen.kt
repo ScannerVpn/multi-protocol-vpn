@@ -20,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.ContentCopy
@@ -130,6 +131,13 @@ fun ConfigsScreen() {
             subtitle = "${AppState.configs.size} total",
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AppButton(
+                    "Best",
+                    { AppState.autoSelectBestServer() },
+                    icon = Icons.Filled.AutoMode,
+                    compact = true,
+                    enabled = !AppState.connectedOrBusy && !AppState.pingAllActive,
+                )
                 AppButton(
                     if (sortByLatency) "Fastest ✓" else "Fastest",
                     { sortByLatency = !sortByLatency },
@@ -522,13 +530,13 @@ private fun ShareConfigDialog(config: VpnConfig, onDismiss: () -> Unit) {
                     )
                 } else {
                     Surface(
-                        color = Color(0xFF080C16),
-                        shape = RoundedCornerShape(13.dp),
+                        color = C.SurfaceLow,
+                        shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(
                             payload,
-                            color = Color(0xFFA5F3D0),
+                            color = C.AccentDim,
                             fontFamily = FontFamily.Monospace,
                             fontSize = 10.5.sp,
                             modifier = Modifier
