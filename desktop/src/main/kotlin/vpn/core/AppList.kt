@@ -109,15 +109,24 @@ object AppList {
     }
 
     // ------------------------------------------------------------------
-    // Script builders ('§' is a placeholder for '$', replaced at the end)
+    // Script builders (VpnScripts.PS = U+0001 is a placeholder for '$',
+    // replaced at the end — same convention as VpnScripts/KillSwitchCleanup)
     // ------------------------------------------------------------------
 
+    // 2026-09-21 CI regression: this used to replace the RETIRED '§'
+    // placeholder while the builders had moved to VpnScripts.PS (U+0001), so
+    // the generated .ps1 carried raw control characters, PowerShell rejected
+    // every variable reference and the scan returned zero apps
+    // (AppListReproTest.scanFindsInstalledApps failed on the Windows runner).
     private fun buildScript(body: String) =
-        body.replace("\u00A7", "\$") // '§' → '$' (avoid Kotlin escaping pain)
+        body.replace(VpnScripts.PS, "$")
 
     private fun psQuote(s: String): String = "'" + s.replace("'", "''") + "'"
 
-    private fun buildScanScript(outPath: String): String {
+    // Internal (not private) so the test source set can assert the generated
+    // PowerShell contains no leaked placeholder — the Windows-only nature of
+    // the live scan means CI would otherwise be the first to notice.
+    internal fun buildScanScript(outPath: String): String {
         val out = psQuote(outPath)
         return buildScript(
             """
@@ -189,7 +198,7 @@ object AppList {
         )
     }
 
-    private fun buildIconScript(iconSource: String, outPng: String): String {
+    internal fun buildIconScript(iconSource: String, outPng: String): String {
         // psQuote wraps in single quotes and doubles embedded quotes.
         val src = psQuote(iconSource)
         val dst = psQuote(outPng)

@@ -118,8 +118,9 @@ object KillSwitchCleanup {
 
     /**
      * Builds the cleanup script. Internal so the test source set can assert
-     * the generated PowerShell is syntactically sound. '§' is a placeholder
-     * for '$' (PowerShell variables), replaced at the very end.
+     * the generated PowerShell is syntactically sound. VpnScripts.PS
+     * (U+0001) is a placeholder for '$' (PowerShell variables), replaced at
+     * the very end.
      */
     internal fun buildCleanupScript(resultFile: String, legacyMarkerPath: String, doneMarkerPath: String): String {
         fun psEscape(s: String) = s.replace("`", "``").replace("$", "`$").replace("\"", "`\"")

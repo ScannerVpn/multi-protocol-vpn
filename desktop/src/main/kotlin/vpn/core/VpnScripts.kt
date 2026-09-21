@@ -343,7 +343,7 @@ try {
     }
 
     # Clear any previous run. Native stderr must go through cmd: with
-    # §ErrorActionPreference='Stop' even a redirect turns "not found" into a
+    # ErrorActionPreference='Stop' even a redirect turns "not found" into a
     # terminating NativeCommandError.
     cmd /c "schtasks /end /tn $taskName >nul 2>&1"
     cmd /c "schtasks /delete /tn $taskName /f >nul 2>&1"
