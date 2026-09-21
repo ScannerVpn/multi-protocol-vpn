@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   build:
-    name: Package Windows EXE / MSI
+    name: Package Windows EXE
     runs-on: windows-latest
     timeout-minutes: 60
     defaults:
@@ -95,13 +95,14 @@ jobs:
         working-directory: desktop
         run: ./gradlew.bat --no-daemon test
 
-      # Portable app image + both installers (windows-latest ships WiX 3.x).
-      # These tasks only exist because build.gradle.kts declares
-      # targetFormats(AppImage, Msi, Exe) — with AppImage alone Gradle rejects
-      # them with "Task 'packageMsi' not found".
+      # EXE-only packaging (2026-09-21): the MSI + portable zip tripled the
+      # artifact size (~509MB total, three ~171MB copies of the same payload)
+      # for formats nobody was using. packageExe still builds the app image
+      # first (createDistributable) as a task dependency. The task exists
+      # because build.gradle.kts declares targetFormats(AppImage, Msi, Exe).
       - name: Package
         working-directory: desktop
-        run: ./gradlew.bat --no-daemon packageDistributionForCurrentOS packageMsi packageExe
+        run: ./gradlew.bat --no-daemon packageExe
 
       - name: Stage artifacts
         shell: pwsh
@@ -109,10 +110,10 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $stage = Join-Path $PWD 'stage'
           New-Item -ItemType Directory -Force $stage | Out-Null
-          Compress-Archive -Path 'desktop/build/compose/binaries/main/app/MultiVPN' `
-            -DestinationPath "$stage/MultiVPN-portable-win64.zip" -Force
-          Copy-Item 'desktop/build/compose/binaries/main/exe/*.exe' $stage -ErrorAction SilentlyContinue
-          Copy-Item 'desktop/build/compose/binaries/main/msi/*.msi' $stage -ErrorAction SilentlyContinue
+          # EXE only — and a missing exe must fail the step outright (no
+          # SilentlyContinue), or upload-artifact would ship a checksum file
+          # alone and look green.
+          Copy-Item 'desktop/build/compose/binaries/main/exe/*.exe' $stage
           if (Test-Path 'wireproxy-source-commit.txt') {
             Copy-Item 'wireproxy-source-commit.txt' $stage
           }
