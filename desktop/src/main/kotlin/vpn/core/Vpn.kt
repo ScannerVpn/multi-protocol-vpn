@@ -1074,17 +1074,39 @@ object VpnService {
         )
         AppLog.i("Aether", "starting core (protocol=${Aether.normalizeProtocol(a.protocol)}, scan=${a.scan})")
         Aether.kill()
-        val pid = HiddenRun.startDetached(
-            listOf(core.absolutePath) + args,
-            workingDir = core.parentFile,
-        ) ?: return VpnResult(false, "could not start aether.exe (process creation failed)")
+        // Launch through cmd.exe with stdout+stderr redirected into a log
+        // file, then recover the REAL aether pid from cmd's pid. Before this
+        // the core's output went nowhere: the 2026-09-21 regression (an
+        // obsolete first argument made the core exit instantly with
+        // "unknown option 'run'") looked exactly like a slow gateway scan —
+        // three silent minutes, then a generic failure. Now the core's own
+        // lines stream into the app log and a crashed process fails fast.
+        val coreLog = File(File(Storage.dataDir, "logs"), "aether-core.log").apply {
+            parentFile?.mkdirs()
+            runCatching { delete() }
+        }
+        val launchLine = Aether.buildLaunchLine(core.absolutePath, args, coreLog.absolutePath)
+        val cmdPid = HiddenRun.startDetachedRaw(launchLine, core.parentFile, Aether.envFor(a))
+            ?: return VpnResult(false, "could not start aether.exe (process creation failed)")
+        val pid = HiddenRun.findChildPid(cmdPid, "aether.exe", attempts = 20) ?: cmdPid
         Aether.trackPid(pid)
 
         // Wait for the local SOCKS listener. The core binds it once its
         // gateway is validated (or immediately in --no-data-check mode).
         val budgetMs = (30 + a.validateSecs * 6).coerceAtMost(180) * 1000L
         var waited = 0L
+        var sentLines = 0
         while (waited < budgetMs && !Aether.isRunning()) {
+            if (!HiddenRun.isPidAlive(pid)) break // the core exited on its own
+            // Stream the core's own log into the app log (about once a
+            // second) so scan progress and parse errors are visible live.
+            if (waited % 1000 == 0L && coreLog.isFile) {
+                val lines = runCatching { coreLog.readLines() }.getOrDefault(emptyList())
+                if (lines.size > sentLines) {
+                    lines.drop(sentLines).forEach { AppLog.i("Aether", "| $it") }
+                    sentLines = lines.size
+                }
+            }
             delay(500)
             waited += 500
         }
@@ -1092,8 +1114,9 @@ object VpnService {
             Aether.kill()
             return VpnResult(
                 false,
-                "Aether did not open its local proxy in time — the scan found no reachable " +
-                    "gateway (try another scan mode, --h2, or a different IP mode).",
+                "Aether did not open its local proxy — the scan found no reachable gateway " +
+                    "(try another scan mode, the HTTP/2 transport, or a different IP mode)." +
+                    aetherLogTail(coreLog),
             )
         }
         if (!Aether.verifyTraffic(15_000)) {
@@ -1102,8 +1125,8 @@ object VpnService {
             return VpnResult(
                 false,
                 "Aether started but no traffic passed through the tunnel. " +
-                    "Try a different protocol (MASQUE H2 / Gool), a stronger scan mode, " +
-                    "or check whether this network blocks QUIC.",
+                    "Try a different protocol (MASQUE HTTP/2 / Gool), a stronger scan mode, " +
+                    "or check whether this network blocks QUIC." + aetherLogTail(coreLog),
             )
         }
 
@@ -1205,6 +1228,17 @@ object VpnService {
         Proxy.enable(Aether.HTTP_PORT)
         AppLog.i("Aether", "Connected via Aether (system proxy)")
         return VpnResult(true, "Connected (system proxy on ${Aether.HTTP_BIND})")
+    }
+
+    /**
+     * Last lines of the aether core log, appended to connect-failure messages
+     * so the reason (a scan finding nothing, a blocked network, a parse
+     * error) is IN the error instead of hidden in a file the user never opens.
+     */
+    private fun aetherLogTail(f: File): String {
+        val lines = runCatching { f.readLines().filter { it.isNotBlank() } }.getOrDefault(emptyList())
+        if (lines.isEmpty()) return ""
+        return " Core log: " + lines.takeLast(5).joinToString(" | ")
     }
 
     // ------------------------------------------------------------------

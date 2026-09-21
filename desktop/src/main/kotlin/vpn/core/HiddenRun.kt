@@ -1,5 +1,6 @@
 package vpn.core
 
+import com.sun.jna.Memory
 import com.sun.jna.Native
 import com.sun.jna.Library
 import com.sun.jna.Pointer
@@ -63,8 +64,24 @@ object HiddenRun {
     fun startDetached(command: List<String>, workingDir: File? = null): Int? =
         runner.startDetached(command, workingDir)
 
+    fun startDetached(command: List<String>, workingDir: File?, env: Map<String, String>): Int? =
+        runner.startDetached(command, workingDir, env)
+
     fun startDetachedRaw(commandLine: String, workingDir: File? = null): Int? =
         runner.startDetachedRaw(commandLine, workingDir)
+
+    fun startDetachedRaw(commandLine: String, workingDir: File?, env: Map<String, String>): Int? =
+        runner.startDetachedRaw(commandLine, workingDir, env)
+
+    /** Windows command-line quoting of a single argument (test seam). */
+    fun quoteArg(arg: String): String = JnaHiddenRun.quoteArg(arg)
+
+    /**
+     * True when a process with this pid exists right now (Toolhelp snapshot).
+     * PID-reuse caveat: the answer is only as fresh as the snapshot — callers
+     * use it as an early "the core died" signal, never as ownership proof.
+     */
+    fun isPidAlive(pid: Int): Boolean = JnaHiddenRun.isPidAlive(pid)
 
     /**
      * Finds the pid of a freshly-spawned child of [parentPid] whose image
@@ -102,7 +119,11 @@ internal object JnaHiddenRun : ProcessRunner {
         "kernel32", NativeKernel32::class.java, com.sun.jna.win32.W32APIOptions.UNICODE_OPTIONS,
     )
 
-    private fun createProcess(line: String, workingDir: File? = null): WinBase.PROCESS_INFORMATION? {
+    private fun createProcess(
+        line: String,
+        workingDir: File? = null,
+        env: Map<String, String> = emptyMap(),
+    ): WinBase.PROCESS_INFORMATION? {
         val startup = WinBase.STARTUPINFO().apply {
             dwFlags = STARTF_USESHOWWINDOW
             wShowWindow = WinDef.WORD(SW_HIDE.toLong())
@@ -115,12 +136,29 @@ internal object JnaHiddenRun : ProcessRunner {
             null,
             false,
             CREATE_NO_WINDOW,
-            null,
+            environmentPointer(env),
             workingDir?.absolutePath,
             startup,
             info,
         )
         return if (ok) info else null
+    }
+
+    /**
+     * Builds the CreateProcessW environment block: UTF-16 "NAME=VALUE"
+     * entries separated by NUL and terminated by a double NUL. Allocated as
+     * writable native memory because CreateProcessW may modify the block in
+     * place (documented behaviour). Empty/null when [env] is empty — a null
+     * pointer means "inherit the parent environment", exactly as before.
+     */
+    private fun environmentPointer(env: Map<String, String>): Pointer? {
+        if (env.isEmpty()) return null
+        val block = environmentBlock(env)
+        val mem = Memory((block.length + 2) * 2L)
+        block.forEachIndexed { i, c -> mem.setChar(i * 2L, c) }
+        mem.setChar(block.length * 2L, '\u0000')
+        mem.setChar((block.length + 1) * 2L, '\u0000')
+        return mem
     }
 
     /**
@@ -247,6 +285,11 @@ internal object JnaHiddenRun : ProcessRunner {
         val line = command.joinToString(" ") { quoteArg(it) }
         return startDetachedRaw(line, workingDir)
     }
+
+    override fun startDetached(command: List<String>, workingDir: File?, env: Map<String, String>): Int? {
+        val line = command.joinToString(" ") { quoteArg(it) }
+        return startDetachedRaw(line, workingDir, env)
+    }
     /**
      * Same as [startDetached] but the caller owns all quoting — needed for
      * `cmd.exe /c "... > log"` where the redirect must reach cmd itself.
@@ -258,6 +301,20 @@ internal object JnaHiddenRun : ProcessRunner {
         Kernel32.INSTANCE.CloseHandle(info.hProcess)
         Kernel32.INSTANCE.CloseHandle(info.hThread)
         return pid.takeIf { it > 0 }
+    }
+
+    override fun startDetachedRaw(commandLine: String, workingDir: File?, env: Map<String, String>): Int? {
+        val info = createProcess(commandLine, workingDir, env) ?: return null
+        val pid = info.dwProcessId.toInt()
+        Kernel32.INSTANCE.CloseHandle(info.hProcess)
+        Kernel32.INSTANCE.CloseHandle(info.hThread)
+        return pid.takeIf { it > 0 }
+    }
+
+    fun isPidAlive(pid: Int): Boolean {
+        var found = false
+        snapshot { p, _, _ -> if (p == pid) found = true }
+        return found
     }
 
     /**
@@ -311,7 +368,7 @@ internal object JnaHiddenRun : ProcessRunner {
      * BEFORE a quote, escape the quote, and wrap when the argument contains
      * space/tab/quote or is empty.
      */
-    private fun quoteArg(arg: String): String {
+    internal fun quoteArg(arg: String): String {
         if (arg.isNotEmpty() && !arg.contains(' ') && !arg.contains('\t') && !arg.contains('"')) {
             return arg
         }
@@ -335,3 +392,12 @@ internal object JnaHiddenRun : ProcessRunner {
         return sb.toString()
     }
 }
+
+/**
+ * Pure builder for the CreateProcessW environment block payload:
+ * "NAME=VALUE" entries joined by NUL, terminated by a double NUL (the caller
+ * appends the final terminator bytes after writing the block). Top-level so
+ * the test source set can pin the exact layout without loading kernel32.
+ */
+internal fun environmentBlock(env: Map<String, String>): String =
+    env.entries.joinToString("\u0000") { "${it.key}=${it.value}" } + "\u0000\u0000"

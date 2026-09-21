@@ -19,28 +19,51 @@ class AetherArgsTest {
     @Test
     fun `defaults map to the core's own defaults`() {
         val args = Aether.buildArgs(defaults)
-        assertTrue("run" in args, "core must run, not print help")
-        assertEquals(listOf("--bind", Aether.BIND), args.drop(1).take(2))
+        // NO positional subcommand: cli.rs is `aether [OPTIONS]` — a leading
+        // "run" (or any non-flag token) dies with "unknown option" instantly.
+        assertEquals("--bind", args.first())
+        assertEquals(Aether.BIND, args[1])
+        assertEquals("masque", args[args.indexOf("--protocol") + 1])
         assertTrue("--http-proxy" in args, "httpProxy defaults to on")
         assertFalse("--h2" in args, "HTTP/3 is the default transport")
         assertFalse("--no-quick-reconnect" in args)
         assertTrue("--quick-reconnect" in args)
         assertFalse("-4" in args && "--dual" in args, "auto = no ip flag")
+        // Every non-flag token must be the VALUE of the flag right before it.
+        var expectingValue = false
+        args.forEach { a ->
+            if (expectingValue) {
+                assertFalse(a.startsWith("--"), "flag $a left without a value")
+                expectingValue = false
+            } else {
+                assertTrue(a.startsWith("-"), "positional token '$a' — the CLI has no subcommand")
+                expectingValue = a in setOf(
+                    "--bind", "--http-proxy", "--protocol", "--scan", "--noize", "--perf",
+                    "--keepalive", "--validate-secs", "--reconnect-secs", "--dns", "--upstream",
+                    "--team", "--access-token", "--access-id", "--access-secret", "--access-email",
+                    "--tor-bind", "--tor-bridge", "--tor-pt-dir", "--route-block", "--route-direct",
+                    "--routes", "--log-level", "--fragment-size", "--fragment-delay", "--ech",
+                    "--wiw-outer", "--wiw-inner", "--mim-outer", "--mim-inner",
+                )
+            }
+        }
     }
 
     @Test
     fun `protocols map to their flags`() {
-        assertEquals(
-            listOf("--wg"),
-            Aether.buildArgs(defaults.copy(protocol = "wg")).filter { it.startsWith("--") && it != "--bind" && it != "--http-proxy" }.take(1),
-        )
-        assertTrue("--gool" in Aether.buildArgs(defaults.copy(protocol = "gool")))
-        assertTrue("--mim" in Aether.buildArgs(defaults.copy(protocol = "mim")))
+        // The protocol is ALWAYS explicit (masque|wg|gool|mim) — never relies
+        // on the core's interactive defaults.
+        val wg = Aether.buildArgs(defaults.copy(protocol = "wg"))
+        assertEquals("wg", wg[wg.indexOf("--protocol") + 1])
+        val gool = Aether.buildArgs(defaults.copy(protocol = "gool"))
+        assertEquals("gool", gool[gool.indexOf("--protocol") + 1])
+        val mim = Aether.buildArgs(defaults.copy(protocol = "mim"))
+        assertEquals("mim", mim[mim.indexOf("--protocol") + 1])
+        // Zero Trust is an ENROLMENT, not a protocol: carrier stays masque.
         val zt = Aether.buildArgs(defaults.copy(protocol = "zt", team = "acme"))
-        assertEquals("zt", zt[zt.indexOf("--protocol") + 1])
+        assertEquals("masque", zt[zt.indexOf("--protocol") + 1])
+        assertFalse("zt" in zt, "--protocol zt is not a valid value (cli.rs: masque|wg|gool|mim)")
         assertEquals("acme", zt[zt.indexOf("--team") + 1])
-        // masque: core default, no protocol flag.
-        assertFalse("--masque" in Aether.buildArgs(defaults))
     }
 
     @Test
@@ -101,7 +124,12 @@ class AetherArgsTest {
         assertFalse("--tor" in Aether.buildArgs(defaults.copy(torMode = "off")))
         val bridged = Aether.buildArgs(defaults.copy(torMode = "chain", torBridges = "force", torCountry = "de"))
         assertTrue("--tor-bridges" in bridged)
-        assertEquals("de", bridged[bridged.indexOf("--tor-country") + 1])
+        // Country is NOT a flag (cli.rs has no --tor-country): it must travel
+        // through the AETHER_TOR_COUNTRY environment variable instead.
+        assertFalse("--tor-country" in bridged)
+        assertEquals(mapOf("AETHER_TOR_COUNTRY" to "de"), Aether.envFor(defaults.copy(torCountry = "DE")))
+        assertTrue(Aether.envFor(defaults.copy(torCountry = "drop table;")).isEmpty())
+        assertTrue(Aether.envFor(defaults).isEmpty())
         val manual = Aether.buildArgs(
             defaults.copy(torMode = "chain", torBridgeLines = "obfs4 1.2.3.4:443 cert=abc iat-mode=0;obfs4 5.6.7.8:443 cert=def"),
         )
@@ -176,5 +204,31 @@ class AetherArgsTest {
     @Test
     fun `protocol label exists for the aether row`() {
         assertEquals("Aether", Links.label("aether"))
+    }
+
+    @Test
+    fun `launch line redirects the core log through cmd with safe quoting`() {
+        val line = Aether.buildLaunchLine(
+            "C:\\Users\\te st\\aether.exe",
+            listOf("--bind", "127.0.0.1:10819", "--tor-bridge", "obfs4 1.2.3.4:443 cert=abc"),
+            "C:\\logs dir\\aether-core.log",
+        )
+        assertTrue(line.startsWith("cmd.exe /c \""), "payload must be wrapped for cmd /c quote-stripping")
+        assertTrue(line.endsWith("2>&1\""))
+        assertTrue("\"C:\\Users\\te st\\aether.exe\"" in line, "executable with spaces must be quoted")
+        assertTrue("\"127.0.0.1:10819\"" in line)
+        assertTrue("\"obfs4 1.2.3.4:443 cert=abc\"" in line, "bridge lines carry spaces and must be quoted")
+        assertTrue("> \"C:\\logs dir\\aether-core.log\" 2>&1" in line, "stdout+stderr must land in the log file")
+        // A path without spaces stays bare — cmd's outer-quote strip still
+        // leaves a well-formed command.
+        val bare = Aether.buildLaunchLine("C:\\tools\\aether.exe", emptyList(), "C:\\l\\x.log")
+        assertTrue("cmd.exe /c \"C:\\tools\\aether.exe > \"C:\\l\\x.log\" 2>&1\"" == bare)
+    }
+
+    @Test
+    fun `environment block matches the CreateProcessW layout`() {
+        assertEquals("A=1\u0000B=2\u0000\u0000", environmentBlock(linkedMapOf("A" to "1", "B" to "2")))
+        assertEquals("K=\u0000\u0000", environmentBlock(mapOf("K" to "")))
+        assertTrue(environmentBlock(emptyMap()).endsWith("\u0000\u0000"))
     }
 }

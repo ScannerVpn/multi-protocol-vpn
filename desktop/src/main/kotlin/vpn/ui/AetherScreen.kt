@@ -43,7 +43,6 @@ import vpn.theme.C
 fun AetherScreen() {
     val layout = LocalLayout.current
     val settings = AppState.settings.aether
-    val busy = AppState.vpnStatus == VpnStatus.CONNECTING || AppState.vpnStatus == VpnStatus.DISCONNECTING
     val scroll = rememberScrollState()
 
     Column(
@@ -56,8 +55,81 @@ fun AetherScreen() {
         ScreenHeader(
             title = "Aether",
             subtitle = "Censorship circumvention · MASQUE · Gool · Zero Trust · Tor",
-        ) {
-            ConnectPill(enabled = !busy)
+        )
+
+        // THE connect/disconnect control for this section — one big button
+        // wired to the exact same path as the Home screen (select the virtual
+        // aether row, then the standard connect), with live status, so the
+        // section is drivable without hunting for the row on another tab.
+        GlassCard {
+            val status = AppState.vpnStatus
+            val active = AppState.activeConfig
+            val isAether = active?.protocol == "aether"
+            val aetherBusy =
+                (status == VpnStatus.CONNECTING || status == VpnStatus.DISCONNECTING) && isAether
+            val aetherConnected = status == VpnStatus.CONNECTED && isAether
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            when {
+                                aetherConnected -> "Connected"
+                                aetherBusy && status == VpnStatus.CONNECTING -> "Connecting…"
+                                aetherBusy -> "Disconnecting…"
+                                status == VpnStatus.CONNECTED -> "Another tunnel is active"
+                                else -> "Not connected"
+                            },
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (aetherConnected) C.Accent else C.TextPrimary,
+                        )
+                        Text(
+                            when {
+                                aetherConnected ->
+                                    "SOCKS ${Aether.BIND} · HTTP ${Aether.HTTP_BIND} — change mode below in Settings"
+                                aetherBusy ->
+                                    "The gateway scan can take up to a minute — live core output lands in the app log"
+                                status == VpnStatus.CONNECTED ->
+                                    "Disconnect the current connection before starting Aether"
+                                else ->
+                                    "No admin rights needed — the core scans for a working gateway automatically"
+                            },
+                            fontSize = 10.5.sp,
+                            color = C.TextSecondary,
+                        )
+                    }
+                    AppButton(
+                        text = when {
+                            aetherConnected -> "Disconnect"
+                            aetherBusy -> "…"
+                            else -> "Connect"
+                        },
+                        onClick = {
+                            if (aetherConnected) {
+                                AppState.disconnectActive()
+                            } else if (!aetherBusy && status != VpnStatus.CONNECTED) {
+                                val aetherId =
+                                    AppState.configs.firstOrNull { it.protocol == "aether" }?.id
+                                if (aetherId != null) {
+                                    AppState.selectConfig(aetherId)
+                                    AppState.connectActive()
+                                }
+                            }
+                        },
+                        enabled = !aetherBusy && (status != VpnStatus.CONNECTED || aetherConnected),
+                        gradient = !aetherConnected,
+                        danger = aetherConnected,
+                        loading = aetherBusy,
+                    )
+                }
+                if (status == VpnStatus.ERROR && AppState.lastError.isNotBlank()) {
+                    Text(AppState.lastError, fontSize = 10.5.sp, color = C.Error)
+                }
+            }
         }
 
         GlassCard {
@@ -259,33 +331,6 @@ fun AetherScreen() {
             color = C.TextFaint,
         )
     }
-}
-
-/** The connect state pill (tapping it toggles the connection). */
-@Composable
-private fun ConnectPill(enabled: Boolean) {
-    val connected = AppState.vpnStatus == VpnStatus.CONNECTED
-    val busy = AppState.vpnStatus == VpnStatus.CONNECTING || AppState.vpnStatus == VpnStatus.DISCONNECTING
-    AppButton(
-        text = when {
-            connected -> "Disconnect"
-            busy -> "…"
-            else -> "Connect"
-        },
-        onClick = {
-            if (connected) {
-                AppState.disconnectActive()
-            } else if (!busy) {
-                val aetherId = AppState.configs.firstOrNull { it.protocol == "aether" }?.id
-                if (aetherId != null) {
-                    AppState.selectConfig(aetherId)
-                    AppState.connectActive()
-                }
-            }
-        },
-        enabled = enabled,
-        compact = true,
-    )
 }
 
 /** One selectable chip row. */

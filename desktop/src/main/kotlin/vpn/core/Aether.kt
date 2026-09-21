@@ -111,7 +111,21 @@ object Aether {
             else -> "masque"
         }
 
-    /** Builds the complete CLI for the Aether core from persisted settings. */
+    /** Builds the complete CLI for the Aether core from persisted settings.
+     *
+     * CONTRACT (pinned against aether/src/cli.rs on 2026-09-21 — every flag
+     * here must exist there, or the core dies instantly with
+     * "unknown option" and the connect looks like a network problem):
+     *  - NO positional subcommand: the CLI is `aether [OPTIONS]` only — the
+     *    old leading "run" argument killed the core before it could bind
+     *    anything (that was the "Aether does nothing" regression).
+     *  - `--protocol` is always passed explicitly: masque | wg | gool | mim.
+     *    Zero Trust is an ENROLMENT (team/service-token flags), not a
+     *    protocol — "zt" would silently parse as masque, so the carrier is
+     *    spelled out and the enrolment flags select the organization.
+     *  - Flag-less knobs (AETHER_TOR_COUNTRY) go through [envFor], never
+     *    through argv.
+     */
     fun buildArgs(
         s: AetherSettings,
         routesFile: String? = null,
@@ -120,7 +134,7 @@ object Aether {
         torBind: String = TOR_BIND,
         ptDir: String? = null,
     ): List<String> {
-        val args = mutableListOf("run", "--bind", socksBind)
+        val args = mutableListOf("--bind", socksBind)
         if (s.httpProxy) {
             args += "--http-proxy"
             args += httpBind
@@ -128,14 +142,12 @@ object Aether {
 
         val protocol = normalizeProtocol(s.protocol)
         when (protocol) {
-            "wg" -> args += "--wg"
-            "gool" -> args += "--gool"
-            "mim" -> args += "--mim"
-            "zt" -> {
-                args += "--protocol"
-                args += "zt"
-            }
-            // masque: the core default — no flag.
+            "wg" -> args += listOf("--protocol", "wg")
+            "gool" -> args += listOf("--protocol", "gool")
+            "mim" -> args += listOf("--protocol", "mim")
+            // masque AND zt: MASQUE is the carrier; the Zero Trust enrolment
+            // flags below (--team/--access-*/--gateway) do the rest.
+            else -> args += listOf("--protocol", "masque")
         }
         // Manual hop endpoints: naming one selects the mode on its own and
         // skips the scan (cli.rs: --wiw-outer/--wiw-inner/--mim-*).
@@ -235,7 +247,9 @@ object Aether {
             }
         }
 
-        // Zero Trust enrolment.
+        // Zero Trust enrolment (the carrier protocol was already passed
+        // above — see the buildArgs contract note). Only when the user
+        // actually picked Zero Trust in the UI.
         if (protocol == "zt") {
             val team = s.team.trim()
             if (team.isNotEmpty()) {
@@ -280,11 +294,8 @@ object Aether {
             args += "--tor-bridge"
             args += line
         }
-        val country = s.torCountry.trim().lowercase()
-        if (country.isNotEmpty()) {
-            args += "--tor-country"
-            args += country
-        }
+        // NOTE: torCountry is NOT a flag — cli.rs only accepts it through the
+        // AETHER_TOR_COUNTRY variable. It travels via [envFor].
         val pt = ptDir
         if (pt != null && File(pt).isDirectory) {
             args += "--tor-pt-dir"
@@ -324,6 +335,31 @@ object Aether {
             "dual", "both" -> "dual"
             else -> "auto"
         }
+
+    /**
+     * Child-process environment for the Aether core. Some knobs exist ONLY
+     * as variables in cli.rs — passing them as flags dies with
+     * "unknown option" before the core starts.
+     */
+    fun envFor(s: AetherSettings): Map<String, String> {
+        val env = mutableMapOf<String, String>()
+        val country = s.torCountry.trim().lowercase()
+        // BridgeDB country codes are short letters ("de", "nl"); keep the
+        // guard tight so a stray value can never poison the environment.
+        if (country.matches(Regex("[a-z]{2,8}"))) env["AETHER_TOR_COUNTRY"] = country
+        return env
+    }
+
+    /**
+     * Raw cmd.exe launch line that captures the core's stdout+stderr into
+     * [logPath]. Uses the classic doubled-quote payload: cmd /? strips the
+     * outer quotes when the command contains redirection specials, leaving a
+     * fully quoted executable plus a quoted redirect target.
+     * Pass to [HiddenRun.startDetachedRaw]; recover the REAL aether pid from
+     * cmd's pid with [HiddenRun.findChildPid].
+     */
+    fun buildLaunchLine(exe: String, args: List<String>, logPath: String): String =
+        "cmd.exe /c \"${HiddenRun.quoteArg(exe)} ${args.joinToString(" ") { HiddenRun.quoteArg(it) }} > ${HiddenRun.quoteArg(logPath)} 2>&1\""
 
     /**
      * Writes the [block]/[direct] routing file when the user configured any

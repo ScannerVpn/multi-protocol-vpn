@@ -21,4 +21,15 @@ interface ProcessRunner {
     suspend fun runRawAndWaitCancellable(commandLine: String, timeoutMs: Long, workingDir: File? = null): Int?
     fun startDetached(command: List<String>, workingDir: File? = null): Int?
     fun startDetachedRaw(commandLine: String, workingDir: File? = null): Int?
+
+    /**
+     * Detached start with a child environment override (e.g. the Aether
+     * core's flag-less AETHER_TOR_COUNTRY). Default delegates to the 2-arg
+     * form so existing fakes keep compiling; the JNA implementation is the
+     * only one that actually injects the block into CreateProcessW.
+     */
+    fun startDetached(command: List<String>, workingDir: File? = null, env: Map<String, String>): Int? =
+        startDetached(command, workingDir)
+    fun startDetachedRaw(commandLine: String, workingDir: File? = null, env: Map<String, String>): Int? =
+        startDetachedRaw(commandLine, workingDir)
 }
