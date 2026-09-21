@@ -219,10 +219,10 @@ class AetherArgsTest {
         assertTrue("\"127.0.0.1:10819\"" in line)
         assertTrue("\"obfs4 1.2.3.4:443 cert=abc\"" in line, "bridge lines carry spaces and must be quoted")
         assertTrue("> \"C:\\logs dir\\aether-core.log\" 2>&1" in line, "stdout+stderr must land in the log file")
-        // A path without spaces stays bare — cmd's outer-quote strip still
-        // leaves a well-formed command.
+        // A path without spaces stays bare (quoteArg only wraps when needed)
+        // — cmd's outer-quote strip still leaves a well-formed command.
         val bare = Aether.buildLaunchLine("C:\\tools\\aether.exe", emptyList(), "C:\\l\\x.log")
-        assertTrue("cmd.exe /c \"C:\\tools\\aether.exe > \"C:\\l\\x.log\" 2>&1\"" == bare)
+        assertEquals("cmd.exe /c \"C:\\tools\\aether.exe > C:\\l\\x.log 2>&1\"", bare)
     }
 
     @Test

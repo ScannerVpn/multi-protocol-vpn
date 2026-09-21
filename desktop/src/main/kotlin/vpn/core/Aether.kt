@@ -359,7 +359,8 @@ object Aether {
      * cmd's pid with [HiddenRun.findChildPid].
      */
     fun buildLaunchLine(exe: String, args: List<String>, logPath: String): String =
-        "cmd.exe /c \"${HiddenRun.quoteArg(exe)} ${args.joinToString(" ") { HiddenRun.quoteArg(it) }} > ${HiddenRun.quoteArg(logPath)} 2>&1\""
+        "cmd.exe /c \"" + (listOf(exe) + args).joinToString(" ") { HiddenRun.quoteArg(it) } +
+            " > " + HiddenRun.quoteArg(logPath) + " 2>&1\""
 
     /**
      * Writes the [block]/[direct] routing file when the user configured any
