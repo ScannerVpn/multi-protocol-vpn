@@ -216,7 +216,7 @@ class AetherArgsTest {
         assertTrue(line.startsWith("cmd.exe /c \""), "payload must be wrapped for cmd /c quote-stripping")
         assertTrue(line.endsWith("2>&1\""))
         assertTrue("\"C:\\Users\\te st\\aether.exe\"" in line, "executable with spaces must be quoted")
-        assertTrue("\"127.0.0.1:10819\"" in line)
+        assertTrue("--bind 127.0.0.1:10819" in line, "space-free values stay bare (quoteArg wraps only when needed)")
         assertTrue("\"obfs4 1.2.3.4:443 cert=abc\"" in line, "bridge lines carry spaces and must be quoted")
         assertTrue("> \"C:\\logs dir\\aether-core.log\" 2>&1" in line, "stdout+stderr must land in the log file")
         // A path without spaces stays bare (quoteArg only wraps when needed)
