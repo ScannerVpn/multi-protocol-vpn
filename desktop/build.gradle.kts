@@ -25,6 +25,20 @@ plugins {
  */
 val appVersion = "3.6.20"
 
+/**
+ * SLIM CORES VARIANT (`gradlew createDistributable -PslimCores=true`).
+ *
+ * The four big cores (xray / singbox / aether / wireproxy — ~170 MB together)
+ * used to bake into every jar, so any core bump rebuilt the whole 188 MB EXE.
+ * With this flag the processResources step omits them and the app acquires
+ * each core ON DEMAND from the sha256-pinned `/cores-manifest.json` catalog
+ * (see CoreAcquire.kt / CoreCatalog.kt). `openvpn` (SYSTEM-executed, install
+ * flow) and the manifest itself always ship, in BOTH variants.
+ *
+ * The FULL build is untouched by default: no flag, no behavior change.
+ */
+val slimCores = (findProperty("slimCores") as String?)?.toBoolean() == true
+
 group = "com.multivpn"
 version = appVersion
 
@@ -38,7 +52,9 @@ val generatedSrcDir = layout.buildDirectory.dir("generated/buildinfo")
 val generateBuildInfo by tasks.registering {
     val outDir = generatedSrcDir
     val v = appVersion
+    val slim = slimCores
     inputs.property("version", v)
+    inputs.property("slimCores", slim)
     outputs.dir(outDir)
     doLast {
         val f = outDir.get().file("vpn/BuildInfo.kt").asFile
@@ -51,12 +67,23 @@ val generateBuildInfo by tasks.registering {
             object BuildInfo {
                 const val VERSION: String = "$v"
                 const val ARCH: String = "x86_64"
+                /** True when built with -PslimCores (cores download on demand). */
+                const val SLIM_CORES: Boolean = $slim
                 /** "v3.6.12 · x86_64" */
                 val LABEL: String get() = "v${'$'}VERSION · ${'$'}ARCH"
             }
 
             """.trimIndent(),
         )
+    }
+}
+
+// Slim variant: keep the manifest + openvpn, drop the four big core trees from
+// the jar. Absent files are then fetched by CoreAcquire against the pinned
+// catalog — a missing bin dir is a SUPPORTED state, not a broken build.
+tasks.named("processResources") {
+    if (slimCores) {
+        (this as Copy).exclude("bin/xray/**", "bin/singbox/**", "bin/aether/**", "bin/wireproxy/**")
     }
 }
 

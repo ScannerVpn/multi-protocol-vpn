@@ -6,14 +6,6 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
-import java.time.Duration
-import java.util.zip.ZipFile
 
 /**
  * sing-box core wrapper (hiddify-core's HiddifyCli).
@@ -38,10 +30,6 @@ object SingBox {
     private val exeCandidates = CoreManifest.SINGBOX_EXES
 
     fun exe(): File? = exeCandidates.map { File(dir, it) }.firstOrNull { it.exists() }
-
-    private val httpClient: HttpClient by lazy {
-        HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build()
-    }
 
     /**
      * Obtains the core: first from bundled resources, or download if allowed/forced.
@@ -71,82 +59,35 @@ object SingBox {
         synchronized(extractLock) {
             if (!CoreManifest.shouldExtract(extractAttempts.get(), coreComplete())) return
             extractAttempts.incrementAndGet()
-            val copied = Resources.extractAll(CoreManifest.SINGBOX_RES, coreFiles, dir)
-            if (copied > 0) AppLog.i("SingBox", "Extracted $copied files from resources")
+            CoreAcquire.ensure("singbox", CoreManifest.SINGBOX_RES, coreFiles, dir, allowDownload = false)
         }
     }
 
+    /**
+     * `allowDownload = false` keeps the path network-free (ping paths rely on
+     * this). When allowed, the fetch goes through [CoreAcquire.ensure] against
+     * the pinned [CoreCatalog] — sha256-verified. The old "latest hiddify-core
+     * release" tar.gz downloader was deleted with plan 009.
+     *
+     * [forceDownload] is kept for call-site compatibility only: with a pinned
+     * catalog it behaves as "permit the network"; no production caller passes
+     * it.
+     */
     suspend fun ensureCore(allowDownload: Boolean = true, forceDownload: Boolean = false): File? = withContext(Dispatchers.IO) {
-        if (forceDownload) {
-            return@withContext downloadCore()
-        }
         // Repairs a partial core (e.g. exe present but wintun.dll missing) on
         // the first call of the run; NOT on every ping (see extractBundleOnce).
         extractBundleOnce()
         if (coreComplete()) return@withContext exe()
 
-        if (allowDownload) {
-            return@withContext downloadCore()
+        if (allowDownload || forceDownload) {
+            if (CoreAcquire.ensure("singbox", CoreManifest.SINGBOX_RES, coreFiles, dir, allowDownload = true) &&
+                coreComplete()
+            ) {
+                return@withContext exe()
+            }
         }
         return@withContext null
     }
-
-    private suspend fun downloadCore(): File? {
-        val url = latestCoreUrl() ?: return null
-        AppLog.i("SingBox", "Downloading ${url.substringAfterLast('/')}")
-        val tmp = File.createTempFile("multivpn_core_", ".tar.gz")
-        try {
-            runCatching {
-                val req = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(Duration.ofSeconds(600)).GET().build()
-                val resp = httpClient.send(req, HttpResponse.BodyHandlers.ofFile(tmp.toPath()))
-                // P3-1 fix: the non-local return inside runCatching skipped
-                // tmp.delete() — the partial archive leaked into %TEMP%.
-                if (resp.statusCode() !in 200..299 || tmp.length() < 1_000_000) {
-                    AppLog.e("SingBox", "core download failed: HTTP ${resp.statusCode()}")
-                    return null
-                }
-                extractTarGz(tmp, dir)
-            }.onFailure { AppLog.e("SingBox", "core download failed: ${it.message}") }
-            return exe()
-        } finally {
-            runCatching { tmp.delete() }
-        }
-    }
-
-    /**
-     * Resolves the latest hiddify-lib-windows-amd64.tar.gz. Same strategy as
-     * Xray: quota-free redirect resolution first, GitHub API as fallback.
-     */
-    private fun latestCoreUrl(): String? {
-        latestByRedirect("https://github.com/hiddify/hiddify-core/releases/latest")?.let { tag ->
-            return "https://github.com/hiddify/hiddify-core/releases/download/$tag/hiddify-lib-windows-amd64.tar.gz"
-        }
-        return runCatching {
-            val req = HttpRequest.newBuilder(
-                URI.create("https://api.github.com/repos/hiddify/hiddify-core/releases/latest"),
-            ).timeout(Duration.ofSeconds(30)).header("User-Agent", "MultiVPN").GET().build()
-            val body = httpClient.send(req, HttpResponse.BodyHandlers.ofString()).body()
-            Regex("\"browser_download_url\"\\s*:\\s*\"([^\"]+hiddify-lib-windows-amd64\\.tar\\.gz)\"")
-                .find(body)?.groupValues?.get(1)
-        }.getOrNull()
-    }
-
-    /**
-     * Follows a /releases/latest redirect chain with HttpURLConnection and
-     * returns the resolved tag (e.g. "v9.9.9"), or null on any failure.
-     */
-    private fun latestByRedirect(latestUrl: String): String? = runCatching {
-        val client = java.net.URL(latestUrl).openConnection() as java.net.HttpURLConnection
-        client.instanceFollowRedirects = true
-        client.connectTimeout = 15_000
-        client.readTimeout = 15_000
-        client.requestMethod = "GET"
-        client.inputStream.use { it.read() } // force the redirect chain to resolve
-        val finalUrl = client.url.toString()
-        client.disconnect()
-        finalUrl.substringAfterLast("/tag/").takeIf { it.isNotBlank() && it != finalUrl }
-    }.getOrNull()
 
     /**
      * Minimal tar.gz extractor (flat archive of a few files).

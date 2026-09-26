@@ -5,13 +5,6 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
-import java.time.Duration
 
 /**
  * Xray client for Windows: vless / trojan / shadowsocks share links become a
@@ -30,10 +23,6 @@ object Xray {
         get() = File(Storage.dataDir, "bin/xray").apply { mkdirs() }
 
     fun exe(): File? = File(xrayDir, "xray.exe").takeIf { it.exists() }
-
-    private val httpClient: HttpClient by lazy {
-        HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build()
-    }
 
     // ------------------------------------------------------------- config
 
@@ -277,10 +266,14 @@ $outbound,
 
     /** Test seam: forget this run's extraction so the next call extracts again. */
     internal fun resetExtractionState() = extractAttempts.set(0)
-
     /**
      * Extracts the bundle at most [CoreManifest.MAX_EXTRACT_ATTEMPTS] times
      * per run, and only while the core is still incomplete after the first.
+     *
+     * The copy itself now goes through [CoreAcquire.ensure] with downloads
+     * disabled: the throttle (this lock + attempt counter) is the 3.6.16
+     * ping-fix invariant and must never move into the acquirer, where ping
+     * callers could not bound it.
      */
     private fun extractBundleOnce() {
         if (!CoreManifest.shouldExtract(extractAttempts.get(), xrayComplete())) return
@@ -290,102 +283,39 @@ $outbound,
             // launched is exactly what broke the spawn.
             if (!CoreManifest.shouldExtract(extractAttempts.get(), xrayComplete())) return
             extractAttempts.incrementAndGet()
-            val copied = Resources.extractAll(CoreManifest.XRAY_RES, xrayFiles, xrayDir)
-            if (copied > 0) AppLog.i("Xray", "Extracted $copied/${xrayFiles.size} files from resources")
+            CoreAcquire.ensure("xray", CoreManifest.XRAY_RES, xrayFiles, xrayDir, allowDownload = false)
         }
     }
 
-    /** Obtains the xray binary. */
+    /**
+     * Obtains the xray binary.
+     *
+     * `allowDownload = false` keeps the whole path network-free (the ping
+     * paths rely on this: a 57-row Ping-all must never fire 57 fetches).
+     * When downloads ARE allowed the fetch goes through [CoreAcquire.ensure]
+     * against the pinned [CoreCatalog] — sha256-verified, never the old
+     * "whatever latest release" guess (the audit's finding, now deleted).
+     *
+     * [forceDownload] is retained only for call-site compatibility: with a
+     * pinned catalog there is no "newer latest" to chase, so it behaves as
+     * "permit the network" (and re-fetches only when the local core is
+     * genuinely incomplete). No production caller passes it.
+     */
     suspend fun ensureXrayBinary(allowDownload: Boolean = true, forceDownload: Boolean = false): File? = withContext(Dispatchers.IO) {
-        if (forceDownload) {
-            return@withContext downloadXrayBinary()
-        }
         // Repairs a missing/broken bundled exe on the first call of the
         // run; NOT on every ping (see extractBundleOnce).
         extractBundleOnce()
         if (xrayComplete()) return@withContext exe()
 
-        if (allowDownload) {
-            return@withContext downloadXrayBinary()
+        if (allowDownload || forceDownload) {
+            if (CoreAcquire.ensure("xray", CoreManifest.XRAY_RES, xrayFiles, xrayDir, allowDownload = true) &&
+                xrayComplete()
+            ) {
+                return@withContext exe()
+            }
         }
         return@withContext null
     }
-
-    private suspend fun downloadXrayBinary(): File? {
-        val url = latestXrayZipUrl() ?: return null
-        AppLog.i("Xray", "Downloading ${url.substringAfterLast('/')}")
-        val zip = File.createTempFile("xray_", ".zip")
-        try {
-            runCatching {
-                val req = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(Duration.ofSeconds(300)).GET().build()
-                val resp = httpClient.send(req, HttpResponse.BodyHandlers.ofFile(zip.toPath()))
-                // P3-1 fix: the non-local `return null` inside runCatching
-                // used to skip the zip.delete() below — a multi-MB archive
-                // stayed in %TEMP% after every failed download.
-                if (resp.statusCode() !in 200..299) {
-                    AppLog.e("Xray", "download failed: HTTP ${resp.statusCode()}")
-                    return null
-                }
-                java.util.zip.ZipFile(zip).use { zf ->
-                    zf.entries().asSequence()
-                        .filter { it.name.endsWith("xray.exe") }
-                        .forEach { e ->
-                            // Files.copy does NOT close its source; the entry
-                            // stream stayed open (one leaked handle per core
-                            // file, and on Windows an open handle keeps the
-                            // zip locked).
-                            zf.getInputStream(e).use { input ->
-                                Files.copy(
-                                    input,
-                                    File(xrayDir, File(e.name).name).toPath(),
-                                    StandardCopyOption.REPLACE_EXISTING,
-                                )
-                            }
-                        }
-                }
-            }.onFailure { AppLog.e("Xray", "download failed: ${it.message}") }
-            return exe()
-        } finally {
-            runCatching { zip.delete() }
-        }
-    }
-
-    /**
-     * Resolves the latest Xray-windows-64.zip. GitHub's API is rate-limited
-     * for anonymous callers (a shared NAT easily exhausts 60 req/h), so the
-     * primary path follows the /releases/latest redirect and reads the tag
-     * from the final URL — no quota. The API stays as a fallback.
-     */
-    private fun latestXrayZipUrl(): String? {
-        latestByRedirect("https://github.com/XTLS/Xray-core/releases/latest")?.let { tag ->
-            return "https://github.com/XTLS/Xray-core/releases/download/$tag/Xray-windows-64.zip"
-        }
-        return runCatching {
-            val req = HttpRequest.newBuilder(
-                URI.create("https://api.github.com/repos/XTLS/Xray-core/releases/latest"),
-            ).timeout(Duration.ofSeconds(30)).header("User-Agent", "MultiVPN").GET().build()
-            val body = httpClient.send(req, HttpResponse.BodyHandlers.ofString()).body()
-            Regex("\"browser_download_url\"\\s*:\\s*\"([^\"]+Xray-windows-64\\.zip)\"")
-                .find(body)?.groupValues?.get(1)
-        }.getOrNull()
-    }
-
-    /**
-     * Follows a /releases/latest redirect chain with HttpURLConnection and
-     * returns the resolved tag (e.g. "v25.8.29"), or null on any failure.
-     */
-    private fun latestByRedirect(latestUrl: String): String? = runCatching {
-        val client = java.net.URL(latestUrl).openConnection() as java.net.HttpURLConnection
-        client.instanceFollowRedirects = true
-        client.connectTimeout = 15_000
-        client.readTimeout = 15_000
-        client.requestMethod = "GET"
-        client.inputStream.use { it.read() } // force the redirect chain to resolve
-        val finalUrl = client.url.toString()
-        client.disconnect()
-        finalUrl.substringAfterLast("/tag/").takeIf { it.isNotBlank() && it != finalUrl }
-    }.getOrNull()
 
     // ---------------------------------------------------------- lifecycle
 
