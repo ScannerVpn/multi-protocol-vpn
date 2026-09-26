@@ -231,7 +231,11 @@ sys.stderr.write("clients found: %d\n" % found)
 if [ -n "$XRAY_CONF" ]; then
     info "Existing Xray installation detected ($XRAY_CONF) - reading inbounds (no reinstall)."
     command -v python3 > /dev/null 2>&1 || error "python3 is required to read the existing config."
-    read_xray_conf | python3 -c "$emit_links_py" "$SERVER_ADDR" 2>/dev/null
+    # `|| true`: under `set -e -o pipefail` a python error (a malformed
+    # existing config.json, say) aborted the whole script instead of degrading
+    # to the MV-XRAY-EMPTY/ABSENT report the app expects — and the error text
+    # was swallowed by 2>/dev/null, so the failure was silent too.
+    read_xray_conf | python3 -c "$emit_links_py" "$SERVER_ADDR" 2>/dev/null || true
     LINKS="$(read_xray_conf | python3 -c "$emit_links_py" "$SERVER_ADDR" 2>/dev/null | grep -c 'MULTIVPN-LINK:' || true)"
     if [ "${LINKS:-0}" -eq 0 ]; then
         warn "No vless/trojan/shadowsocks inbounds with clients were found in the existing config."

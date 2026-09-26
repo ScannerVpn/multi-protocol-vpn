@@ -19,7 +19,14 @@ object Transports {
     fun forConfig(protocol: String?): String = when (protocol) {
         null -> UNSUPPORTED
         "openvpn" -> OPENVPN
+        // No Android build of either core exists: IKEv2 would need the system
+        // keystore and strongSwan, and Aether ships as a desktop binary that
+        // spawns its own pluggable transports. Listing them explicitly is the
+        // whole point — the previous `else -> LIBBOX` handed an Aether config
+        // to sing-box, which cannot speak the protocol, so it failed as a
+        // misleading "اتصال تأیید نشد" instead of "not supported here".
         "ikev2" -> UNSUPPORTED
+        "aether" -> UNSUPPORTED
         else -> LIBBOX
     }
 

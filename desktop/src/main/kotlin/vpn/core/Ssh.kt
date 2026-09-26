@@ -81,13 +81,20 @@ object SshService {
         try {
             client.connect(server.ip, server.sshPort)
             if (hasKey) {
-                val provider: FileKeyProvider = OpenSSHKeyFile()
-                provider.init(File(server.privateKeyPath))
-                try {
+                // Key first, password as the fallback. The whole key attempt —
+                // INCLUDING provider.init() — has to sit inside the try: init
+                // used to run outside it, so a configured-but-unusable key
+                // file (missing, malformed, passphrase-protected) threw
+                // straight past the password fallback and the connection
+                // aborted even though a working password was on hand.
+                val keyAuth = runCatching {
+                    val provider: FileKeyProvider = OpenSSHKeyFile()
+                    provider.init(File(server.privateKeyPath))
                     client.authPublickey(server.username, provider)
-                } catch (e: Exception) {
+                }
+                if (keyAuth.isFailure) {
                     if (hasPassword) client.authPassword(server.username, server.password)
-                    else throw e
+                    else throw keyAuth.exceptionOrNull()!!
                 }
             } else {
                 client.authPassword(server.username, server.password)
@@ -246,7 +253,7 @@ object SshService {
     ): WgProvisionResult {
         val script = SshService::class.java.classLoader
             ?.getResourceAsStream("setup-wireguard.sh")
-            ?.readBytes()?.decodeToString()
+            ?.use { it.readBytes() }?.decodeToString()
             ?: throw IllegalStateException("setup-wireguard.sh resource missing")
 
         val prefix = if (server.username == "root") "" else "sudo "
@@ -335,7 +342,7 @@ object SshService {
 
     private fun loadScript(name: String): String =
         SshService::class.java.classLoader?.getResourceAsStream(name)
-            ?.readBytes()?.decodeToString()
+            ?.use { it.readBytes() }?.decodeToString()
             ?: throw IllegalStateException("$name resource missing")
 
     /**

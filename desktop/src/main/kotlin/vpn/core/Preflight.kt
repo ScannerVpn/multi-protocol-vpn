@@ -65,10 +65,13 @@ object Preflight {
      * why a plain HTTP-proxy client pointed at the base port found "nothing"
      * there in PROXY_ONLY mode.
      */
-    fun endpointSummary(protocol: String, base: Int = ProxyPorts.socks, httpPort: Int = ProxyPorts.http): String =
-        if (protocol == "hysteria2") {
-            "HTTP+SOCKS 127.0.0.1:$base"
-        } else {
-            "SOCKS 127.0.0.1:$base \u00b7 HTTP 127.0.0.1:$httpPort"
-        }
+    fun endpointSummary(
+        protocol: String,
+        base: Int = if (protocol == "aether") Aether.SOCKS_PORT else ProxyPorts.socks,
+        httpPort: Int = if (protocol == "aether") Aether.HTTP_PORT else ProxyPorts.http,
+    ): String = if (protocol == "hysteria2") {
+        "HTTP+SOCKS 127.0.0.1:$base"
+    } else {
+        "SOCKS 127.0.0.1:$base · HTTP 127.0.0.1:$httpPort"
+    }
 }

@@ -54,7 +54,7 @@ fun AetherScreen() {
     ) {
         ScreenHeader(
             title = "Aether",
-            subtitle = "Censorship circumvention · MASQUE · Gool · Zero Trust · Tor",
+            subtitle = "Censorship circumvention · MASQUE · Gool · Zero Trust · Tor · Psiphon",
         )
 
         // THE connect/disconnect control for this section — one big button
@@ -90,7 +90,7 @@ fun AetherScreen() {
                         Text(
                             when {
                                 aetherConnected ->
-                                    "SOCKS ${Aether.BIND} · HTTP ${Aether.HTTP_BIND} — change mode below in Settings"
+                                    "SOCKS ${Aether.BIND} · HTTP ${if (settings.httpProxy) Aether.httpBind(settings) else "off"} — change mode below in Settings"
                                 aetherBusy ->
                                     "The gateway scan can take up to a minute — live core output lands in the app log"
                                 status == VpnStatus.CONNECTED ->
@@ -155,7 +155,9 @@ fun AetherScreen() {
                 }
                 Text(desc, fontSize = 11.sp, color = C.TextSecondary)
 
-                if (Aether.normalizeProtocol(settings.protocol) == "masque") {
+                // Zero Trust rides the MASQUE carrier (buildArgs resolves
+                // zt -> masque), so the transport knobs apply to it too.
+                if (Aether.normalizeProtocol(settings.protocol) in setOf("masque", "zt")) {
                     ToggleRow("HTTP/2 transport", "TCP instead of QUIC — for networks that block UDP", settings.h2) {
                         AppState.updateAetherSettings { it.copy(h2 = it.h2.not()) }
                     }
@@ -188,7 +190,7 @@ fun AetherScreen() {
                 }
                 if (Aether.normalizeProtocol(settings.protocol) == "zt") {
                     AppTextField(settings.team, { v -> AppState.updateAetherSettings { it.copy(team = v) } }, "Team name")
-                    AppTextField(settings.accessToken, { v -> AppState.updateAetherSettings { it.copy(accessToken = v) } }, "Access token (or sign-in below)")
+                    AppTextField(settings.accessToken, { v -> AppState.updateAetherSettings { it.copy(accessToken = v) } }, "Access token (or sign-in below)", password = true)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Box(Modifier.weight(1f)) {
                             AppTextField(settings.accessId, { v -> AppState.updateAetherSettings { it.copy(accessId = v) } }, "Service token ID")
@@ -236,6 +238,26 @@ fun AetherScreen() {
                 ToggleRow("HTTP proxy too", "Expose an HTTP CONNECT proxy alongside SOCKS", settings.httpProxy) {
                     AppState.updateAetherSettings { it.copy(httpProxy = it.httpProxy.not()) }
                 }
+                AppTextField(
+                    settings.exitLoc,
+                    { value -> AppState.updateAetherSettings { it.copy(exitLoc = value) } },
+                    "Exit countries (!IR,AZ or DE,SE; empty = any)",
+                )
+                AppTextField(
+                    settings.exitLocSecs.toString(),
+                    { value -> AppState.updateAetherSettings { it.copy(exitLocSecs = value.toIntOrNull()?.coerceIn(1, 86_400) ?: 60) } },
+                    "Exit policy check interval (seconds)",
+                )
+                ToggleRow("Periodic core stats", "Log upload, download and uptime", settings.stats) {
+                    AppState.updateAetherSettings { it.copy(stats = it.stats.not()) }
+                }
+                if (settings.stats) {
+                    AppTextField(
+                        settings.statsSecs.toString(),
+                        { value -> AppState.updateAetherSettings { it.copy(statsSecs = value.toIntOrNull()?.coerceIn(1, 86_400) ?: 60) } },
+                        "Stats interval (seconds)",
+                    )
+                }
             }
         }
 
@@ -250,14 +272,43 @@ fun AetherScreen() {
                         "only" to "Tor only",
                     ),
                     selected = settings.torMode,
-                ) { m -> AppState.updateAetherSettings { it.copy(torMode = m) } }
+                ) { mode ->
+                    AppState.updateAetherSettings {
+                        when {
+                            mode == "reverse" && it.psiphonMode == "reverse" ->
+                                it.copy(torMode = mode, psiphonMode = "off")
+                            mode == "only" -> it.copy(torMode = mode, psiphonMode = "off")
+                            else -> it.copy(torMode = mode)
+                        }
+                    }
+                }
                 if (settings.torMode != "off") {
+                    if (settings.torMode in setOf("chain", "reverse")) {
+                        ToggleRow("Tor HTTP proxy", "Expose Tor on its secondary HTTP listener", settings.torHttpProxy) {
+                            AppState.updateAetherSettings { it.copy(torHttpProxy = it.torHttpProxy.not()) }
+                        }
+                    }
+                    Text("Relay sources", fontSize = 11.sp, color = C.TextSecondary)
+                    ChipRow(
+                        options = listOf("auto" to "BridgeDB + relays", "only" to "Relays only", "off" to "BridgeDB only"),
+                        selected = settings.torRelays,
+                    ) { value -> AppState.updateAetherSettings { it.copy(torRelays = value) } }
+                    Text("Relay ports", fontSize = 11.sp, color = C.TextSecondary)
+                    ChipRow(
+                        options = listOf("web" to "Web", "any" to "Any"),
+                        selected = settings.torRelayPorts,
+                    ) { value -> AppState.updateAetherSettings { it.copy(torRelayPorts = value) } }
                     Text("Bridges", fontSize = 11.sp, color = C.TextSecondary)
                     ChipRow(
                         options = listOf("auto" to "Auto", "force" to "Force", "off" to "Never"),
                         selected = settings.torBridges,
                     ) { b -> AppState.updateAetherSettings { it.copy(torBridges = b) } }
                     AppTextField(settings.torCountry, { v -> AppState.updateAetherSettings { it.copy(torCountry = v) } }, "Bridge country (e.g. de)")
+                    AppTextField(
+                        settings.torBridgeFile,
+                        { value -> AppState.updateAetherSettings { it.copy(torBridgeFile = value) } },
+                        "Bridge file (torrc lines)",
+                    )
                     AppTextField(
                         settings.torBridgeLines,
                         { v -> AppState.updateAetherSettings { it.copy(torBridgeLines = v) } },
@@ -268,6 +319,86 @@ fun AetherScreen() {
                     Text(
                         "Tor exit proxy: ${Aether.TOR_BIND}",
                         fontSize = 11.sp,
+                        color = C.TextFaint,
+                    )
+                }
+            }
+        }
+
+        GlassCard {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Psiphon", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = C.TextPrimary)
+                ChipRow(
+                    options = listOf(
+                        "off" to "Off",
+                        "chain" to "Inside tunnel",
+                        "reverse" to "Through Psiphon",
+                        "only" to "Psiphon only",
+                    ),
+                    selected = settings.psiphonMode,
+                ) { mode ->
+                    AppState.updateAetherSettings {
+                        when {
+                            mode == "reverse" && it.torMode == "reverse" ->
+                                it.copy(psiphonMode = mode, torMode = "off")
+                            mode == "only" -> it.copy(psiphonMode = mode, torMode = "off")
+                            else -> it.copy(psiphonMode = mode)
+                        }
+                    }
+                }
+                if (settings.psiphonMode != "off") {
+                    Text("Connection mode", fontSize = 11.sp, color = C.TextSecondary)
+                    ChipRow(
+                        options = listOf("auto" to "Auto", "cdn" to "CDN meek", "direct" to "Direct"),
+                        selected = settings.psiphonVariant,
+                    ) { value -> AppState.updateAetherSettings { it.copy(psiphonVariant = value) } }
+                    AppTextField(
+                        settings.psiphonRegion,
+                        { value -> AppState.updateAetherSettings { it.copy(psiphonRegion = value.uppercase().take(2)) } },
+                        "Exit region (two-letter country code)",
+                    )
+                    AppTextField(
+                        settings.psiphonReadySecs.toString(),
+                        { value -> AppState.updateAetherSettings { it.copy(psiphonReadySecs = value.toIntOrNull()?.coerceIn(1, 86_400) ?: 180) } },
+                        "Startup readiness (seconds)",
+                    )
+                    AppTextField(
+                        settings.psiphonConfig,
+                        { value -> AppState.updateAetherSettings { it.copy(psiphonConfig = value) } },
+                        "Custom config JSON path",
+                    )
+                    AppTextField(
+                        settings.psiphonCdnIps,
+                        { value -> AppState.updateAetherSettings { it.copy(psiphonCdnIps = value) } },
+                        "Custom CDN IPs",
+                    )
+                    AppTextField(
+                        settings.psiphonCdnSni,
+                        { value -> AppState.updateAetherSettings { it.copy(psiphonCdnSni = value) } },
+                        "Custom CDN SNI",
+                    )
+                    AppTextField(
+                        settings.psiphonDir,
+                        { value -> AppState.updateAetherSettings { it.copy(psiphonDir = value) } },
+                        "State directory",
+                    )
+                    AppTextField(
+                        settings.psiphonBin,
+                        { value -> AppState.updateAetherSettings { it.copy(psiphonBin = value) } },
+                        "Tunnel core path (empty = bundled)",
+                    )
+                    if (settings.psiphonMode in setOf("chain", "reverse")) {
+                        ToggleRow("Psiphon HTTP proxy", "Expose Psiphon on its secondary HTTP listener", settings.psiphonHttpProxy) {
+                            AppState.updateAetherSettings { it.copy(psiphonHttpProxy = it.psiphonHttpProxy.not()) }
+                        }
+                    }
+                    Text(
+                        if (settings.psiphonMode == "only") {
+                            "Psiphon-only endpoint: SOCKS ${Aether.BIND} · HTTP ${if (settings.httpProxy) Aether.PSIPHON_HTTP_BIND else "off"}"
+                        } else {
+                            "Psiphon provider: SOCKS ${Aether.PSIPHON_BIND} · HTTP ${if (settings.psiphonHttpProxy) Aether.PSIPHON_HTTP_BIND else "off"}"
+                        },
+                        fontSize = 10.5.sp,
                         color = C.TextFaint,
                     )
                 }
@@ -311,12 +442,13 @@ fun AetherScreen() {
                 ) { p -> AppState.updateAetherSettings { it.copy(perf = p) } }
                 Text("Log level", fontSize = 11.sp, color = C.TextSecondary)
                 ChipRow(
-                    options = listOf("error", "warn", "info", "debug").map { it to it.uppercase() },
+                    options = listOf("error", "warn", "info", "debug", "trace").map { it to it.uppercase() },
                     selected = settings.logLevel,
                 ) { l -> AppState.updateAetherSettings { it.copy(logLevel = l) } }
                 Text(
-                    "Local endpoints — SOCKS ${Aether.BIND} · HTTP ${if (settings.httpProxy) Aether.HTTP_BIND else "off"}" +
-                        " · Tor ${if (settings.torMode != "off") Aether.TOR_BIND else "off"}",
+                    "Local endpoints — SOCKS ${Aether.BIND} · HTTP ${if (settings.httpProxy) Aether.httpBind(settings) else "off"}" +
+                        " · Tor ${if (settings.torMode != "off") Aether.TOR_BIND else "off"}" +
+                        " · Psiphon ${if (settings.psiphonMode != "off") Aether.PSIPHON_BIND else "off"}",
                     fontSize = 10.5.sp,
                     color = C.TextFaint,
                     textAlign = TextAlign.Start,
@@ -325,7 +457,7 @@ fun AetherScreen() {
         }
 
         Text(
-            "Powered by Aether (CluvexStudio) — integrated into MultiVPN. " +
+            "Powered by Aether ${Aether.VERSION} (CluvexStudio) — integrated into MultiVPN. " +
                 "Settings apply on the next connect; the running core keeps its current tunnel.",
             fontSize = 10.5.sp,
             color = C.TextFaint,

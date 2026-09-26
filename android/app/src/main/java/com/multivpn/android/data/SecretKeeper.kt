@@ -75,6 +75,11 @@ object SecretKeeper {
     /** Wraps plaintext; null/empty pass through unchanged. */
     fun protect(plain: String?): String? {
         if (plain.isNullOrEmpty()) return plain
+        // NEVER double-wrap. A value that failed to unwrap (foreign profile,
+        // restored backup) is kept as the original blob by [unwrap]; re-wrapping
+        // it here would bury the recoverable secret one layer deeper on every
+        // save. The desktop's SecretBox guards the same way.
+        if (plain.startsWith(PREFIX)) return plain
         val k = key() ?: return plain
         return try {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")

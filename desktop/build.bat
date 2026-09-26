@@ -49,10 +49,10 @@ java -version 2>&1 | findstr /i "version"
 if errorlevel 1 goto :fail_java
 
 rem ---------- [2/4] VPN cores are NOT in git - fetch when missing ------
-if exist "src\main\resources\bin\xray\xray.exe" (
+if exist "src\main\resources\bin\xray\xray.exe" if exist "src\main\resources\bin\aether\aether.exe" if exist "src\main\resources\bin\aether\pt\lyrebird.exe" if exist "src\main\resources\bin\aether\pt\psiphon-tunnel-core.exe" (
     echo [2/4] Cores already present - skipping download.
 ) else (
-    echo [2/4] Downloading VPN cores ^(xray / sing-box / openvpn^) ...
+    echo [2/4] Downloading VPN cores ^(xray / sing-box / openvpn / Aether^) ...
     powershell -NoProfile -ExecutionPolicy Bypass -File fetch-cores.ps1 -SkipWireproxy
     if errorlevel 1 (
         echo   WARNING: core download failed. The app will still build,

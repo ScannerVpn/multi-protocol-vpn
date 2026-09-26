@@ -1,6 +1,7 @@
 package vpn.core
 
 import kotlin.test.Test
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -63,5 +64,27 @@ class KillSwitchCleanupScriptTest {
         val s = script()
         assertTrue("Start-Process powershell -Verb RunAs" in s, "UAC re-launch missing")
         assertTrue("IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)" in s, "admin check missing")
+    }
+
+    @Test
+    fun `the UAC re-launch quotes the -File argument the way PowerShell expects`() {
+        val line = script().lineSequence()
+            .first { it.contains("Start-Process powershell -Verb RunAs") }
+        // PowerShell's escape character is the BACKTICK: `" is a literal quote,
+        // while `\ is just a backslash. So `\" ends the string right there and
+        // the remaining tokens fall apart — the generated script then re-launches
+        // powershell with an argument list of three broken pieces ("-File \",
+        // the script path, "\") and the elevated cleanup NEVER RUNS. Verified
+        // against PowerShell's own parser: `@("A`\"B`\"")` reports
+        // "Unexpected token" while `@("A`"B`"")` is a single element.
+        assertTrue(
+            "`\"\$script`\"" in line,
+            "the -File argument is not escaped as `\"...`\": $line",
+        )
+        assertFalse(
+            "`\\\"" in line,
+            "backtick-backslash-quote: the string terminates early and the " +
+                "elevated cleanup silently never runs: $line",
+        )
     }
 }

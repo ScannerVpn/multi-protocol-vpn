@@ -103,6 +103,62 @@ class StorageTest {
     }
 
     @Test
+    fun `Zero Trust credentials are protected at rest`() {
+        val original = Storage.loadSettings()
+        val f = File(Storage.dataDir, "settings.json")
+        try {
+            Storage.saveSettings(
+                original.copy(
+                    aether = original.aether.copy(
+                        accessToken = "zero-trust-token",
+                        accessSecret = "zero-trust-secret",
+                    ),
+                ),
+            )
+            val raw = f.readText()
+            assertFalse("zero-trust-token" in raw)
+            assertFalse("zero-trust-secret" in raw)
+            val loaded = Storage.loadSettings().aether
+            assertEquals("zero-trust-token", loaded.accessToken)
+            assertEquals("zero-trust-secret", loaded.accessSecret)
+        } finally {
+            Storage.saveSettings(original)
+        }
+    }
+
+    @Test
+    fun `legacy plaintext Zero Trust credentials are migrated on load`() {
+        val original = Storage.loadSettings()
+        val f = File(Storage.dataDir, "settings.json")
+        try {
+            f.writeText(
+                """{"aether":{"accessToken":"legacy-token","accessSecret":"legacy-secret"}}""",
+            )
+            val loaded = Storage.loadSettings().aether
+            assertEquals("legacy-token", loaded.accessToken)
+            assertEquals("legacy-secret", loaded.accessSecret)
+            val raw = f.readText()
+            assertFalse("legacy-token" in raw)
+            assertFalse("legacy-secret" in raw)
+        } finally {
+            Storage.saveSettings(original)
+        }
+    }
+
+    @Test
+    fun `legacy stealth scan migrates to verified`() {
+        val original = Storage.loadSettings()
+        val f = File(Storage.dataDir, "settings.json")
+        try {
+            f.writeText("""{"aether":{"scan":"stealth"}}""")
+            assertEquals("verified", Storage.loadSettings().aether.scan)
+            assertEquals("verified", Storage.loadSettings().aether.scan)
+        } finally {
+            Storage.saveSettings(original)
+        }
+    }
+
+    @Test
     fun `an out-of-range proxy port is repaired on load`() {
         val original = Storage.loadSettings()
         val f = File(Storage.dataDir, "settings.json")

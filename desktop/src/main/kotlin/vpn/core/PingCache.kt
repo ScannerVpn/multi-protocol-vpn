@@ -52,7 +52,14 @@ object PingCache {
     }
 
     /** @return the cached value for [configId], or null when there is none. */
-    fun get(configId: String): Entry? = load()[configId]
+    fun get(configId: String): Entry? {
+        val map = load()
+        // Read under the same lock as the writers: put/retainAll/remove mutate
+        // this HashMap in place, and an unsynchronised read racing a rehash can
+        // return a wrong (or stale) entry — a fabricated latency number is
+        // exactly what this file must never produce.
+        return synchronized(lock) { map[configId] }
+    }
 
     /** True when [entry] exists but is older than [STALE_MS]. */
     fun isStale(entry: Entry?, now: Long = System.currentTimeMillis()): Boolean =

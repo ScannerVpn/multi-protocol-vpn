@@ -364,7 +364,11 @@ else
         rm -f "$PEER_TMP"
     else
         "$QUICK" up "$IFACE" && info "Interface $IFACE started."
-        systemctl enable "wg-quick@${IFACE}" > /dev/null 2>&1 || true
+        # MUST be $QUICK, not a hardcoded wg-quick: an AmneziaWG install ships
+        # awg-quick (there is no wg-quick@wg0 unit on such a host), so the
+        # tunnel silently failed to come back after the first reboot — and the
+        # `|| true` hid it.
+        systemctl enable "${QUICK}@${IFACE}" > /dev/null 2>&1 || true
     fi
 fi
 

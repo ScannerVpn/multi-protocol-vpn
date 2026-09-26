@@ -58,16 +58,17 @@ fun Card(content: @Composable androidx.compose.foundation.layout.ColumnScope.() 
     Column(
         Modifier
             .fillMaxWidth()
-            .background(Palette.Glass, RoundedCornerShape(14.dp))
-            .border(1.dp, Palette.Border, RoundedCornerShape(14.dp))
+            .background(LocalPalette.current.Glass, RoundedCornerShape(14.dp))
+            .border(1.dp, LocalPalette.current.Border, RoundedCornerShape(14.dp))
             .padding(14.dp),
         content = content,
     )
 }
 
+@Composable
 fun Modifier.glass(): Modifier = this
-    .background(Palette.Glass, RoundedCornerShape(12.dp))
-    .border(1.dp, Palette.Border, RoundedCornerShape(12.dp))
+    .background(LocalPalette.current.Glass, RoundedCornerShape(12.dp))
+    .border(1.dp, LocalPalette.current.Border, RoundedCornerShape(12.dp))
 
 /** A labelled row with a trailing switch. */
 @Composable
@@ -82,16 +83,16 @@ fun SettingSwitch(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, color = Palette.TextPrimary, fontSize = 13.sp)
-            subtitle?.let { Text(it, color = Palette.TextFaint, fontSize = 10.5.sp) }
+            Text(title, color = LocalPalette.current.TextPrimary, fontSize = 13.sp)
+            subtitle?.let { Text(it, color = LocalPalette.current.TextFaint, fontSize = 10.5.sp) }
         }
         Switch(
             checked = checked,
             onCheckedChange = onChange,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
-                checkedTrackColor = Palette.Accent,
-                uncheckedTrackColor = Palette.GlassStrong,
+                checkedTrackColor = LocalPalette.current.Accent,
+                uncheckedTrackColor = LocalPalette.current.GlassStrong,
             ),
         )
     }
@@ -113,10 +114,10 @@ fun SettingRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, color = Palette.TextPrimary, fontSize = 13.sp)
-            subtitle?.let { Text(it, color = Palette.TextFaint, fontSize = 10.5.sp) }
+            Text(title, color = LocalPalette.current.TextPrimary, fontSize = 13.sp)
+            subtitle?.let { Text(it, color = LocalPalette.current.TextFaint, fontSize = 10.5.sp) }
         }
-        Text(value, color = Palette.Cyan, fontSize = 12.sp)
+        Text(value, color = LocalPalette.current.Cyan, fontSize = 12.sp)
     }
 }
 
@@ -136,12 +137,12 @@ fun LatencyPill(
     now: Long = System.currentTimeMillis(),
 ) {
     val (text, color) = when {
-        failed -> "تایم‌اوت" to Palette.Bad
+        failed -> "تایم‌اوت" to LocalPalette.current.Bad
         freshMs != null -> "$freshMs ms" to gradeColor(freshMs)
         cached != null -> {
             val stale = now - cached.at > ConfigSort.STALE_MS
             val label = "${cached.ms} ms"
-            label to if (stale) Palette.TextFaint else Palette.TextSecondary
+            label to if (stale) LocalPalette.current.TextFaint else LocalPalette.current.TextSecondary
         }
         else -> return
     }
@@ -154,10 +155,11 @@ fun LatencyPill(
     }
 }
 
+@Composable
 private fun gradeColor(ms: Int): Color = when (LatencyGrade.of(ms)) {
-    LatencyGrade.Grade.GOOD -> Palette.Ok
-    LatencyGrade.Grade.FAIR -> Palette.Warn
-    LatencyGrade.Grade.POOR -> Palette.Bad
+    LatencyGrade.Grade.GOOD -> LocalPalette.current.Ok
+    LatencyGrade.Grade.FAIR -> LocalPalette.current.Warn
+    LatencyGrade.Grade.POOR -> LocalPalette.current.Bad
 }
 
 /** A single-field dialog (rename, edit link, passphrase, add link/sub). */
@@ -177,32 +179,32 @@ fun TextDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
             TextButton(onClick = { onConfirm(text) }, enabled = text.isNotBlank()) {
-                Text(confirmLabel, color = Palette.Cyan)
+                Text(confirmLabel, color = LocalPalette.current.Cyan)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("انصراف", color = Palette.TextSecondary) }
+            TextButton(onClick = onDismiss) { Text("انصراف", color = LocalPalette.current.TextSecondary) }
         },
-        title = { Text(title, color = Palette.TextPrimary, fontSize = 15.sp) },
+        title = { Text(title, color = LocalPalette.current.TextPrimary, fontSize = 15.sp) },
         text = {
             OutlinedTextField(
                 value = text,
                 onValueChange = { text = it },
-                placeholder = { Text(hint, color = Palette.TextFaint, fontSize = 12.sp) },
+                placeholder = { Text(hint, color = LocalPalette.current.TextFaint, fontSize = 12.sp) },
                 singleLine = singleLine,
                 minLines = if (singleLine) 1 else 4,
                 visualTransformation = if (password) PasswordVisualTransformation() else
                     androidx.compose.ui.text.input.VisualTransformation.None,
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Palette.Accent,
-                    unfocusedBorderColor = Palette.Border,
-                    focusedTextColor = Palette.TextPrimary,
-                    unfocusedTextColor = Palette.TextPrimary,
-                    cursorColor = Palette.Cyan,
+                    focusedBorderColor = LocalPalette.current.Accent,
+                    unfocusedBorderColor = LocalPalette.current.Border,
+                    focusedTextColor = LocalPalette.current.TextPrimary,
+                    unfocusedTextColor = LocalPalette.current.TextPrimary,
+                    cursorColor = LocalPalette.current.Cyan,
                 ),
             )
         },
-        containerColor = Palette.Surface,
+        containerColor = LocalPalette.current.Surface,
     )
 }
 
@@ -218,9 +220,9 @@ fun ChoiceDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("بستن", color = Palette.TextSecondary) }
+            TextButton(onClick = onDismiss) { Text("بستن", color = LocalPalette.current.TextSecondary) }
         },
-        title = { Text(title, color = Palette.TextPrimary, fontSize = 15.sp) },
+        title = { Text(title, color = LocalPalette.current.TextPrimary, fontSize = 15.sp) },
         text = {
             Column {
                 options.forEach { (value, label) ->
@@ -233,16 +235,16 @@ fun ChoiceDialog(
                     ) {
                         Text(
                             if (value == selected) "●" else "○",
-                            color = if (value == selected) Palette.Cyan else Palette.TextFaint,
+                            color = if (value == selected) LocalPalette.current.Cyan else LocalPalette.current.TextFaint,
                             fontSize = 13.sp,
                         )
                         Spacer(Modifier.width(10.dp))
-                        Text(label, color = Palette.TextPrimary, fontSize = 13.sp)
+                        Text(label, color = LocalPalette.current.TextPrimary, fontSize = 13.sp)
                     }
                 }
             }
         },
-        containerColor = Palette.Surface,
+        containerColor = LocalPalette.current.Surface,
     )
 }
 
@@ -252,22 +254,22 @@ fun TextViewDialog(title: String, body: String, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("بستن", color = Palette.Cyan) }
+            TextButton(onClick = onDismiss) { Text("بستن", color = LocalPalette.current.Cyan) }
         },
-        title = { Text(title, color = Palette.TextPrimary, fontSize = 15.sp) },
+        title = { Text(title, color = LocalPalette.current.TextPrimary, fontSize = 15.sp) },
         text = {
             androidx.compose.foundation.lazy.LazyColumn(Modifier.height(360.dp)) {
                 item {
                     Text(
                         body.ifBlank { "(خالی)" },
-                        color = Palette.TextSecondary,
+                        color = LocalPalette.current.TextSecondary,
                         fontSize = 10.sp,
                         fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                     )
                 }
             }
         },
-        containerColor = Palette.Surface,
+        containerColor = LocalPalette.current.Surface,
     )
 }
 
@@ -284,15 +286,15 @@ fun ConfirmDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
             TextButton(onClick = { onConfirm(); onDismiss() }) {
-                Text(confirmLabel, color = Palette.Bad)
+                Text(confirmLabel, color = LocalPalette.current.Bad)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("انصراف", color = Palette.TextSecondary) }
+            TextButton(onClick = onDismiss) { Text("انصراف", color = LocalPalette.current.TextSecondary) }
         },
-        title = { Text(title, color = Palette.TextPrimary, fontSize = 15.sp) },
-        text = { Text(body, color = Palette.TextSecondary, fontSize = 12.sp) },
-        containerColor = Palette.Surface,
+        title = { Text(title, color = LocalPalette.current.TextPrimary, fontSize = 15.sp) },
+        text = { Text(body, color = LocalPalette.current.TextSecondary, fontSize = 12.sp) },
+        containerColor = LocalPalette.current.Surface,
     )
 }
 
@@ -313,35 +315,35 @@ fun AddConfigSheet(
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("انصراف", color = Palette.TextSecondary) }
+            TextButton(onClick = onDismiss) { Text("انصراف", color = LocalPalette.current.TextSecondary) }
         },
-        title = { Text("افزودن کانفیگ", color = Palette.TextPrimary, fontSize = 15.sp) },
+        title = { Text("افزودن کانفیگ", color = LocalPalette.current.TextPrimary, fontSize = 15.sp) },
         text = {
             Column {
                 AddConfigOption(
                     icon = Icons.Filled.Link,
                     title = "از لینک",
                     subtitle = "vless:// · trojan:// · ss:// · hy2:// — هر خط یک لینک",
-                    tint = Palette.Accent,
+                    tint = LocalPalette.current.Accent,
                     onClick = onLink,
                 )
                 AddConfigOption(
                     icon = Icons.Filled.Cloud,
                     title = "از اشتراک",
                     subtitle = "آدرس ساب (http/https)؛ همهٔ کانفیگ‌هایش اضافه می‌شوند",
-                    tint = Palette.Accent2,
+                    tint = LocalPalette.current.Accent2,
                     onClick = onSubscription,
                 )
                 AddConfigOption(
                     icon = Icons.Filled.Folder,
                     title = "از فایل",
                     subtitle = ".conf / .ovpn / .json از حافظهٔ دستگاه",
-                    tint = Palette.Mint,
+                    tint = LocalPalette.current.Mint,
                     onClick = onFile,
                 )
             }
         },
-        containerColor = Palette.Surface,
+        containerColor = LocalPalette.current.Surface,
     )
 }
 
@@ -364,8 +366,8 @@ private fun AddConfigOption(
         IconTile(icon, tint, size = 34.dp, iconSize = 17.dp)
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, color = Palette.TextPrimary, fontSize = 13.sp)
-            Text(subtitle, color = Palette.TextFaint, fontSize = 10.sp)
+            Text(title, color = LocalPalette.current.TextPrimary, fontSize = 13.sp)
+            Text(subtitle, color = LocalPalette.current.TextFaint, fontSize = 10.sp)
         }
     }
 }
@@ -408,15 +410,15 @@ fun IconTile(
 fun SectionCard(
     title: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
-    tint: Color = Palette.Accent,
+    tint: Color = LocalPalette.current.Accent,
     badge: String? = null,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
 ) {
     Column(
         Modifier
             .fillMaxWidth()
-            .background(Palette.Glass, RoundedCornerShape(14.dp))
-            .border(1.dp, Palette.Border, RoundedCornerShape(14.dp))
+            .background(LocalPalette.current.Glass, RoundedCornerShape(14.dp))
+            .border(1.dp, LocalPalette.current.Border, RoundedCornerShape(14.dp))
             .padding(14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -426,7 +428,7 @@ fun SectionCard(
             }
             Text(
                 title,
-                color = Palette.TextPrimary,
+                color = LocalPalette.current.TextPrimary,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f),
@@ -434,11 +436,11 @@ fun SectionCard(
             badge?.let {
                 Text(
                     it,
-                    color = Palette.TextFaint,
+                    color = LocalPalette.current.TextFaint,
                     fontSize = 9.5.sp,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                     modifier = Modifier
-                        .background(Palette.SurfaceLow, RoundedCornerShape(6.dp))
+                        .background(LocalPalette.current.SurfaceLow, RoundedCornerShape(6.dp))
                         .padding(horizontal = 6.dp, vertical = 3.dp),
                 )
             }
@@ -458,14 +460,14 @@ fun Chip(
     selected: Boolean,
     count: Int? = null,
     leadingIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
-    tint: Color = Palette.Cyan,
+    tint: Color = LocalPalette.current.Cyan,
     onClick: () -> Unit,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .clip(RoundedCornerShape(20.dp))
-            .background(if (selected) tint else Palette.Glass)
+            .background(if (selected) tint else LocalPalette.current.Glass)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 7.dp),
     ) {
@@ -473,7 +475,7 @@ fun Chip(
             Icon(
                 leadingIcon,
                 null,
-                tint = if (selected) Palette.Surface else Palette.TextSecondary,
+                tint = if (selected) LocalPalette.current.Surface else LocalPalette.current.TextSecondary,
                 modifier = Modifier.size(13.dp),
             )
             Spacer(Modifier.width(5.dp))
@@ -482,7 +484,7 @@ fun Chip(
             label,
             fontSize = 11.5.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (selected) Palette.Surface else Palette.TextSecondary,
+            color = if (selected) LocalPalette.current.Surface else LocalPalette.current.TextSecondary,
         )
         if (count != null) {
             Spacer(Modifier.width(6.dp))
@@ -490,10 +492,10 @@ fun Chip(
                 "$count",
                 fontSize = 9.5.sp,
                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                color = if (selected) Palette.Surface else Palette.TextFaint,
+                color = if (selected) LocalPalette.current.Surface else LocalPalette.current.TextFaint,
                 modifier = Modifier
                     .background(
-                        if (selected) Palette.Surface.copy(alpha = 0.25f) else Palette.GlassStrong,
+                        if (selected) LocalPalette.current.Surface.copy(alpha = 0.25f) else LocalPalette.current.GlassStrong,
                         RoundedCornerShape(8.dp),
                     )
                     .padding(horizontal = 5.dp, vertical = 1.dp),
@@ -512,7 +514,7 @@ fun TelemetryBox(
     label: String,
     value: String,
     unit: String? = null,
-    valueColor: Color = Palette.TextPrimary,
+    valueColor: Color = LocalPalette.current.TextPrimary,
     icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
     iconTint: Color = valueColor,
 ) {
@@ -520,7 +522,7 @@ fun TelemetryBox(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .fillMaxWidth()
-            .background(Palette.SurfaceLow, RoundedCornerShape(12.dp))
+            .background(LocalPalette.current.SurfaceLow, RoundedCornerShape(12.dp))
             .padding(vertical = 9.dp, horizontal = 6.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -537,10 +539,10 @@ fun TelemetryBox(
             )
             unit?.let {
                 Spacer(Modifier.width(2.dp))
-                Text(it, color = Palette.TextFaint, fontSize = 9.sp)
+                Text(it, color = LocalPalette.current.TextFaint, fontSize = 9.sp)
             }
         }
-        Text(label, color = Palette.TextFaint, fontSize = 9.5.sp, maxLines = 1)
+        Text(label, color = LocalPalette.current.TextFaint, fontSize = 9.5.sp, maxLines = 1)
     }
 }
 
@@ -559,12 +561,12 @@ fun StatusPill(text: String, color: Color, filled: Boolean = false) {
         Box(
             Modifier
                 .size(5.dp)
-                .background(if (filled) Palette.Surface else color, CircleShape),
+                .background(if (filled) LocalPalette.current.Surface else color, CircleShape),
         )
         Spacer(Modifier.width(6.dp))
         Text(
             text,
-            color = if (filled) Palette.Surface else color,
+            color = if (filled) LocalPalette.current.Surface else color,
             fontSize = 10.sp,
             fontWeight = FontWeight.SemiBold,
         )
@@ -577,12 +579,12 @@ fun StatusPill(text: String, color: Color, filled: Boolean = false) {
  * value — never a decorative gauge.
  */
 @Composable
-fun FactRow(title: String, value: String, valueColor: Color = Palette.TextSecondary) {
+fun FactRow(title: String, value: String, valueColor: Color = LocalPalette.current.TextSecondary) {
     Row(
         Modifier.fillMaxWidth().padding(vertical = 5.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        Text(title, color = Palette.TextPrimary, fontSize = 11.5.sp, modifier = Modifier.weight(1f))
+        Text(title, color = LocalPalette.current.TextPrimary, fontSize = 11.5.sp, modifier = Modifier.weight(1f))
         Text(
             value,
             color = valueColor,

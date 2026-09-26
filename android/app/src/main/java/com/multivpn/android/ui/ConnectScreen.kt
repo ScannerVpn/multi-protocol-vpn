@@ -195,12 +195,12 @@ fun ConnectScreen(onOpenRouting: () -> Unit = {}) {
             Spacer(Modifier.height(10.dp))
             Text(
                 msg,
-                color = Palette.TextSecondary,
+                color = LocalPalette.current.TextSecondary,
                 fontSize = 11.5.sp,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Palette.Glass, RoundedCornerShape(12.dp))
+                    .background(LocalPalette.current.Glass, RoundedCornerShape(12.dp))
                     .padding(12.dp),
             )
         }
@@ -217,8 +217,8 @@ private fun SessionFactsCard(connected: Boolean, protocol: String?, serverName: 
     Column(
         Modifier
             .fillMaxWidth()
-            .background(Palette.Glass, RoundedCornerShape(14.dp))
-            .border(1.dp, Palette.Border, RoundedCornerShape(14.dp))
+            .background(LocalPalette.current.Glass, RoundedCornerShape(14.dp))
+            .border(1.dp, LocalPalette.current.Border, RoundedCornerShape(14.dp))
             .padding(14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -226,12 +226,12 @@ private fun SessionFactsCard(connected: Boolean, protocol: String?, serverName: 
                 Modifier
                     .size(7.dp)
                     .clip(CircleShape)
-                    .background(if (connected) Palette.Ok else Palette.TextFaint),
+                    .background(if (connected) LocalPalette.current.Ok else LocalPalette.current.TextFaint),
             )
             Spacer(Modifier.width(8.dp))
             Text(
                 if (connected) "تونل رمزنگاری فعال" else "تونل غیرفعال",
-                color = Palette.TextPrimary,
+                color = LocalPalette.current.TextPrimary,
                 fontSize = 12.5.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
@@ -239,14 +239,14 @@ private fun SessionFactsCard(connected: Boolean, protocol: String?, serverName: 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
-                    .background(Palette.Glass, RoundedCornerShape(999.dp))
+                    .background(LocalPalette.current.Glass, RoundedCornerShape(999.dp))
                     .padding(horizontal = 8.dp, vertical = 3.dp),
             ) {
-                Icon(Icons.Filled.Lock, null, tint = Palette.Accent, modifier = Modifier.size(11.dp))
+                Icon(Icons.Filled.Lock, null, tint = LocalPalette.current.Accent, modifier = Modifier.size(11.dp))
                 Spacer(Modifier.width(4.dp))
                 Text(
                     protocol?.let { Telemetry.cryptoLabel(it) } ?: "—",
-                    color = Palette.Accent,
+                    color = LocalPalette.current.Accent,
                     fontSize = 9.sp,
                 )
             }
@@ -256,14 +256,14 @@ private fun SessionFactsCard(connected: Boolean, protocol: String?, serverName: 
             Column(
                 Modifier
                     .weight(1f)
-                    .background(Palette.SurfaceLow, RoundedCornerShape(12.dp))
+                    .background(LocalPalette.current.SurfaceLow, RoundedCornerShape(12.dp))
                     .padding(10.dp),
             ) {
-                Text("سرور فعال", color = Palette.TextFaint, fontSize = 9.5.sp)
+                Text("سرور فعال", color = LocalPalette.current.TextFaint, fontSize = 9.5.sp)
                 Spacer(Modifier.height(2.dp))
                 Text(
                     serverName ?: "انتخاب نشده",
-                    color = Palette.TextPrimary,
+                    color = LocalPalette.current.TextPrimary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -272,14 +272,14 @@ private fun SessionFactsCard(connected: Boolean, protocol: String?, serverName: 
             Column(
                 Modifier
                     .weight(1f)
-                    .background(Palette.SurfaceLow, RoundedCornerShape(12.dp))
+                    .background(LocalPalette.current.SurfaceLow, RoundedCornerShape(12.dp))
                     .padding(10.dp),
             ) {
-                Text("مسیر داده", color = Palette.TextFaint, fontSize = 9.5.sp)
+                Text("مسیر داده", color = LocalPalette.current.TextFaint, fontSize = 9.5.sp)
                 Spacer(Modifier.height(2.dp))
                 Text(
                     protocol?.let { Telemetry.transportLabel(it) } ?: "—",
-                    color = Palette.TextPrimary,
+                    color = LocalPalette.current.TextPrimary,
                     fontSize = 11.sp,
                     maxLines = 1,
                 )
@@ -334,23 +334,23 @@ private fun HeroRing(
                 Icons.Filled.Bolt,
                 null,
                 tint = when {
-                    connected -> Palette.Ok
-                    busy -> Palette.Warn
-                    else -> Palette.Accent
+                    connected -> LocalPalette.current.Ok
+                    busy -> LocalPalette.current.Warn
+                    else -> LocalPalette.current.Accent
                 },
                 modifier = Modifier.size(26.dp),
             )
             Spacer(Modifier.height(4.dp))
-            Text(statusLabel(status), color = Palette.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text(statusLabel(status), color = LocalPalette.current.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             Text(
                 // Only a real session has a duration; otherwise the honest
                 // answer is a dash, not "00:00:00".
                 uptime?.let { CoreClient.formatUptime(it) } ?: "—",
-                color = Palette.TextFaint,
+                color = LocalPalette.current.TextFaint,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
             )
-            Text("مدت پایداری", color = Palette.TextFaint, fontSize = 8.5.sp)
+            Text("مدت پایداری", color = LocalPalette.current.TextFaint, fontSize = 8.5.sp)
         }
     }
 }
@@ -375,10 +375,10 @@ private fun statusLabel(status: EngineStatus): String = when (status) {
 private fun RingCanvas(status: EngineStatus, connected: Boolean, busy: Boolean) {
     val ringColor by animateColorAsState(
         targetValue = when (status) {
-            EngineStatus.CONNECTED -> Palette.Ok
-            EngineStatus.CONNECTING, EngineStatus.DISCONNECTING -> Palette.Cyan
-            EngineStatus.DISCONNECTED -> Palette.TextFaint
-            EngineStatus.UNSUPPORTED -> Palette.Accent
+            EngineStatus.CONNECTED -> LocalPalette.current.Ok
+            EngineStatus.CONNECTING, EngineStatus.DISCONNECTING -> LocalPalette.current.Cyan
+            EngineStatus.DISCONNECTED -> LocalPalette.current.TextFaint
+            EngineStatus.UNSUPPORTED -> LocalPalette.current.Accent
         },
         animationSpec = tween(400),
         label = "ringColor",
@@ -417,10 +417,13 @@ private fun RingCanvas(status: EngineStatus, connected: Boolean, busy: Boolean) 
         }
     }
 
+    // Read the palette OUTSIDE the Canvas: a DrawScope lambda is not a
+    // composable scope, so LocalPalette.current cannot be read in there.
+    val p = LocalPalette.current
     Canvas(Modifier.size(196.dp)) {
         val stroke = 22f
         drawArc(
-            color = Palette.GlassStrong,
+            color = p.GlassStrong,
             startAngle = 0f,
             sweepAngle = 360f,
             useCenter = false,
@@ -437,10 +440,10 @@ private fun RingCanvas(status: EngineStatus, connected: Boolean, busy: Boolean) 
                 )
                 drawArc(
                     brush = Brush.sweepGradient(
-                        0f to Palette.Ok.copy(alpha = 0f),
+                        0f to p.Ok.copy(alpha = 0f),
                         0.12f to Color.White.copy(alpha = 0.45f + 0.3f * shimmer.value),
-                        0.24f to Palette.Ok.copy(alpha = 0f),
-                        1f to Palette.Ok.copy(alpha = 0f),
+                        0.24f to p.Ok.copy(alpha = 0f),
+                        1f to p.Ok.copy(alpha = 0f),
                     ),
                     startAngle = spin.value,
                     sweepAngle = 360f,
@@ -451,9 +454,9 @@ private fun RingCanvas(status: EngineStatus, connected: Boolean, busy: Boolean) 
             busy -> {
                 drawArc(
                     brush = Brush.sweepGradient(
-                        0f to Palette.Cyan.copy(alpha = 0.15f),
-                        0.6f to Palette.Accent,
-                        1f to Palette.Cyan,
+                        0f to p.Cyan.copy(alpha = 0.15f),
+                        0.6f to p.Accent,
+                        1f to p.Cyan,
                     ),
                     startAngle = spin.value - 90f,
                     sweepAngle = 100f,
@@ -463,7 +466,7 @@ private fun RingCanvas(status: EngineStatus, connected: Boolean, busy: Boolean) 
             }
             else -> {
                 drawArc(
-                    brush = Brush.sweepGradient(listOf(Palette.Accent, Palette.Cyan, Palette.Accent)),
+                    brush = Brush.sweepGradient(listOf(p.Accent, p.Cyan, p.Accent)),
                     startAngle = -90f,
                     sweepAngle = 300f,
                     useCenter = false,
@@ -506,11 +509,11 @@ private fun TrafficCard() {
 
     Card {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("ترافیک این سشن", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Palette.TextPrimary)
+            Text("ترافیک این سشن", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = LocalPalette.current.TextPrimary)
             Text(
                 if (startedAt <= 0L) "—" else CoreClient.formatUptime((now - startedAt) / 1000),
                 fontSize = 11.5.sp,
-                color = Palette.Cyan,
+                color = LocalPalette.current.Cyan,
                 fontFamily = FontFamily.Monospace,
             )
         }
@@ -519,20 +522,20 @@ private fun TrafficCard() {
         if (s == null) {
             // The core is up but has not reported accounting yet. Saying so is
             // the honest answer; "0 B" would read as a measurement.
-            Text("هسته هنوز شمارشی گزارش نکرده.", color = Palette.TextFaint, fontSize = 11.sp)
+            Text("هسته هنوز شمارشی گزارش نکرده.", color = LocalPalette.current.TextFaint, fontSize = 11.sp)
         } else {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TelemetryBox(
                     label = "دانلود · کل",
                     value = CoreClient.formatBytes(s.downlinkTotal),
                     icon = Icons.Filled.ArrowDownward,
-                    iconTint = Palette.Mint,
+                    iconTint = LocalPalette.current.Mint,
                 )
                 TelemetryBox(
                     label = "آپلود · کل",
                     value = CoreClient.formatBytes(s.uplinkTotal),
                     icon = Icons.Filled.ArrowUpward,
-                    iconTint = Palette.Cyan,
+                    iconTint = LocalPalette.current.Cyan,
                 )
             }
             Spacer(Modifier.height(8.dp))
@@ -541,13 +544,13 @@ private fun TrafficCard() {
                     label = "نرخ دانلود",
                     value = Telemetry.formatMbps(s.downlink),
                     unit = "Mbps",
-                    valueColor = Palette.Mint,
+                    valueColor = LocalPalette.current.Mint,
                 )
                 TelemetryBox(
                     label = "نرخ آپلود",
                     value = Telemetry.formatMbps(s.uplink),
                     unit = "Mbps",
-                    valueColor = Palette.Cyan,
+                    valueColor = LocalPalette.current.Cyan,
                 )
                 TelemetryBox(
                     label = "اتصال‌ها",
@@ -573,13 +576,13 @@ private fun RateSparkline(samples: List<Long>) {
     Column(
         Modifier
             .fillMaxWidth()
-            .background(Palette.SurfaceLowest, RoundedCornerShape(12.dp))
+            .background(LocalPalette.current.SurfaceLowest, RoundedCornerShape(12.dp))
             .padding(10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "نرخ دانلود ۴۸ ثانیهٔ اخیر",
-                color = Palette.TextFaint,
+                color = LocalPalette.current.TextFaint,
                 fontSize = 9.5.sp,
                 modifier = Modifier.weight(1f),
             )
@@ -587,12 +590,13 @@ private fun RateSparkline(samples: List<Long>) {
             Text(
                 if (peak == null) "در حال نمونه‌برداری…"
                 else "بیشینه: ${Telemetry.formatMbps(peak)} Mbps",
-                color = Palette.TextFaint,
+                color = LocalPalette.current.TextFaint,
                 fontSize = 9.sp,
                 fontFamily = FontFamily.Monospace,
             )
         }
         Spacer(Modifier.height(6.dp))
+        val p = LocalPalette.current
         Canvas(
             Modifier
                 .fillMaxWidth()
@@ -616,13 +620,13 @@ private fun RateSparkline(samples: List<Long>) {
             drawPath(
                 path = fill,
                 brush = Brush.verticalGradient(
-                    listOf(Palette.Accent.copy(alpha = 0.30f), Color.Transparent),
+                    listOf(p.Accent.copy(alpha = 0.30f), Color.Transparent),
                 ),
             )
-            drawPath(path = path, color = Palette.Accent, style = Stroke(width = 2f, cap = StrokeCap.Round))
+            drawPath(path = path, color = p.Accent, style = Stroke(width = 2f, cap = StrokeCap.Round))
             // The newest sample, marked: the right edge is "now".
             drawCircle(
-                color = Palette.Accent,
+                color = p.Accent,
                 radius = 3f,
                 center = Offset(size.width, size.height - (normalized.last() * size.height * 0.9f) - 2f),
             )
@@ -635,11 +639,11 @@ private fun RateSparkline(samples: List<Long>) {
 private fun SessionUsageHint() {
     Card {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("مصرف این سشن", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = Palette.TextPrimary)
+            Text("مصرف این سشن", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = LocalPalette.current.TextPrimary)
             Spacer(Modifier.weight(1f))
-            Text("0 B", fontSize = 13.sp, color = Palette.TextSecondary)
+            Text("0 B", fontSize = 13.sp, color = LocalPalette.current.TextSecondary)
             Spacer(Modifier.width(6.dp))
-            Text("— وصل شوید تا شمارش زنده شروع شود", fontSize = 10.sp, color = Palette.TextFaint)
+            Text("— وصل شوید تا شمارش زنده شروع شود", fontSize = 10.sp, color = LocalPalette.current.TextFaint)
         }
     }
 }
@@ -663,24 +667,24 @@ private fun ActiveNodeCard(
 
     Card {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("سرور فعال مسیریابی", color = Palette.TextFaint, fontSize = 11.sp, modifier = Modifier.weight(1f))
+            Text("سرور فعال مسیریابی", color = LocalPalette.current.TextFaint, fontSize = 11.sp, modifier = Modifier.weight(1f))
             Box {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.clickable { pickerOpen = true },
                 ) {
-                    Text("تغییر نود", color = Palette.Cyan, fontSize = 11.sp)
+                    Text("تغییر نود", color = LocalPalette.current.Cyan, fontSize = 11.sp)
                     Icon(
                         Icons.Filled.KeyboardArrowLeft,
                         null,
-                        tint = Palette.Cyan,
+                        tint = LocalPalette.current.Cyan,
                         modifier = Modifier.size(15.dp),
                     )
                 }
                 DropdownMenu(expanded = pickerOpen, onDismissRequest = { pickerOpen = false }) {
                     if (configs.isEmpty()) {
                         DropdownMenuItem(
-                            text = { Text("اول از تب «سرورها» اضافه کنید", color = Palette.TextSecondary) },
+                            text = { Text("اول از تب «سرورها» اضافه کنید", color = LocalPalette.current.TextSecondary) },
                             onClick = { pickerOpen = false },
                         )
                     }
@@ -689,7 +693,7 @@ private fun ActiveNodeCard(
                             text = {
                                 Text(
                                     "${c.name} · ${Telemetry.protocolLabel(c.protocol)}",
-                                    color = if (c.id == activeConfig?.id) Palette.Cyan else Palette.TextPrimary,
+                                    color = if (c.id == activeConfig?.id) LocalPalette.current.Cyan else LocalPalette.current.TextPrimary,
                                 )
                             },
                             onClick = { onPick(c.id); pickerOpen = false },
@@ -700,30 +704,30 @@ private fun ActiveNodeCard(
         }
         Spacer(Modifier.height(10.dp))
         if (activeConfig == null) {
-            Text("کانفیگی انتخاب نشده است.", color = Palette.TextFaint, fontSize = 11.5.sp)
+            Text("کانفیگی انتخاب نشده است.", color = LocalPalette.current.TextFaint, fontSize = 11.5.sp)
             return@Card
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconTile(Icons.Filled.Public, Palette.Accent, size = 40.dp, iconSize = 20.dp)
+            IconTile(Icons.Filled.Public, LocalPalette.current.Accent, size = 40.dp, iconSize = 20.dp)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     activeConfig.name,
-                    color = Palette.TextPrimary,
+                    color = LocalPalette.current.TextPrimary,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                 )
                 Text(
                     "${activeConfig.serverIp} · ${Telemetry.protocolLabel(activeConfig.protocol)}",
-                    color = Palette.TextFaint,
+                    color = LocalPalette.current.TextFaint,
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
                 )
                 Text(
                     Telemetry.cryptoLabel(activeConfig.protocol),
-                    color = Palette.TextSecondary,
+                    color = LocalPalette.current.TextSecondary,
                     fontSize = 9.5.sp,
                     maxLines = 1,
                 )
@@ -737,7 +741,7 @@ private fun ActiveNodeCard(
         Spacer(Modifier.height(8.dp))
         Text(
             "IP خروجی واقعی فقط از داخل تونل قابل مشاهده است؛ این اپ آن را تست نمی‌کند و عددی جعل نمی‌کند.",
-            color = Palette.TextFaint,
+            color = LocalPalette.current.TextFaint,
             fontSize = 9.5.sp,
         )
     }
@@ -765,7 +769,7 @@ private fun DefensiveSwitches(
     onOpenSystemVpnSettings: () -> Unit,
 ) {
     Card {
-        Text("سوئیچ‌های دفاعی و مسیردهی", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Palette.TextPrimary)
+        Text("سوئیچ‌های دفاعی و مسیردهی", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = LocalPalette.current.TextPrimary)
         Spacer(Modifier.height(4.dp))
 
         SettingRow(
@@ -789,20 +793,20 @@ private fun DefensiveSwitches(
         )
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
             Column(Modifier.weight(1f)) {
-                Text("کیل سوییچ (سطح سیستم)", color = Palette.TextPrimary, fontSize = 13.sp)
+                Text("کیل سوییچ (سطح سیستم)", color = LocalPalette.current.TextPrimary, fontSize = 13.sp)
                 Text(
                     "معادلش در اندروید «همیشه‌فعال + بلاک بدون VPN» است و فقط از تنظیمات سیستم تغییر می‌کند.",
-                    color = Palette.TextFaint,
+                    color = LocalPalette.current.TextFaint,
                     fontSize = 10.5.sp,
                 )
             }
             Text(
                 "تنظیمات VPN",
-                color = Palette.Cyan,
+                color = LocalPalette.current.Cyan,
                 fontSize = 11.5.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier
-                    .background(Palette.Glass, RoundedCornerShape(10.dp))
+                    .background(LocalPalette.current.Glass, RoundedCornerShape(10.dp))
                     .clickable(onClick = onOpenSystemVpnSettings)
                     .padding(horizontal = 10.dp, vertical = 6.dp),
             )

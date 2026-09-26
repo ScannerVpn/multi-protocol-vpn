@@ -168,29 +168,29 @@ private fun RoutingBanner(connected: Boolean) {
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .background(Palette.Glass, RoundedCornerShape(14.dp))
-            .border(1.dp, Palette.Border, RoundedCornerShape(14.dp))
+            .background(LocalPalette.current.Glass, RoundedCornerShape(14.dp))
+            .border(1.dp, LocalPalette.current.Border, RoundedCornerShape(14.dp))
             .padding(14.dp),
     ) {
-        IconTile(Icons.Filled.Route, Palette.Accent, size = 38.dp)
+        IconTile(Icons.Filled.Route, LocalPalette.current.Accent, size = 38.dp)
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 "قوانین و روتینگ ترافیک",
-                color = Palette.TextPrimary,
+                color = LocalPalette.current.TextPrimary,
                 fontSize = 13.5.sp,
                 fontWeight = FontWeight.Bold,
             )
             Text(
                 "موتور: libbox (hiddify-core / sing-box) · مسیر: VpnService TUN",
-                color = Palette.TextFaint,
+                color = LocalPalette.current.TextFaint,
                 fontSize = 9.5.sp,
                 fontFamily = FontFamily.Monospace,
             )
         }
         StatusPill(
             text = if (connected) "RUNNING" else "قطع",
-            color = if (connected) Palette.Ok else Palette.TextFaint,
+            color = if (connected) LocalPalette.current.Ok else LocalPalette.current.TextFaint,
         )
     }
 }
@@ -207,7 +207,7 @@ private fun RoutingRulesSection(
     onPickSplit: () -> Unit,
     onPickApps: () -> Unit,
 ) {
-    SectionCard(title = "قوانین روتینگ", icon = Icons.Filled.Public, tint = Palette.Accent, badge = "REAL") {
+    SectionCard(title = "قوانین روتینگ", icon = Icons.Filled.Public, tint = LocalPalette.current.Accent, badge = "REAL") {
         SettingSwitch(
             title = "جلوگیری از نشت DNS",
             subtitle = "پرس‌وجوها از داخل تونل بروند، نه از DNS شبکهٔ محلی",
@@ -239,7 +239,7 @@ private fun RoutingRulesSection(
         Spacer(Modifier.height(6.dp))
         Text(
             "قوانینی که همیشه در کانفیگ ساخته‌شده هستند:",
-            color = Palette.TextFaint,
+            color = LocalPalette.current.TextFaint,
             fontSize = 10.sp,
         )
         Spacer(Modifier.height(2.dp))
@@ -264,24 +264,24 @@ private fun CoreSection(configs: List<vpn.core.VpnConfig>, activeProtocol: Strin
     SectionCard(
         title = "هسته و پروتکل",
         icon = Icons.Filled.Security,
-        tint = Palette.Accent2,
+        tint = LocalPalette.current.Accent2,
         badge = "libbox",
     ) {
         FactRow(
             title = "هستهٔ تونل",
             value = "libbox (hiddify-core / sing-box 1.13)",
-            valueColor = Palette.TextPrimary,
+            valueColor = LocalPalette.current.TextPrimary,
         )
         FactRow(
             title = "هستهٔ OpenVPN",
             value = "libovpn3 در یک VpnService جدا (فقط برای .ovpn)",
-            valueColor = Palette.TextPrimary,
+            valueColor = LocalPalette.current.TextPrimary,
         )
         if (known.isEmpty() && extra.isEmpty()) {
             Spacer(Modifier.height(4.dp))
             Text(
                 "هنوز کانفیگی نیست؛ مسیر هر پروتکل بعد از افزودن سرور اینجا نشان داده می‌شود.",
-                color = Palette.TextFaint,
+                color = LocalPalette.current.TextFaint,
                 fontSize = 10.5.sp,
             )
         }
@@ -294,9 +294,9 @@ private fun CoreSection(configs: List<vpn.core.VpnConfig>, activeProtocol: Strin
                     "${Telemetry.transportLabel(proto)} · بدون تست urlTest"
                 },
                 valueColor = if (Transports.forConfig(proto) == Transports.UNSUPPORTED) {
-                    Palette.Warn
+                    LocalPalette.current.Warn
                 } else {
-                    Palette.TextSecondary
+                    LocalPalette.current.TextSecondary
                 },
             )
         }
@@ -309,7 +309,7 @@ private fun SecuritySection(
     settings: Settings,
     onOpenSystemVpnSettings: () -> Unit,
 ) {
-    SectionCard(title = "امنیت و پایداری", icon = Icons.Filled.Security, tint = Palette.Ok, badge = "SHIELD") {
+    SectionCard(title = "امنیت و پایداری", icon = Icons.Filled.Security, tint = LocalPalette.current.Ok, badge = "SHIELD") {
         SettingSwitch(
             title = "اتصال خودکار",
             subtitle = "با باز شدن اپ به آخرین سرور فعال وصل شو",
@@ -327,21 +327,21 @@ private fun SecuritySection(
             modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
         ) {
             Column(Modifier.weight(1f)) {
-                Text("کیل سوییچ اضطراری", color = Palette.TextPrimary, fontSize = 12.5.sp)
+                Text("کیل سوییچ اضطراری", color = LocalPalette.current.TextPrimary, fontSize = 12.5.sp)
                 Text(
                     "در اندروید این کار با «VPN همیشه‌فعال» و «بلاک کردن اتصال‌های بدون VPN» انجام می‌شود که " +
                         "فقط خود سیستم تغییرش می‌دهد — این اپ آن صفحه را باز می‌کند و ادعای بیشتری نمی‌کند.",
-                    color = Palette.TextFaint,
+                    color = LocalPalette.current.TextFaint,
                     fontSize = 9.5.sp,
                 )
             }
             Text(
                 "تنظیمات VPN",
-                color = Palette.Cyan,
+                color = LocalPalette.current.Cyan,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier
-                    .background(Palette.Glass, RoundedCornerShape(10.dp))
+                    .background(LocalPalette.current.Glass, RoundedCornerShape(10.dp))
                     .clickable(onClick = onOpenSystemVpnSettings)
                     .padding(horizontal = 10.dp, vertical = 6.dp),
             )
@@ -355,17 +355,17 @@ private fun SecuritySection(
  */
 @Composable
 private fun TopologySection(activeName: String?, activeProtocol: String?) {
-    SectionCard(title = "مسیر زندهٔ ترافیک", icon = Icons.Filled.Sync, tint = Palette.Mint, badge = "TOPOLOGY") {
-        FactRow(title = "دستگاه", value = "همهٔ اپ‌ها → VpnService (TUN)", valueColor = Palette.TextPrimary)
+    SectionCard(title = "مسیر زندهٔ ترافیک", icon = Icons.Filled.Sync, tint = LocalPalette.current.Mint, badge = "TOPOLOGY") {
+        FactRow(title = "دستگاه", value = "همهٔ اپ‌ها → VpnService (TUN)", valueColor = LocalPalette.current.TextPrimary)
         FactRow(
             title = "آدرس داخل تونل",
             value = "${Telemetry.tunAddressV4()} · ${Telemetry.tunAddressV6()}",
-            valueColor = Palette.TextPrimary,
+            valueColor = LocalPalette.current.TextPrimary,
         )
         FactRow(
             title = "گوی مسیردهی",
             value = "selector «proxy» — سوییچ لحظه‌ای (interrupt_exist_connections)",
-            valueColor = Palette.TextPrimary,
+            valueColor = LocalPalette.current.TextPrimary,
         )
         FactRow(
             title = "خروج‌گاه فعال",
@@ -373,7 +373,7 @@ private fun TopologySection(activeName: String?, activeProtocol: String?) {
                 activeName == null -> "انتخاب نشده"
                 else -> "$activeName · ${activeProtocol?.let { Telemetry.protocolLabel(it) } ?: "—"}"
             },
-            valueColor = Palette.Cyan,
+            valueColor = LocalPalette.current.Cyan,
         )
     }
 }
@@ -392,16 +392,16 @@ private fun ApplyButton(connected: Boolean, onApply: () -> Unit) {
             .fillMaxWidth()
             .height(46.dp)
             .background(
-                Brush.horizontalGradient(listOf(Palette.Accent, Palette.Accent2)),
+                Brush.horizontalGradient(listOf(LocalPalette.current.Accent, LocalPalette.current.Accent2)),
                 RoundedCornerShape(14.dp),
             )
             .clickable(onClick = onApply),
     ) {
-        Icon(Icons.Filled.Sync, null, tint = Palette.SurfaceLowest, modifier = Modifier.size(18.dp))
+        Icon(Icons.Filled.Sync, null, tint = LocalPalette.current.SurfaceLowest, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(8.dp))
         Text(
             if (connected) "اعمال تغییرات (اتصال دوباره)" else "اعمال تغییرات و وصل شدن",
-            color = Palette.SurfaceLowest,
+            color = LocalPalette.current.SurfaceLowest,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
         )
@@ -415,25 +415,25 @@ private fun AdvancedSettingsRow(onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .background(Palette.Glass, RoundedCornerShape(12.dp))
+            .background(LocalPalette.current.Glass, RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
             .padding(12.dp),
     ) {
-        Icon(Icons.Filled.Settings, null, tint = Palette.TextSecondary, modifier = Modifier.size(17.dp))
+        Icon(Icons.Filled.Settings, null, tint = LocalPalette.current.TextSecondary, modifier = Modifier.size(17.dp))
         Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 "تنظیمات پیشرفته",
-                color = Palette.TextPrimary,
+                color = LocalPalette.current.TextPrimary,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
                 "پشتیبان‌گیری رمزگذاری‌شده، بازیابی، لاگ هسته، مسیر داده و درباره",
-                color = Palette.TextFaint,
+                color = LocalPalette.current.TextFaint,
                 fontSize = 9.5.sp,
             )
         }
-        Text("‹", color = Palette.TextFaint, fontSize = 16.sp)
+        Text("‹", color = LocalPalette.current.TextFaint, fontSize = 16.sp)
     }
 }

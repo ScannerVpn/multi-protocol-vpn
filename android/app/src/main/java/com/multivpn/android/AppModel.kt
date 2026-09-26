@@ -13,6 +13,7 @@ import com.multivpn.android.vpn.CoreClient
 import com.multivpn.android.vpn.Transports
 import com.multivpn.android.vpn.EngineBridge
 import com.multivpn.android.vpn.EngineStatus
+import com.multivpn.android.vpn.KillSwitch
 import com.multivpn.android.vpn.LibboxEngine
 import com.multivpn.android.vpn.Pinger
 import com.multivpn.android.vpn.TunnelVpnService
@@ -57,6 +58,16 @@ object AppModel {
 
     /** Transient user-facing message (import results, engine notes). */
     val notice = MutableStateFlow<String?>(null)
+
+    /**
+     * True while the kill switch is holding the VPN slot with a blocking sink.
+     *
+     * Surfaced separately from [EngineBridge.status] on purpose: the engine is
+     * DISCONNECTED during a kill-switch hold (there is no working tunnel), so
+     * folding this into the status would either lie about a connection or hide
+     * the protection that is actually in force.
+     */
+    val killSwitchActive = MutableStateFlow(false)
 
     /** Config-folder groups the user collapsed (session state, not persisted:
      * a fresh open shows every folder expanded). Keys are the same source
@@ -143,6 +154,23 @@ object AppModel {
                 val unexpectedlyDropped = previous == EngineStatus.CONNECTED &&
                     state.status == EngineStatus.DISCONNECTED
                 previous = state.status
+                // A verified tunnel is back, which means the live config
+                // replaced the kill-switch sink in the VPN slot.
+                if (state.status == EngineStatus.CONNECTED) killSwitchActive.value = false
+                if (unexpectedlyDropped && settings.value.killSwitch) {
+                    // Leak window: the tunnel is down but the user never asked
+                    // for it to be. Hold the VPN slot with a sink until either
+                    // the reconnect below replaces it with the real config, or
+                    // the user disconnects explicitly.
+                    scope.launch {
+                        val ctx = appContext
+                        if (ctx != null && KillSwitch.engage(ctx)) {
+                            killSwitchActive.value = true
+                        } else {
+                            notice.value = "کلید قطع نتوانست ترافیک را مسدود کند — دستگاه بدون تونل است."
+                        }
+                    }
+                }
                 if (unexpectedlyDropped && reconnectAllowed && settings.value.autoReconnect) {
                     // One re-dial per established session; no retries on a failed
                     // initial connection, explicit disconnect, or VPN revocation.
@@ -228,12 +256,27 @@ object AppModel {
      *
      * @return (added, updated) counts.
      */
-    private fun ingestLinks(text: String, source: String?, updateExisting: Boolean): Pair<Int, Int> {
+    private fun ingestLinks(
+        text: String,
+        source: String?,
+        updateExisting: Boolean,
+        serverId: String? = null,
+    ): Pair<Int, Int> {
         val current = configs.value
         val existingRaw = current.mapNotNull { it.xrayLink }.toSet()
         val addedList = mutableListOf<VpnConfig>()
         val updates = mutableListOf<Pair<Int, VpnConfig>>() // (index, new config)
         val seenKeys = mutableSetOf<String>()
+        // The category follows the SOURCE, not "is there a source at all":
+        // every link imported from a server used to land in category
+        // "subscription" with a null serverId, so it showed up under the wrong
+        // folder and removeServer(withConfigs = true) — which matches on
+        // serverId — silently left all of them behind.
+        val category = when {
+            source == null -> "manual"
+            source.startsWith("server:") -> "my_servers"
+            else -> "subscription"
+        }
         text.split(Regex("\\s+")).map { it.trim() }.filter { it.contains("://") }.forEach { raw ->
             val link = Links.parse(raw) ?: return@forEach
             val key = stableKeyOf(link)
@@ -251,7 +294,8 @@ object AppModel {
                         serverIp = link.address,
                         protocol = link.protocol,
                         xrayLink = raw,
-                        category = if (source != null) "subscription" else "manual",
+                        category = category,
+                        serverId = serverId,
                         source = source,
                     )
                 }
@@ -335,7 +379,11 @@ object AppModel {
                                 line.startsWith("MULTIVPN-LINK: ") -> {
                                     val raw = line.removePrefix("MULTIVPN-LINK: ").trim()
                                     if (raw.contains("://") && raw !in existingRaw) {
-                                        ingestLinks(raw, serverSource, updateExisting = false)
+                                        ingestLinks(
+                                            raw, serverSource,
+                                            updateExisting = false,
+                                            serverId = server.id,
+                                        )
                                         links++
                                     }
                                 }
@@ -638,6 +686,18 @@ object AppModel {
             )
             return
         }
+        // Aether is the desktop's censorship-circumvention core (MASQUE/Gool/
+        // MiM/Zero-Trust + a Tor/Psiphon chain). It ships as a desktop binary
+        // that spawns its own pluggable-transport processes, so there is no
+        // Android build to bundle. Saying so beats the previous behaviour,
+        // where it fell through to sing-box and died as a bogus timeout.
+        if (cfg.protocol == "aether") {
+            EngineBridge.setFailed(
+                "پروتکل Aether فقط روی نسخهٔ ویندوز است (هستهٔ بومی دسکتاپ به‌همراهTor/Psiphon). " +
+                    "روی اندروید از VLESS، Trojan، Shadowsocks، Hysteria2، WireGuard یا AmneziaWG استفاده کنید.",
+            )
+            return
+        }
         val ctx = appContext ?: return
         try {
             if (android.net.VpnService.prepare(ctx) != null) {
@@ -700,6 +760,13 @@ object AppModel {
         connectionJob = scope.launch {
             pending?.join()
             pinger.cancelAndWait()
+            // The user asked to be released: the sink must go too, or "قطع
+            // اتصال" would leave the device with no internet and no way to
+            // understand why.
+            if (killSwitchActive.value) {
+                KillSwitch.release()
+                killSwitchActive.value = false
+            }
             engine.disconnect()
         }
     }
@@ -1170,7 +1237,16 @@ object AppModel {
     }
 
     fun exportBackup(out: OutputStream, passphrase: CharArray) {
-        val s = store ?: return
+        val s = store
+        if (s == null) {
+            // Same contract as importBackup: the caller owns the SAF stream,
+            // and a silent return left the export dialog closing with no file
+            // and no explanation.
+            runCatching { out.close() }
+            passphrase.fill('\u0000')
+            notice.value = "داده‌های برنامه هنوز آماده نیست."
+            return
+        }
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 Backup(s).export(
@@ -1193,7 +1269,16 @@ object AppModel {
             notice.value = "قبل از بازگردانی، اتصال و تست کانفیگ‌ها را متوقف کنید."
             return
         }
-        val s = store ?: return
+        val s = store
+        if (s == null) {
+            // The SAF stream is owned by the caller, not by Backup.import, so
+            // every early return here has to close it — this one used to leak
+            // the descriptor (and the underlying document handle).
+            runCatching { input.close() }
+            passphrase.fill('\u0000')
+            notice.value = "داده‌های برنامه هنوز آماده نیست."
+            return
+        }
         scope.launch {
             val result = withContext(Dispatchers.IO) { Backup(s).import(input, passphrase) }
             if (result.ok) {
@@ -1222,10 +1307,36 @@ object AppModel {
     private fun persist() {
         store?.saveConfigs(configs.value)
         pingCache?.retainAll(configs.value.map { it.id }.toSet())
+        syncSubConfigIds()
     }
 
     private fun persistSubs() {
         store?.saveSubscriptions(subscriptions.value)
+    }
+
+    /**
+     * Recomputes every subscription's config count from the LIVE config list.
+     *
+     * [Subscription.configIds] was declared (and persisted) but never assigned
+     * anywhere, so the configs tab rendered "0 کانفیگ" for every subscription
+     * however many links it had imported. The value is DERIVED rather than
+     * tracked: a config can be deleted individually from the config list, so a
+     * separately maintained copy would drift out of sync the first time that
+     * happened. Called from [persist], i.e. after every config mutation.
+     */
+    private fun syncSubConfigIds() {
+        val subs = subscriptions.value
+        if (subs.isEmpty()) return
+        val updated = subs.map { s ->
+            val ids = configs.value
+                .filter { it.source == "subscription:${s.id}" }
+                .map { it.id }
+            if (ids == s.configIds) s else s.copy(configIds = ids)
+        }
+        if (updated != subs) {
+            subscriptions.value = updated
+            persistSubs()
+        }
     }
 
     private fun endpointHost(confText: String): String? =

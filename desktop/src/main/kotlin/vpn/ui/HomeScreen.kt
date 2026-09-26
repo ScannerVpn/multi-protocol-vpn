@@ -82,6 +82,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import vpn.core.Aether
 import vpn.core.InstalledApp
 import vpn.core.Links
 import vpn.core.SplitModes
@@ -670,6 +671,21 @@ private fun ErrorCard(
  * direction, so ONE combined figure is shown and labelled as such rather than
  * inventing a plausible-looking split. See [vpn.core.TrafficStats].
  */
+private fun proxyEndpointSummary(protocol: String): String {
+    if (protocol != "aether") return Preflight.endpointSummary(protocol)
+    val aether = AppState.settings.aether
+    val httpEnabled = AppState.settings.mode != VpnModes.PROXY_ONLY || aether.httpProxy
+    return if (httpEnabled) {
+        Preflight.endpointSummary(
+            "aether",
+            base = Aether.SOCKS_PORT,
+            httpPort = Aether.httpPort(aether),
+        )
+    } else {
+        "SOCKS ${Aether.BIND}"
+    }
+}
+
 @Composable
 private fun TrafficCard(state: AppState) {
     val sample = state.traffic
@@ -778,7 +794,7 @@ private fun TrafficCard(state: AppState) {
             val tun = AppState.settings.mode == VpnModes.TUN
             InfoRow(
                 "Local proxy",
-                if (tun) "SOCKS 127.0.0.1:${ProxyPorts.tunProbe}" else Preflight.endpointSummary(cfg.protocol),
+                if (tun) "SOCKS 127.0.0.1:${ProxyPorts.tunProbe}" else proxyEndpointSummary(cfg.protocol),
             )
         }
     }
@@ -842,7 +858,7 @@ private fun HealthCard(state: AppState) {
             when {
                 mode == VpnModes.TUN -> "sing-box TUN engine (full system)"
                 cfg.protocol == "hysteria2" -> "sing-box mixed proxy"
-                else -> Preflight.endpointSummary(cfg.protocol)
+                else -> proxyEndpointSummary(cfg.protocol)
             },
         )
         InfoRow("DNS", dnsText)

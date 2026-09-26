@@ -99,15 +99,22 @@ object TrafficStats {
 
     /**
      * Finds the UP interface carrying one of our tunnel addresses and reads its
-     * counters. Reuses [VpnStatusProbe.isVpnAddress] so the definition of "our
-     * tunnel" lives in exactly one place.
+     * counters.
+     *
+     * Uses [VpnStatusProbe.vpnAddressOnAdapter] — NOT the bare
+     * `isVpnAddress` — for the same reason [VpnStatusProbe] does: the
+     * 172.19.0.0/16 TUN range is shared with WSL2, Docker and Hyper-V virtual
+     * switches, which are always up. With WSL2 running, a plain range check
+     * picked the WSL adapter and reported ITS counters as the session's
+     * traffic, with no VPN connected at all.
      */
     private fun adapterSample(): Sample? = runCatching {
         val iface = NetworkInterface.getNetworkInterfaces().asSequence()
             .filter { runCatching { it.isUp && !it.isLoopback }.getOrDefault(false) }
             .firstOrNull { ni ->
                 ni.inetAddresses.asSequence().any {
-                    it is Inet4Address && VpnStatusProbe.isVpnAddress(it.hostAddress)
+                    it is Inet4Address &&
+                        VpnStatusProbe.vpnAddressOnAdapter(it.hostAddress, ni.name)
                 }
             } ?: return@runCatching null
 
@@ -146,15 +153,24 @@ object TrafficStats {
         return Sample(rx = combined, tx = 0, source = Source.PROCESS_COMBINED, via = "$image:$pid")
     }
 
+    internal data class CoreStatus(val running: Boolean, val pid: Int, val image: String)
+
+    internal fun selectLivingCore(
+        xray: CoreStatus,
+        wireProxy: CoreStatus,
+        singBox: CoreStatus,
+        aether: CoreStatus,
+    ): Pair<Int, String>? = listOf(xray, wireProxy, singBox, aether)
+        .firstOrNull { it.running && it.pid > 0 }
+        ?.let { it.pid to it.image }
+
     /** The tracked PID of the core that is actually listening, or null. */
-    private fun livingCore(): Pair<Int, String>? = when {
-        Xray.isRunning() && Xray.trackedPid() > 0 -> Xray.trackedPid() to "xray.exe"
-        WireProxy.isRunning() && WireProxy.trackedPid() > 0 ->
-            WireProxy.trackedPid() to "wireproxy.exe"
-        SingBox.isRunning() && SingBox.trackedPid() > 0 ->
-            SingBox.trackedPid() to (SingBox.exe()?.name ?: "sing-box.exe")
-        else -> null
-    }
+    private fun livingCore(): Pair<Int, String>? = selectLivingCore(
+        xray = CoreStatus(Xray.isRunning(), Xray.trackedPid(), "xray.exe"),
+        wireProxy = CoreStatus(WireProxy.isRunning(), WireProxy.trackedPid(), "wireproxy.exe"),
+        singBox = CoreStatus(SingBox.isRunning(), SingBox.trackedPid(), SingBox.exe()?.name ?: "sing-box.exe"),
+        aether = CoreStatus(Aether.isRunning(), Aether.trackedPid(), "aether.exe"),
+    )
 
     /** (readTransfer, writeTransfer) for [pid], or null when inaccessible. */
     private fun ioCounters(pid: Int): Pair<Long, Long>? = runCatching {

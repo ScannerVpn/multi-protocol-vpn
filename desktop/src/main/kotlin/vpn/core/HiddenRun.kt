@@ -9,6 +9,7 @@ import com.sun.jna.platform.win32.Kernel32
 import com.sun.jna.platform.win32.Tlhelp32
 import com.sun.jna.platform.win32.WinBase
 import com.sun.jna.platform.win32.WinDef
+import com.sun.jna.platform.win32.WinNT
 import com.sun.jna.ptr.IntByReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
@@ -91,12 +92,21 @@ object HiddenRun {
      */
     suspend fun findChildPid(parentPid: Int, image: String, attempts: Int = 15, sleepMs: Long = 100): Int? =
         JnaHiddenRun.findChildPid(parentPid, image, attempts, sleepMs)
+
+    fun findOwnedProcessPid(image: String, executablePath: String): Int? =
+        JnaHiddenRun.findOwnedProcessPid(image, executablePath)
+
+    fun pidListeningOnPort(port: Int): Int? = JnaHiddenRun.pidListeningOnPort(port)
+
+    fun isDescendantOf(processPid: Int, ancestorPid: Int): Boolean =
+        JnaHiddenRun.isDescendantOf(processPid, ancestorPid)
 }
 
 /** The real JNA implementation — every previous HiddenRun body, unchanged. */
 internal object JnaHiddenRun : ProcessRunner {
 
     private const val CREATE_NO_WINDOW = 0x08000000
+    private const val CREATE_UNICODE_ENVIRONMENT = 0x00000400
     private const val STARTF_USESHOWWINDOW = 0x00000001
     private const val SW_HIDE = 0
 
@@ -135,7 +145,7 @@ internal object JnaHiddenRun : ProcessRunner {
             null,
             null,
             false,
-            CREATE_NO_WINDOW,
+            CREATE_NO_WINDOW or CREATE_UNICODE_ENVIRONMENT,
             environmentPointer(env),
             workingDir?.absolutePath,
             startup,
@@ -152,8 +162,7 @@ internal object JnaHiddenRun : ProcessRunner {
      * pointer means "inherit the parent environment", exactly as before.
      */
     private fun environmentPointer(env: Map<String, String>): Pointer? {
-        if (env.isEmpty()) return null
-        val block = environmentBlock(env)
+        val block = environmentBlock(mergeEnvironment(System.getenv(), env))
         val mem = Memory((block.length + 2) * 2L)
         block.forEachIndexed { i, c -> mem.setChar(i * 2L, c) }
         mem.setChar(block.length * 2L, '\u0000')
@@ -324,6 +333,31 @@ internal object JnaHiddenRun : ProcessRunner {
      * the tool's. Polls briefly — the child may not exist yet on the first
      * snapshot.  Runs with [delay] so cancellation propagates to callers.
      */
+    fun findOwnedProcessPid(image: String, executablePath: String): Int? {
+        val candidates = mutableListOf<Int>()
+        snapshot { pid, _, exe ->
+            if (exe.equals(image, ignoreCase = true)) candidates += pid
+        }
+        candidates.forEach { owned ->
+            val process = Kernel32.INSTANCE.OpenProcess(
+                WinNT.PROCESS_QUERY_LIMITED_INFORMATION, false, owned,
+            ) ?: return@forEach
+            val actual = try {
+                val path = CharArray(32_768)
+                val length = IntByReference(path.size)
+                if (Kernel32.INSTANCE.QueryFullProcessImageName(process, 0, path, length)) {
+                    String(path, 0, length.value)
+                } else {
+                    null
+                }
+            } finally {
+                Kernel32.INSTANCE.CloseHandle(process)
+            }
+            if (actual.equals(executablePath, ignoreCase = true)) return owned
+        }
+        return null
+    }
+
     suspend fun findChildPid(parentPid: Int, image: String, attempts: Int = 15, sleepMs: Long = 100): Int? {
         repeat(attempts) {
             var found: Int? = null
@@ -336,6 +370,31 @@ internal object JnaHiddenRun : ProcessRunner {
             delay(sleepMs)
         }
         return null
+    }
+
+    fun isDescendantOf(processPid: Int, ancestorPid: Int): Boolean {
+        if (processPid == ancestorPid) return true
+        val parents = mutableMapOf<Int, Int>()
+        snapshot { pid, parent, _ -> parents[pid] = parent }
+        var current = processPid
+        repeat(32) {
+            val parent = parents[current] ?: return false
+            if (parent == ancestorPid) return true
+            if (parent <= 0 || parent == current) return false
+            current = parent
+        }
+        return false
+    }
+
+    fun pidListeningOnPort(port: Int): Int? {
+        val output = File.createTempFile("multivpn-netstat-", ".txt")
+        return try {
+            val path = quoteArg(output.absolutePath)
+            runRawAndWait("cmd.exe /d /c \"netstat -ano -p tcp > $path\"", 10_000)
+            parseListeningPid(runCatching { output.readText() }.getOrDefault(""), port)
+        } finally {
+            output.delete()
+        }
     }
 
     /** Walks the Toolhelp32 snapshot: (pid, parentPid, exe name). */
@@ -400,4 +459,29 @@ internal object JnaHiddenRun : ProcessRunner {
  * the test source set can pin the exact layout without loading kernel32.
  */
 internal fun environmentBlock(env: Map<String, String>): String =
-    env.entries.joinToString("\u0000") { "${it.key}=${it.value}" } + "\u0000\u0000"
+    env.entries.sortedBy { it.key.lowercase() }
+        .joinToString("\u0000") { "${it.key}=${it.value}" } + "\u0000\u0000"
+
+internal fun parseListeningPid(netstatOutput: String, port: Int): Int? =
+    netstatOutput.lineSequence().mapNotNull { line ->
+        val parts = line.trim().split(Regex("\\s+"))
+        if (parts.size < 5 || !parts[0].startsWith("TCP", ignoreCase = true)) return@mapNotNull null
+        if (!parts[3].equals("LISTENING", ignoreCase = true)) return@mapNotNull null
+        val localPort = parts[1].substringAfterLast(':', "").toIntOrNull()
+        if (localPort != port) null else parts[4].toIntOrNull()?.takeIf { it > 0 }
+    }.firstOrNull()
+
+internal fun mergeEnvironment(
+    parent: Map<String, String>,
+    overrides: Map<String, String>,
+): Map<String, String> {
+    val merged = linkedMapOf<String, String>()
+    parent.forEach { (key, value) ->
+        if (!key.startsWith("AETHER_", ignoreCase = true)) merged[key] = value
+    }
+    overrides.forEach { (key, value) ->
+        merged.keys.filter { it.equals(key, ignoreCase = true) }.forEach { merged.remove(it) }
+        merged[key] = value
+    }
+    return merged
+}

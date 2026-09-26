@@ -53,10 +53,13 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # ---------- [2/4] VPN cores are NOT in git ---------------------------
-if (Test-Path 'src\main\resources\bin\xray\xray.exe') {
+if ((Test-Path 'src\main\resources\bin\xray\xray.exe') -and
+    (Test-Path 'src\main\resources\bin\aether\aether.exe') -and
+    (Test-Path 'src\main\resources\bin\aether\pt\lyrebird.exe') -and
+    (Test-Path 'src\main\resources\bin\aether\pt\psiphon-tunnel-core.exe')) {
     Write-Host "[2/4] Cores already present - skipping download." -ForegroundColor Green
 } else {
-    Write-Host "[2/4] Downloading VPN cores (xray / sing-box / openvpn) ..." -ForegroundColor Yellow
+    Write-Host "[2/4] Downloading VPN cores (xray / sing-box / openvpn / Aether) ..." -ForegroundColor Yellow
     & "$PSScriptRoot\fetch-cores.ps1" -SkipWireproxy
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[2/4] WARNING: core download failed. Build continues," -ForegroundColor Yellow

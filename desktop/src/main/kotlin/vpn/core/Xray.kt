@@ -328,11 +328,17 @@ $outbound,
                     zf.entries().asSequence()
                         .filter { it.name.endsWith("xray.exe") || it.name.endsWith(".dat") }
                         .forEach { e ->
-                            Files.copy(
-                                zf.getInputStream(e),
-                                File(xrayDir, File(e.name).name).toPath(),
-                                StandardCopyOption.REPLACE_EXISTING,
-                            )
+                            // Files.copy does NOT close its source; the entry
+                            // stream stayed open (one leaked handle per core
+                            // file, and on Windows an open handle keeps the
+                            // zip locked).
+                            zf.getInputStream(e).use { input ->
+                                Files.copy(
+                                    input,
+                                    File(xrayDir, File(e.name).name).toPath(),
+                                    StandardCopyOption.REPLACE_EXISTING,
+                                )
+                            }
                         }
                 }
             }.onFailure { AppLog.e("Xray", "download failed: ${it.message}") }

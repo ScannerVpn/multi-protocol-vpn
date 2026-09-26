@@ -266,4 +266,30 @@ class WireProxyConfigTest {
         assertContains(out, "Address = 10.8.1.20/32")
         assertEquals(1, out.lines().count { it.startsWith("Address =") })
     }
+
+    @Test
+    fun `an ipv6-first address list still yields an ipv4 address`() {
+        // The wireproxy netstack device is IPv4-only — which is exactly why
+        // `::/0` is stripped from AllowedIPs. A conf that lists its IPv6
+        // address FIRST (common in third-party and AmneziaWG exports) used to
+        // hand the device an address it cannot carry, and the tunnel never
+        // came up with no error anywhere.
+        val out = WireProxy.buildConfig(
+            conf(plainConf.replace("Address = 10.8.1.20/32", "Address = fd00::5/128, 10.8.1.20/32")),
+            amnezia = false,
+        )!!
+
+        assertContains(out, "Address = 10.8.1.20/32")
+        assertEquals(1, out.lines().count { it.startsWith("Address =") })
+    }
+
+    @Test
+    fun `an ipv6-only address list falls back to it rather than crashing`() {
+        val out = WireProxy.buildConfig(
+            conf(plainConf.replace("Address = 10.8.1.20/32", "Address = fd00::5/128")),
+            amnezia = false,
+        )!!
+
+        assertContains(out, "Address = fd00::5/128")
+    }
 }

@@ -60,9 +60,12 @@ import java.io.File
 @Composable
 fun SettingsScreen() {
     val settings by AppModel.settings.collectAsState()
+    val killSwitchOn by AppModel.killSwitchActive.collectAsState()
     val context = LocalContext.current
     var dnsPicker by remember { mutableStateOf(false) }
     var splitPicker by remember { mutableStateOf(false) }
+    var themePicker by remember { mutableStateOf(false) }
+    var animPicker by remember { mutableStateOf(false) }
     var appPicker by remember { mutableStateOf(false) }
     var logOpen by remember { mutableStateOf(false) }
     var logBody by remember { mutableStateOf("") }
@@ -88,12 +91,12 @@ fun SettingsScreen() {
     ) {
         item {
             Spacer(Modifier.height(12.dp))
-            Text("تنظیمات", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Palette.TextPrimary)
+            Text("تنظیمات", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = LocalPalette.current.TextPrimary)
         }
 
         item {
             Card {
-                Text("اتصال", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Palette.TextPrimary)
+                Text("اتصال", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = LocalPalette.current.TextPrimary)
                 SettingSwitch(
                     title = "اتصال خودکار",
                     subtitle = "با باز شدن اپ به آخرین کانفیگ فعال وصل شو",
@@ -111,7 +114,50 @@ fun SettingsScreen() {
 
         item {
             Card {
-                Text("DNS", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Palette.TextPrimary)
+                Text("حفاظت", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = LocalPalette.current.TextPrimary)
+                SettingSwitch(
+                    title = "کلید قطع (Kill switch)",
+                    subtitle = "اگر تونل خودبه‌خود قطع شد، فوراً ترافیک را مسدود کن تا چیزی بدون تونل بیرون نرود",
+                    checked = settings.killSwitch,
+                    onChange = { v -> AppModel.updateSettings { it.copy(killSwitch = v) } },
+                )
+                if (settings.killSwitch) {
+                    Text(
+                        if (killSwitchOn) "هم‌اکنون فعال — ترافیک در حال مسدود شدن است."
+                        else "آماده؛ فقط هنگام قطع ناگهانی فعال می‌شود.",
+                        color = if (killSwitchOn) LocalPalette.current.Warn else LocalPalette.current.TextFaint,
+                        fontSize = 10.5.sp,
+                    )
+                }
+            }
+        }
+
+        item {
+            Card {
+                Text("ظاهر", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = LocalPalette.current.TextPrimary)
+                SettingRow(
+                    title = "تم",
+                    value = Settings.themeLabel(settings.theme),
+                    onClick = { themePicker = true },
+                )
+                SettingRow(
+                    title = "شدت حرکت",
+                    value = Settings.animLabel(settings.animationLevel),
+                    subtitle = if (settings.animationsEnabled) null else "همهٔ حرکت‌ها خاموش است",
+                    onClick = { animPicker = true },
+                )
+                SettingSwitch(
+                    title = "حرکت‌های تزئینی",
+                    subtitle = "انیمیشن‌های رابط را روشن نگه دار",
+                    checked = settings.animationsEnabled,
+                    onChange = { v -> AppModel.updateSettings { it.copy(animationsEnabled = v) } },
+                )
+            }
+        }
+
+        item {
+            Card {
+                Text("DNS", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = LocalPalette.current.TextPrimary)
                 SettingSwitch(
                     title = "جلوگیری از نشت DNS",
                     subtitle = "پرس‌وجوها از داخل تونل بروند، نه از DNS شبکهٔ محلی",
@@ -130,11 +176,11 @@ fun SettingsScreen() {
 
         item {
             Card {
-                Text("تانل تفکیکی (per-app)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Palette.TextPrimary)
+                Text("تانل تفکیکی (per-app)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = LocalPalette.current.TextPrimary)
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "اندروید خودش این را اعمال می‌کند، پس واقعاً کار می‌کند (برخلاف نسخه ویندوز که به نام پروسه وابسته است).",
-                    color = Palette.TextFaint, fontSize = 10.5.sp,
+                    color = LocalPalette.current.TextFaint, fontSize = 10.5.sp,
                 )
                 SettingRow(
                     title = "حالت",
@@ -153,11 +199,11 @@ fun SettingsScreen() {
 
         item {
             Card {
-                Text("پشتیبان‌گیری", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Palette.TextPrimary)
+                Text("پشتیبان‌گیری", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = LocalPalette.current.TextPrimary)
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "فایل پشتیبان با رمز خودت AES-256 می‌شود و با نسخهٔ ویندوز سازگار است — یعنی می‌توانی بین موبایل و کامپیوتر جابه‌جا کنی.",
-                    color = Palette.TextFaint, fontSize = 10.5.sp,
+                    color = LocalPalette.current.TextFaint, fontSize = 10.5.sp,
                 )
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -177,7 +223,7 @@ fun SettingsScreen() {
 
         item {
             Card {
-                Text("عیب‌یابی", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Palette.TextPrimary)
+                Text("عیب‌یابی", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = LocalPalette.current.TextPrimary)
                 SettingRow(
                     title = "لاگ اپ",
                     value = "نمایش",
@@ -194,29 +240,29 @@ fun SettingsScreen() {
 
         item {
             Card {
-                Text("درباره", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Palette.TextPrimary)
+                Text("درباره", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = LocalPalette.current.TextPrimary)
                 Spacer(Modifier.height(6.dp))
-                Text("MultiVPN Android · نسخه 0.4.0", color = Palette.TextSecondary, fontSize = 12.sp)
+                Text("MultiVPN Android · نسخه 0.4.0", color = LocalPalette.current.TextSecondary, fontSize = 12.sp)
                 Text(
                     "تونل: Hysteria2 · VLESS+Reality · Trojan · SS-2022 · WireGuard · AmneziaWG · OpenVPN",
-                    color = Palette.TextSecondary, fontSize = 11.5.sp,
+                    color = LocalPalette.current.TextSecondary, fontSize = 11.5.sp,
                 )
                 Text(
                     "سرورها: نصب خودکار VLESS/Trojan/SS روی VPS خودت با SSH (همان اسکریپت‌های نسخهٔ ویندوز).",
-                    color = Palette.TextSecondary, fontSize = 11.5.sp,
+                    color = LocalPalette.current.TextSecondary, fontSize = 11.5.sp,
                 )
                 Text(
                     "هنوز نه: IKEv2 — گواهی کلاینت به استور کلید سیستم اندروید نیاز دارد.",
-                    color = Palette.TextFaint, fontSize = 10.5.sp,
+                    color = LocalPalette.current.TextFaint, fontSize = 10.5.sp,
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
                     "مسیر داده: " + File(context.filesDir, "data").absolutePath,
-                    color = Palette.TextFaint, fontSize = 10.sp,
+                    color = LocalPalette.current.TextFaint, fontSize = 10.sp,
                 )
                 Text(
                     "لینک‌ها با Android Keystore رمز می‌شوند (معادل DPAPI نسخه ویندوز).",
-                    color = Palette.TextFaint, fontSize = 10.5.sp,
+                    color = LocalPalette.current.TextFaint, fontSize = 10.5.sp,
                 )
             }
         }
@@ -230,6 +276,24 @@ fun SettingsScreen() {
             selected = settings.dnsServer,
             onDismiss = { dnsPicker = false },
             onPick = { v -> AppModel.updateSettings { it.copy(dnsServer = v) } },
+        )
+    }
+    if (themePicker) {
+        ChoiceDialog(
+            title = "تم",
+            options = Settings.THEMES.map { it to Settings.themeLabel(it) },
+            selected = settings.theme,
+            onDismiss = { themePicker = false },
+            onPick = { v -> AppModel.updateSettings { it.copy(theme = v) } },
+        )
+    }
+    if (animPicker) {
+        ChoiceDialog(
+            title = "شدت حرکت",
+            options = Settings.ANIM_LEVELS.map { it to Settings.animLabel(it) },
+            selected = settings.animationLevel,
+            onDismiss = { animPicker = false },
+            onPick = { v -> AppModel.updateSettings { it.copy(animationLevel = v) } },
         )
     }
     if (splitPicker) {
@@ -323,26 +387,26 @@ fun AppPickerDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
             TextButton(onClick = { onConfirm(picked) }) {
-                Text("تأیید (${picked.size})", color = Palette.Cyan)
+                Text("تأیید (${picked.size})", color = LocalPalette.current.Cyan)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("انصراف", color = Palette.TextSecondary) }
+            TextButton(onClick = onDismiss) { Text("انصراف", color = LocalPalette.current.TextSecondary) }
         },
-        title = { Text("انتخاب اپ‌ها", color = Palette.TextPrimary, fontSize = 15.sp) },
+        title = { Text("انتخاب اپ‌ها", color = LocalPalette.current.TextPrimary, fontSize = 15.sp) },
         text = {
             Column {
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    placeholder = { Text("جستجو", color = Palette.TextFaint, fontSize = 12.sp) },
+                    placeholder = { Text("جستجو", color = LocalPalette.current.TextFaint, fontSize = 12.sp) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Palette.Accent,
-                        unfocusedBorderColor = Palette.Border,
-                        focusedTextColor = Palette.TextPrimary,
-                        unfocusedTextColor = Palette.TextPrimary,
+                        focusedBorderColor = LocalPalette.current.Accent,
+                        unfocusedBorderColor = LocalPalette.current.Border,
+                        focusedTextColor = LocalPalette.current.TextPrimary,
+                        unfocusedTextColor = LocalPalette.current.TextPrimary,
                     ),
                 )
                 Row(
@@ -352,12 +416,12 @@ fun AppPickerDialog(
                     Checkbox(
                         checked = showSystem,
                         onCheckedChange = { showSystem = it },
-                        colors = CheckboxDefaults.colors(checkedColor = Palette.Accent),
+                        colors = CheckboxDefaults.colors(checkedColor = LocalPalette.current.Accent),
                     )
-                    Text("اپ‌های سیستمی هم نشان بده", color = Palette.TextSecondary, fontSize = 11.sp)
+                    Text("اپ‌های سیستمی هم نشان بده", color = LocalPalette.current.TextSecondary, fontSize = 11.sp)
                 }
                 if (loading) {
-                    Text("در حال خواندن لیست اپ‌ها…", color = Palette.TextFaint, fontSize = 12.sp)
+                    Text("در حال خواندن لیست اپ‌ها…", color = LocalPalette.current.TextFaint, fontSize = 12.sp)
                 } else {
                     LazyColumn(Modifier.height(340.dp)) {
                         items(visible, key = { it.packageName }) { app ->
@@ -374,12 +438,12 @@ fun AppPickerDialog(
                                 Checkbox(
                                     checked = app.packageName in picked,
                                     onCheckedChange = null,
-                                    colors = CheckboxDefaults.colors(checkedColor = Palette.Accent),
+                                    colors = CheckboxDefaults.colors(checkedColor = LocalPalette.current.Accent),
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 Column(Modifier.weight(1f)) {
-                                    Text(app.label, color = Palette.TextPrimary, fontSize = 12.5.sp)
-                                    Text(app.packageName, color = Palette.TextFaint, fontSize = 9.5.sp)
+                                    Text(app.label, color = LocalPalette.current.TextPrimary, fontSize = 12.5.sp)
+                                    Text(app.packageName, color = LocalPalette.current.TextFaint, fontSize = 9.5.sp)
                                 }
                             }
                         }
@@ -387,6 +451,6 @@ fun AppPickerDialog(
                 }
             }
         },
-        containerColor = Palette.Surface,
+        containerColor = LocalPalette.current.Surface,
     )
 }

@@ -347,6 +347,25 @@ class VpnScriptsTest {
     }
 
     @Test
+    fun `cleanup reports a failure through the status protocol, not inline`() {
+        val s = VpnScripts.buildCleanupScript("C:\\Temp\\r.txt", listOf("A"), false, listOf("CN=X"))
+        // The catch used to write `"ERROR: <msg>"` as ONE line. readResultFile
+        // compares the first line to "ERROR" exactly, so the status fell into
+        // the unknown branch, the message was discarded, and the user got the
+        // generic "Connection failed. Check server or certificates." instead of
+        // the real reason. Every receipt must go through Write-Result, which
+        // puts the status on its own line.
+        assertFalse(
+            "ERROR:" in s,
+            "an inline 'ERROR: <msg>' receipt cannot be parsed by readResultFile",
+        )
+        assertTrue(
+            "Write-Result \"ERROR\" \$_.Exception.Message" in s,
+            "the catch block must report through Write-Result (status on its own line)",
+        )
+    }
+
+    @Test
     fun `kill script targets the given image only`() {
         val s = allScripts().getValue("killProcess")
         assertTrue("taskkill /IM HiddifyCli.exe /F" in s)

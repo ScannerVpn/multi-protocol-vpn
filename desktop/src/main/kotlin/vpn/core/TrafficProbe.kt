@@ -63,17 +63,13 @@ internal object TrafficProbe {
 
     /**
      * Runs one request and reports whether it proves connectivity.
-     * [proxyPort] null = direct (used to verify a TUN adapter carries traffic).
+     * [proxy] null = direct (used to verify a TUN adapter carries traffic).
      */
-    private fun probeOnce(url: String, proxyPort: Int?, timeoutMs: Int): Boolean = runCatching {
+    private fun probeOnce(url: String, proxy: java.net.Proxy?, timeoutMs: Int): Boolean = runCatching {
         val u = URL(url)
-        val conn = if (proxyPort == null) {
-            u.openConnection()
-        } else {
-            u.openConnection(
-                java.net.Proxy(java.net.Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", proxyPort)),
-            )
-        } as HttpURLConnection
+        val conn = (
+            if (proxy == null) u.openConnection() else u.openConnection(proxy)
+            ) as HttpURLConnection
         conn.connectTimeout = timeoutMs
         conn.readTimeout = timeoutMs
         conn.requestMethod = "GET"
@@ -93,24 +89,44 @@ internal object TrafficProbe {
         }
     }.getOrDefault(false)
 
+    /**
+     * Local proxy descriptor for [port].
+     *
+     * HTTP vs SOCKS is NOT interchangeable: an HTTP CONNECT sent to a
+     * SOCKS5-only listener fails on the first byte (0x43 'C' instead of the
+     * SOCKS version 0x05), so probing the wrong one always reports "no
+     * traffic" no matter how healthy the tunnel is. Every core here exposes
+     * its own mix — sing-box serves a single `mixed` inbound, xray/wireproxy
+     * put HTTP on base+1, and Aether binds SOCKS5 and HTTP on SEPARATE ports
+     * (see [Aether.SOCKS_PORT]/[Aether.HTTP_PORT]).
+     */
+    private fun localProxy(port: Int, socks: Boolean): java.net.Proxy =
+        java.net.Proxy(
+            if (socks) java.net.Proxy.Type.SOCKS else java.net.Proxy.Type.HTTP,
+            InetSocketAddress("127.0.0.1", port),
+        )
+
+    /** Test seam for [localProxy] — pins the protocol a probe would speak. */
+    internal fun localProxyType(socks: Boolean): java.net.Proxy.Type = localProxy(1, socks).type()
+
     /** Daemon worker pool — probe threads must never block app exit. */
     private fun probePool(size: Int) = Executors.newFixedThreadPool(size) { r ->
         Thread(r).apply { isDaemon = true; name = "traffic-probe" }
     }
 
     /**
-     * Races ALL endpoints concurrently against [proxyPort] and returns the
+     * Races ALL endpoints concurrently against [proxy] and returns the
      * elapsed ms of the first one that PROVED connectivity, or null when none
      * did within [timeoutMs]. Because every racer starts at the same instant,
      * the elapsed time of the winner IS that request's own honest duration —
      * no queue-wait is folded into the number.
      */
-    private fun raceEndpoints(proxyPort: Int?, timeoutMs: Int): Int? {
+    private fun raceEndpoints(proxy: java.net.Proxy?, timeoutMs: Int): Int? {
         val start = System.nanoTime()
         val pool = probePool(ENDPOINTS.size)
         val completion = ExecutorCompletionService<Boolean>(pool)
         try {
-            ENDPOINTS.forEach { e -> completion.submit { probeOnce(e, proxyPort, timeoutMs) } }
+            ENDPOINTS.forEach { e -> completion.submit { probeOnce(e, proxy, timeoutMs) } }
             var collected = 0
             // Overall deadline: every racer is capped at timeoutMs anyway, so
             // waiting for the remaining count with the full timeout is a safe
@@ -133,7 +149,7 @@ internal object TrafficProbe {
      * First endpoint that proves connectivity wins the race.
      */
     fun throughProxy(proxyPort: Int, timeoutMs: Int): Boolean =
-        raceEndpoints(proxyPort, timeoutMs) != null
+        raceEndpoints(localProxy(proxyPort, socks = false), timeoutMs) != null
 
     /**
      * Verifies traffic WITHOUT any proxy setting — the proof a TUN adapter
@@ -148,5 +164,13 @@ internal object TrafficProbe {
      * number stays honest under parallelism.
      */
     fun latencyThroughProxy(proxyPort: Int, timeoutMs: Int): Int? =
-        raceEndpoints(proxyPort, timeoutMs)
+        raceEndpoints(localProxy(proxyPort, socks = false), timeoutMs)
+
+    /** [throughProxy] for a SOCKS5-only listener (Aether's `--bind` port). */
+    fun throughSocks(socksPort: Int, timeoutMs: Int): Boolean =
+        raceEndpoints(localProxy(socksPort, socks = true), timeoutMs) != null
+
+    /** [latencyThroughProxy] for a SOCKS5-only listener. */
+    fun latencyThroughSocks(socksPort: Int, timeoutMs: Int): Int? =
+        raceEndpoints(localProxy(socksPort, socks = true), timeoutMs)
 }

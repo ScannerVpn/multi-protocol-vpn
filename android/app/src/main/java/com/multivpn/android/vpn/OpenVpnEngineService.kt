@@ -71,8 +71,16 @@ object OpenVpnEngine {
                 ConnectionState.CONNECTING, ConnectionState.READYFORCONNECT ->
                     EngineBridge.setStatus(EngineStatus.CONNECTING)
                 ConnectionState.DISCONNECTING -> EngineBridge.setStatus(EngineStatus.DISCONNECTING)
-                ConnectionState.PERMISSION_NOT_GRANTED ->
+                ConnectionState.PERMISSION_NOT_GRANTED -> {
+                    // The user denied the VPN consent dialog: there is no
+                    // session, so the object must be dropped here. Leaving it
+                    // set made every later start() bail out with "تونل
+                    // OpenVPN از قبل فعال است" — a permanent dead end for
+                    // OpenVPN until the app process was killed.
+                    activeToken = null
+                    connection = null
                     EngineBridge.setFailed("دسترسی VPN برای OpenVPN داده نشد.")
+                }
                 ConnectionState.DISCONNECTED, ConnectionState.IDLE -> {
                     // The core ended the session on its own: forget the
                     // connection object too, or the next start() would be
@@ -84,7 +92,19 @@ object OpenVpnEngine {
         }
         activeToken = token
         connection = conn
-        conn.start(VpnConfiguration(config, emptySet(), null, null))
+        try {
+            conn.start(VpnConfiguration(config, emptySet(), null, null))
+        } catch (e: Exception) {
+            // A start() that throws must not leave a phantom "active" session
+            // behind: [start] refuses while connection != null, so every later
+            // attempt would fail with "تونل OpenVPN از قبل فعال است" and the
+            // user could never connect again without restarting the app.
+            AppLog.e("OpenVPN", "start failed: ${e.message}")
+            activeToken = null
+            connection = null
+            EngineBridge.setFailed("شروع تونل OpenVPN ناموفق بود: ${e.message ?: e}")
+            return
+        }
         AppLog.i("OpenVPN", "start requested (${ovpnText.length} chars of config)")
     }
 

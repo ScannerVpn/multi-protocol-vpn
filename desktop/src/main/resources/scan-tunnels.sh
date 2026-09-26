@@ -32,16 +32,23 @@ awg_version_of() { # awg_version_of <conf-text>
 
 # ---- WireGuard / AmneziaWG (host, then docker) ----
 WG_DONE=""
+WG_KINDS=" "
 for f in /etc/wireguard/*.conf; do
     [ -f "$f" ] || continue
     TXT="$(cat "$f")"
     if grep -qE '^Jc[[:space:]]*=' <<< "$TXT"; then
-        echo "MV-TUNNEL: amnezia-$(awg_version_of "$TXT") host"
+        KIND="amnezia-$(awg_version_of "$TXT")"
     else
-        echo "MV-TUNNEL: wireguard host"
+        KIND="wireguard"
     fi
+    # One marker per DISTINCT kind. `break` after the first file hid a second
+    # protocol on hosts that carry both (e.g. wg0.conf AND awg0.conf), so the
+    # app's "Import all" offered to install a protocol that already existed.
+    case "$WG_KINDS" in
+        *" $KIND "*) ;;
+        *) echo "MV-TUNNEL: $KIND host"; WG_KINDS="$WG_KINDS$KIND " ;;
+    esac
     WG_DONE=1
-    break
 done
 if [ -z "$WG_DONE" ] && command -v docker > /dev/null 2>&1; then
     for name in $(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -iE 'amnezia|wireguard|^a?wg' || true); do

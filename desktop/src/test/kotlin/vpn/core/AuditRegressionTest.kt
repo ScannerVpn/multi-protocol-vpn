@@ -463,6 +463,17 @@ class AuditRegressionTest {
         assertTrue(s.rx >= 0 && s.tx >= 0, "counters must never be negative")
     }
 
+    @Test
+    fun `aether is eligible for process traffic sampling`() {
+        val selected = TrafficStats.selectLivingCore(
+            xray = TrafficStats.CoreStatus(running = false, pid = 0, image = "xray.exe"),
+            wireProxy = TrafficStats.CoreStatus(running = false, pid = 0, image = "wireproxy.exe"),
+            singBox = TrafficStats.CoreStatus(running = false, pid = 0, image = "sing-box.exe"),
+            aether = TrafficStats.CoreStatus(running = true, pid = 9188, image = "aether.exe"),
+        )
+        assertEquals(9188 to "aether.exe", selected)
+    }
+
     // ---- fast ping (3.6.12): the list ping must not take minutes ----
     //
     // The old shape raced nothing: latencyThroughProxy tried 4 endpoints

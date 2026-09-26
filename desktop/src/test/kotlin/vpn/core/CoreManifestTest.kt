@@ -1,6 +1,7 @@
 package vpn.core
 
 import java.io.File
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -100,6 +101,28 @@ class CoreManifestTest {
     }
 
     @Test
+    fun `aether file list matches the fetcher`() {
+        assertEquals(
+            CoreManifest.AETHER_FILES.sorted(),
+            psArray(fetchScript(), "aetherFiles").sorted(),
+            "CoreManifest.AETHER_FILES and fetch-cores.ps1's \$aetherFiles disagree",
+        )
+    }
+
+    @Test
+    fun `bundled Aether reports v2_1_0`() {
+        val exe = File(moduleRoot(), "src/main/resources/bin/aether/aether.exe")
+        assertTrue(exe.isFile, "Aether resource is missing: ${exe.absolutePath}")
+        val process = ProcessBuilder(exe.absolutePath, "--version")
+            .redirectErrorStream(true)
+            .start()
+        val output = process.inputStream.bufferedReader().readText()
+        assertTrue(process.waitFor(10_000, TimeUnit.SECONDS), "aether.exe --version timed out")
+        assertEquals(0, process.exitValue())
+        assertTrue("aether 2.1.0" in output, "unexpected bundled Aether version: $output")
+    }
+
+    @Test
     fun `resource paths are consistent with the fetcher layout`() {
         // fetch-cores.ps1 writes into src/main/resources/bin/<name>; the app
         // reads /bin/<name> off the classpath. The trailing segment must match.
@@ -108,6 +131,7 @@ class CoreManifestTest {
             CoreManifest.SINGBOX_RES to "singbox",
             CoreManifest.WIREPROXY_RES to "wireproxy",
             CoreManifest.OPENVPN_RES to "openvpn",
+            CoreManifest.AETHER_RES to "aether",
         ).forEach { (res, dirName) ->
             assertEquals("/bin/$dirName", res)
         }
@@ -127,6 +151,7 @@ class CoreManifestTest {
             "singbox" to CoreManifest.SINGBOX_FILES,
             "openvpn" to CoreManifest.OPENVPN_FILES,
             "wireproxy" to CoreManifest.WIREPROXY_FILES,
+            "aether" to CoreManifest.AETHER_FILES,
         )
         val missing = mutableListOf<String>()
         checks.forEach { (dirName, files) ->

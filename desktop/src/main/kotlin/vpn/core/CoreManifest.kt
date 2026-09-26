@@ -66,7 +66,7 @@ internal object CoreManifest {
      * bridges when not blocked) but shipped by fetch-cores.ps1.
      */
     const val AETHER_RES = "/bin/aether"
-    val AETHER_FILES = listOf("aether.exe", "lyrebird.exe")
+    val AETHER_FILES = listOf("aether.exe", "pt/lyrebird.exe", "pt/psiphon-tunnel-core.exe")
 
     /** True when every name in [files] exists inside [dir]. */
     fun allPresent(dir: File, files: List<String>): Boolean =

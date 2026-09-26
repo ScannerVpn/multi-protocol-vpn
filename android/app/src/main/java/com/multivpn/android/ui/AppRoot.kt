@@ -120,7 +120,7 @@ fun AppRoot() {
 @Composable
 private fun auroraBrush(): Brush = Brush.radialGradient(
     colors = listOf(
-        Palette.Accent.copy(alpha = 0.20f),
+        LocalPalette.current.Accent.copy(alpha = 0.20f),
         Color.Transparent,
     ),
     center = Offset(90f, 60f),
@@ -149,7 +149,7 @@ private fun AppHeader(tab: Tab, sub: SubPage, onBack: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .background(Palette.SurfaceLowest.copy(alpha = 0.92f))
+            .background(LocalPalette.current.SurfaceLowest.copy(alpha = 0.92f))
             .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
         if (sub != SubPage.NONE) {
@@ -157,13 +157,13 @@ private fun AppHeader(tab: Tab, sub: SubPage, onBack: () -> Unit) {
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .size(34.dp)
-                    .background(Palette.Glass, RoundedCornerShape(11.dp))
+                    .background(LocalPalette.current.Glass, RoundedCornerShape(11.dp))
                     .clickable(onClick = onBack),
             ) {
                 Icon(
                     Icons.Filled.ArrowBack,
                     "بازگشت",
-                    tint = Palette.TextPrimary,
+                    tint = LocalPalette.current.TextPrimary,
                     modifier = Modifier.size(18.dp),
                 )
             }
@@ -173,7 +173,7 @@ private fun AppHeader(tab: Tab, sub: SubPage, onBack: () -> Unit) {
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .size(38.dp)
-                    .background(Palette.SurfaceHigh, RoundedCornerShape(12.dp)),
+                    .background(LocalPalette.current.SurfaceHigh, RoundedCornerShape(12.dp)),
             ) {
                 // The user's CyberShield mark, shipped as a real vector asset.
                 Icon(
@@ -193,7 +193,7 @@ private fun AppHeader(tab: Tab, sub: SubPage, onBack: () -> Unit) {
                     SubPage.ADVANCED -> "تنظیمات پیشرفته"
                     SubPage.NONE -> tab.label
                 },
-                color = Palette.TextPrimary,
+                color = LocalPalette.current.TextPrimary,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
@@ -201,7 +201,7 @@ private fun AppHeader(tab: Tab, sub: SubPage, onBack: () -> Unit) {
             Text(
                 AppModel.activeConfig?.let { "${Telemetry.protocolLabel(it.protocol)} · ${it.name}" }
                     ?: "کانفیگی انتخاب نشده",
-                color = Palette.TextFaint,
+                color = LocalPalette.current.TextFaint,
                 fontSize = 9.5.sp,
                 maxLines = 1,
             )
@@ -212,36 +212,36 @@ private fun AppHeader(tab: Tab, sub: SubPage, onBack: () -> Unit) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
-                    .background(Palette.Glass, RoundedCornerShape(999.dp))
+                    .background(LocalPalette.current.Glass, RoundedCornerShape(999.dp))
                     .padding(horizontal = 8.dp, vertical = 4.dp),
             ) {
                 Box(
                     Modifier
                         .size(5.dp)
-                        .background(if (ping != null) Palette.Mint else Palette.TextFaint, CircleShape),
+                        .background(if (ping != null) LocalPalette.current.Mint else LocalPalette.current.TextFaint, CircleShape),
                 )
                 Spacer(Modifier.width(5.dp))
                 Text(
                     ping?.let { "$it ms" } ?: "—",
-                    color = if (ping != null) Palette.Mint else Palette.TextFaint,
+                    color = if (ping != null) LocalPalette.current.Mint else LocalPalette.current.TextFaint,
                     fontSize = 10.sp,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                 )
                 Spacer(Modifier.width(4.dp))
-                Text("urlTest", color = Palette.TextFaint, fontSize = 8.5.sp)
+                Text("urlTest", color = LocalPalette.current.TextFaint, fontSize = 8.5.sp)
             }
             Spacer(Modifier.width(6.dp))
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .size(36.dp)
-                    .background(Palette.Glass, RoundedCornerShape(11.dp))
+                    .background(LocalPalette.current.Glass, RoundedCornerShape(11.dp))
                     .clickable { AppModel.connectFastest() },
             ) {
                 Icon(
                     Icons.Filled.Bolt,
                     "اتصال به سریع‌ترین سرور اندازه‌گیری‌شده",
-                    tint = Palette.Accent,
+                    tint = LocalPalette.current.Accent,
                     modifier = Modifier.size(18.dp),
                 )
             }
@@ -250,18 +250,19 @@ private fun AppHeader(tab: Tab, sub: SubPage, onBack: () -> Unit) {
 }
 
 /** One colour per engine state — the same map the ring and the tray use. */
+@Composable
 internal fun statusColor(status: EngineStatus): Color = when (status) {
-    EngineStatus.CONNECTED -> Palette.Ok
-    EngineStatus.CONNECTING, EngineStatus.DISCONNECTING -> Palette.Warn
-    EngineStatus.UNSUPPORTED -> Palette.Accent2
-    EngineStatus.DISCONNECTED -> Palette.TextFaint
+    EngineStatus.CONNECTED -> LocalPalette.current.Ok
+    EngineStatus.CONNECTING, EngineStatus.DISCONNECTING -> LocalPalette.current.Warn
+    EngineStatus.UNSUPPORTED -> LocalPalette.current.Accent2
+    EngineStatus.DISCONNECTED -> LocalPalette.current.TextFaint
 }
 
 /**
  * The bottom bar of the mockup (2026-09-15):
  *
  *  - `bg-surface-container-lowest/85 backdrop-blur-xl` → a near-opaque
- *    [Palette.SurfaceLowest] sheet so the aurora behind it stays faintly
+ *    [LocalPalette.current.SurfaceLowest] sheet so the aurora behind it stays faintly
  *    visible while the icons keep full contrast (Compose cannot blur a
  *    *backdrop*, so the sheet carries the effect via its alpha);
  *  - `shadow-[0_-4px_24px_rgba(0,0,0,0.5)]` → a top-edge elevation shadow that
@@ -285,7 +286,7 @@ private fun BottomBar(selected: Tab, onSelect: (Tab) -> Unit) {
                 ambientColor = Color.Black,
                 spotColor = Color.Black,
             )
-            .background(Palette.SurfaceLowest.copy(alpha = 0.90f))
+            .background(LocalPalette.current.SurfaceLowest.copy(alpha = 0.90f))
             .navigationBarsPadding(),
     ) {
         Row(
@@ -330,29 +331,29 @@ private fun BottomBarItem(tab: Tab, active: Boolean, onClick: () -> Unit) {
                         Modifier.shadow(
                             elevation = 10.dp,
                             shape = RoundedCornerShape(11.dp),
-                            ambientColor = Palette.Accent,
-                            spotColor = Palette.Accent,
+                            ambientColor = LocalPalette.current.Accent,
+                            spotColor = LocalPalette.current.Accent,
                         )
                     } else {
                         Modifier
                     },
                 )
                 .background(
-                    if (active) Palette.Accent.copy(alpha = 0.18f) else Color.Transparent,
+                    if (active) LocalPalette.current.Accent.copy(alpha = 0.18f) else Color.Transparent,
                     RoundedCornerShape(11.dp),
                 ),
         ) {
             Icon(
                 tab.icon,
                 tab.label,
-                tint = if (active) Palette.Accent else Palette.TextSecondary,
+                tint = if (active) LocalPalette.current.Accent else LocalPalette.current.TextSecondary,
                 modifier = Modifier.size(20.dp),
             )
         }
         Spacer(Modifier.height(3.dp))
         Text(
             tab.label,
-            color = if (active) Palette.Accent else Palette.TextSecondary,
+            color = if (active) LocalPalette.current.Accent else LocalPalette.current.TextSecondary,
             fontSize = 9.5.sp,
             fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
             maxLines = 1,
@@ -369,19 +370,19 @@ private fun NoticeBanner() {
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp)
-            .background(Palette.GlassStrong, RoundedCornerShape(12.dp))
+            .background(LocalPalette.current.GlassStrong, RoundedCornerShape(12.dp))
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text,
-            color = Palette.TextPrimary,
+            color = LocalPalette.current.TextPrimary,
             fontSize = 12.sp,
             modifier = Modifier.weight(1f),
         )
         TextButton(onClick = {
             AppModel.dismissNotice()
             AppModel.pinger.clearMessage()
-        }) { Text("بستن", color = Palette.Cyan, fontSize = 12.sp) }
+        }) { Text("بستن", color = LocalPalette.current.Cyan, fontSize = 12.sp) }
     }
 }

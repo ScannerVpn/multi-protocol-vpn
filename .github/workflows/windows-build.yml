@@ -86,7 +86,7 @@ jobs:
       # Without it the script only warned, so a build could ship completely
       # unverified third-party binaries — one of which (openvpn.exe) is later
       # executed as SYSTEM on every user's machine.
-      - name: Fetch remaining cores (xray / sing-box / openvpn)
+      - name: Fetch remaining cores (xray / sing-box / openvpn / Aether)
         working-directory: desktop
         shell: pwsh
         run: ./fetch-cores.ps1 -RequireHashes

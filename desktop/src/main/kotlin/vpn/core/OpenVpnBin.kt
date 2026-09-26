@@ -93,12 +93,23 @@ internal object OpenVpn {
         if (forceDownload) {
             return@withContext downloadBinary()
         }
-        if (complete()) return@withContext true
-        // Copy from resources (file names must match what is actually bundled).
-        val copied = Resources.extractAll(
-            CoreManifest.OPENVPN_RES, CoreManifest.OPENVPN_FILES, dir(),
-        )
-        AppLog.i("VPN", "Extracted $copied OpenVPN files from resources")
+        // Repair a bundled copy that is PRESENT but incomplete. [complete] only
+        // demands [CoreManifest.OPENVPN_REQUIRED], which deliberately leaves
+        // wintun.dll out (a system install ships its own driver) — but the
+        // BUNDLED copy is always launched with `--windows-driver wintun`, so a
+        // bundled exe without wintun.dll was declared complete and the missing
+        // driver was never repaired from resources. A system install (no
+        // bundled exe at all) is left alone: [complete] already accepts it.
+        val bundledPresent = File(dir(), "openvpn.exe").exists()
+        val bundledIncomplete = bundledPresent &&
+            !CoreManifest.allPresent(dir(), CoreManifest.OPENVPN_FILES)
+        if (!complete() || bundledIncomplete) {
+            // Copy from resources (file names must match what is actually bundled).
+            val copied = Resources.extractAll(
+                CoreManifest.OPENVPN_RES, CoreManifest.OPENVPN_FILES, dir(),
+            )
+            AppLog.i("VPN", "Extracted $copied OpenVPN files from resources")
+        }
         if (complete()) return@withContext true
         if (allowDownload) {
             return@withContext downloadBinary()
@@ -111,8 +122,16 @@ internal object OpenVpn {
         // Force download even if already present
         if (complete()) return@withContext true
         val msi = latestMsiUrl()?.let { downloadToFile(it) } ?: return@withContext false
-        val install = VpnScripts.runElevatedScript(300) { f -> VpnScripts.buildMsiInstallScript(f, msi.absolutePath) }
-        install.ok && complete()
+        try {
+            val install = VpnScripts.runElevatedScript(300) { f ->
+                VpnScripts.buildMsiInstallScript(f, msi.absolutePath)
+            }
+            install.ok && complete()
+        } finally {
+            // The installer ran (or failed) — the multi-MB MSI used to sit in
+            // %TEMP% forever, once per download attempt.
+            runCatching { msi.delete() }
+        }
     }
 
     private fun latestMsiUrl(): String? = runCatching {
@@ -242,8 +261,15 @@ internal object OpenVpn {
      *  - `verify-x509-name` CN pins that fail against foreign PKIs.
      * Writes to [target] when given (the SYSTEM-level task cannot read the
      * user's %TEMP%), else to a temp copy.
+     *
+     * [authFileReference] overrides the path written into the `auth-user-pass`
+     * directive. The sidecar is physically written next to [target], but the
+     * config that the SYSTEM task actually reads lives in the ACL-protected
+     * staging directory — pointing it back at the user-writable source
+     * directory (the old behaviour) meant the staged copy was never used and
+     * a standard user could still swap the credentials openvpn.exe reads.
      */
-    fun sanitizeOvpn(conf: File, target: File? = null): File {
+    fun sanitizeOvpn(conf: File, target: File? = null, authFileReference: String? = null): File {
         val raw = runCatching { conf.readBytes() }.getOrElse { return conf }
         val text = String(raw, Charsets.UTF_8)
             .replace("\u0000", "")
@@ -283,9 +309,11 @@ internal object OpenVpn {
             f
         } else null
         var withCreds = if (creds != null) {
+            // Reference the STAGED sidecar when one is given — see the KDoc.
+            val referenced = authFileReference ?: passFile!!.absolutePath
             clean.replace(
                 creds.value,
-                "auth-user-pass \"${passFile!!.absolutePath.replace("\\", "\\\\")}\"",
+                "auth-user-pass \"${referenced.replace("\\", "\\\\")}\"",
             )
         } else clean
 
@@ -361,8 +389,15 @@ internal object OpenVpn {
         // <auth-user-pass> (rejected by this build), explicit-exit-notify on
         // tcp (udp-only) and a verify-x509-name CN pin that does not match.
         // Keep the cleaned copy next to the binary: the SYSTEM task cannot
-        // read the user's %TEMP% reliably.
-        val cleaned = sanitizeOvpn(conf, File(exe.parentFile, "current.ovpn"))
+        // read the user's %TEMP% reliably. An inline <auth-user-pass> sidecar
+        // is written here too, but the config points at the STAGED copy the
+        // elevated script creates (see buildOvpnConnectScript) — otherwise
+        // openvpn.exe would read credentials from a user-writable directory.
+        val cleaned = sanitizeOvpn(
+            conf,
+            File(exe.parentFile, "current.ovpn"),
+            authFileReference = File(secureDir, "ovpn_auth.txt").absolutePath,
+        )
         runCatching { logFile.delete() }
         runCatching { marker.writeText(TASK_NAME) }
         // TOCTOU guard: hash the binary NOW (same read the signature check

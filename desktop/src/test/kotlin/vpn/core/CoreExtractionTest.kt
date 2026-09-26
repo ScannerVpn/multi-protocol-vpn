@@ -137,6 +137,15 @@ class CoreExtractionTest {
     }
 
     @Test
+    fun `Aether upgrades the nested v2_1 runtime once`() {
+        Aether.resetExtractionState()
+        assertTrue(Aether.ensureCore(allowExtract = true)?.isFile == true)
+        assertTrue(Aether.ptDir()?.isDirectory == true)
+        assertTrue(Aether.psiphonBin()?.isFile == true)
+        assertTrue(Aether.ensureCore(allowExtract = false)?.isFile == true)
+    }
+
+    @Test
     fun `extraction targets stay inside the app data dir`() {
         // Sanity on the seam the guard protects: the destination must be the
         // per-user data dir, never a shared/system path a concurrent copy

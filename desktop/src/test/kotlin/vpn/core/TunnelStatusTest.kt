@@ -173,4 +173,42 @@ Ethernet adapter vEthernet (Default Switch):
     """.trimIndent()
         assertFalse(VpnService.hasLiveTunnelAddress(docker))
     }
+
+    /**
+     * The adapter-heading pattern must NOT swallow ipconfig's per-adapter
+     * property lines. `Connection-specific DNS Suffix  . :` looks like a
+     * heading (it even ends in a colon) and a naive pattern would make it one —
+     * resetting the block's Media-State latch AND replacing the real heading,
+     * after which our own 172.19.x address no longer belongs to the "MultiVPN"
+     * adapter and a live TUN session reads as down.
+     *
+     * The leading `[^\s]` in the pattern is what saves it (it consumes the
+     * first character, so a line STARTING with "Connection" can never match),
+     * and the same holds for the localized spellings. Pinned here so a future
+     * rewrite of that regex cannot silently lose it.
+     */
+    @Test
+    fun `property lines are never mistaken for adapter headings`() {
+        val suffixes = listOf(
+            "Connection-specific DNS Suffix  . :",
+            "Verbindungsspezifisches DNS-Suffix. . . . . . :",
+            "Suffixe DNS propre à la connexion. . . . . . . :",
+        )
+        suffixes.forEach { line ->
+            val text = """
+Windows IP Configuration
+
+Unknown adapter MultiVPN:
+
+   $line
+   IPv4 Address. . . . . . . . . . . : 172.19.0.2(Preferred)
+   Subnet Mask . . . . . . . . . . . : 255.255.255.252
+            """.trimIndent()
+            assertTrue(
+                VpnService.hasLiveTunnelAddress(text),
+                "the property line '$line' was treated as a heading, so our own " +
+                    "TUN address stopped counting",
+            )
+        }
+    }
 }

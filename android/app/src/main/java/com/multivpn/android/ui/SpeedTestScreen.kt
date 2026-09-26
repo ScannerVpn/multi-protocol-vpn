@@ -99,13 +99,13 @@ fun SpeedTestScreen(onOpenRouting: () -> Unit = {}) {
             Column(Modifier.weight(1f)) {
                 Text(
                     "تست کیفیت و پایداری شبکه",
-                    color = Palette.TextPrimary,
+                    color = LocalPalette.current.TextPrimary,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
                     "سنجش با درخواست واقعی از داخل هر کانفیگ (urlTest)",
-                    color = Palette.TextSecondary,
+                    color = LocalPalette.current.TextSecondary,
                     fontSize = 10.5.sp,
                 )
             }
@@ -115,7 +115,7 @@ fun SpeedTestScreen(onOpenRouting: () -> Unit = {}) {
                     median != null -> "${measured.size} سرور سنجیده شد"
                     else -> "آمادهٔ تست"
                 },
-                color = if (pinging) Palette.Warn else if (median != null) Palette.Ok else Palette.TextFaint,
+                color = if (pinging) LocalPalette.current.Warn else if (median != null) LocalPalette.current.Ok else LocalPalette.current.TextFaint,
             )
         }
 
@@ -175,21 +175,23 @@ fun SpeedTestScreen(onOpenRouting: () -> Unit = {}) {
 private fun GaugeCard(medianMs: Int?, connected: Boolean, stats: CoreClient.Stats?) {
     val fraction = medianMs?.let { Telemetry.gaugeFraction(it) } ?: 0f
     val gradeColor = when (medianMs?.let { Telemetry.grade(it) }) {
-        LatencyGrade.Grade.GOOD -> Palette.Ok
-        LatencyGrade.Grade.FAIR -> Palette.Warn
-        LatencyGrade.Grade.POOR -> Palette.Bad
-        null -> Palette.TextFaint
+        LatencyGrade.Grade.GOOD -> LocalPalette.current.Ok
+        LatencyGrade.Grade.FAIR -> LocalPalette.current.Warn
+        LatencyGrade.Grade.POOR -> LocalPalette.current.Bad
+        null -> LocalPalette.current.TextFaint
     }
 
     Column(
         Modifier
             .fillMaxWidth()
-            .background(Palette.Glass, RoundedCornerShape(16.dp))
-            .border(1.dp, Palette.Border, RoundedCornerShape(16.dp))
+            .background(LocalPalette.current.Glass, RoundedCornerShape(16.dp))
+            .border(1.dp, LocalPalette.current.Border, RoundedCornerShape(16.dp))
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(contentAlignment = Alignment.Center) {
+            // Palette read outside the DrawScope — it is not a composable scope.
+            val p = LocalPalette.current
             Canvas(Modifier.size(width = 200.dp, height = 124.dp)) {
                 val stroke = 12f
                 val inset = stroke / 2f + 2f
@@ -197,7 +199,7 @@ private fun GaugeCard(medianMs: Int?, connected: Boolean, stats: CoreClient.Stat
                 // 220° sweep starting at 160°: the mockup's gauge, open at the
                 // bottom where the value sits.
                 drawArc(
-                    color = Palette.SurfaceHigh,
+                    color = p.SurfaceHigh,
                     startAngle = 160f,
                     sweepAngle = 220f,
                     useCenter = false,
@@ -207,7 +209,7 @@ private fun GaugeCard(medianMs: Int?, connected: Boolean, stats: CoreClient.Stat
                 )
                 if (fraction > 0f) {
                     drawArc(
-                        brush = Brush.linearGradient(listOf(Palette.Accent, Palette.Accent2, Palette.Ok)),
+                        brush = Brush.linearGradient(listOf(p.Accent, p.Accent2, p.Ok)),
                         startAngle = 160f,
                         sweepAngle = 220f * fraction,
                         useCenter = false,
@@ -220,14 +222,14 @@ private fun GaugeCard(medianMs: Int?, connected: Boolean, stats: CoreClient.Stat
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     medianMs?.let { "$it" } ?: "—",
-                    color = if (medianMs != null) gradeColor else Palette.TextFaint,
+                    color = if (medianMs != null) gradeColor else p.TextFaint,
                     fontSize = 34.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
                 )
                 Text(
                     if (medianMs != null) "ms · میانهٔ پینگ موج" else "هنوز اندازه‌گیری نشده",
-                    color = Palette.TextFaint,
+                    color = p.TextFaint,
                     fontSize = 9.5.sp,
                 )
                 if (medianMs != null) {
@@ -248,7 +250,7 @@ private fun GaugeCard(medianMs: Int?, connected: Boolean, stats: CoreClient.Stat
             } else {
                 "برای نرخ زنده باید وصل باشی؛ در حالت قطع می‌توانی پینگ همهٔ سرورها را بسنجی."
             },
-            color = Palette.TextFaint,
+            color = LocalPalette.current.TextFaint,
             fontSize = 9.5.sp,
         )
     }
@@ -269,7 +271,7 @@ private fun RunTestButton(
             .fillMaxWidth()
             .height(46.dp)
             .background(
-                Brush.horizontalGradient(listOf(Palette.Accent, Palette.Accent2)),
+                Brush.horizontalGradient(listOf(LocalPalette.current.Accent, LocalPalette.current.Accent2)),
                 RoundedCornerShape(14.dp),
             )
             .clickable { if (pinging) onCancel() else onRun() },
@@ -277,13 +279,13 @@ private fun RunTestButton(
         Icon(
             if (pinging) Icons.Filled.Equalizer else Icons.Filled.Speed,
             null,
-            tint = Palette.SurfaceLowest,
+            tint = LocalPalette.current.SurfaceLowest,
             modifier = Modifier.size(18.dp),
         )
         Spacer(Modifier.width(8.dp))
         Text(
             if (pinging) "لغو (${progress.first}/${progress.second})" else "شروع تست پینگ همهٔ سرورها",
-            color = Palette.SurfaceLowest,
+            color = LocalPalette.current.SurfaceLowest,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
         )
@@ -302,34 +304,34 @@ private fun WaveFactsRow(measured: List<Int>, failed: Int, total: Int) {
             value = Telemetry.median(measured)?.toString() ?: "—",
             unit = "ms",
             icon = Icons.Filled.Timer,
-            iconTint = Palette.Mint,
+            iconTint = LocalPalette.current.Mint,
         )
         TelemetryBox(
             label = "بهترین",
             value = measured.minOrNull()?.toString() ?: "—",
             unit = "ms",
             icon = Icons.Filled.Bolt,
-            iconTint = Palette.Accent,
+            iconTint = LocalPalette.current.Accent,
         )
         TelemetryBox(
             label = "پاسخ داد",
             value = "${measured.size}",
             unit = "/$total",
             icon = Icons.Filled.CheckCircle,
-            iconTint = Palette.Ok,
+            iconTint = LocalPalette.current.Ok,
         )
         TelemetryBox(
             label = "بی‌پاسخ",
             value = "$failed",
             icon = Icons.Filled.Security,
-            iconTint = if (failed > 0) Palette.Bad else Palette.TextFaint,
+            iconTint = if (failed > 0) LocalPalette.current.Bad else LocalPalette.current.TextFaint,
         )
     }
     Spacer(Modifier.height(6.dp))
     Text(
         "پینگ هر سرور یک اندازه‌گیری واقعی end-to-end است (HTTP 204 از داخل کانفیگ). " +
             "Jitter و packet-loss از یک موج تک‌نمونه‌ای قابل محاسبه نیستند، پس این اپ عددی برایشان نمی‌سازد.",
-        color = Palette.TextFaint,
+        color = LocalPalette.current.TextFaint,
         fontSize = 9.5.sp,
     )
 }
@@ -345,25 +347,25 @@ private fun BenchmarkSection(configs: List<vpn.core.VpnConfig>, fresh: Map<Strin
     SectionCard(
         title = "مقایسهٔ عملکرد پروتکل‌ها",
         icon = Icons.Filled.Equalizer,
-        tint = Palette.Accent,
+        tint = LocalPalette.current.Accent,
         badge = if (rows.isEmpty()) null else "${rows.size} پروتکل",
     ) {
         if (rows.isEmpty()) {
             Text(
                 "هنوز سروری اضافه نشده است؛ از تب «سرورها» لینک یا ساب اضافه کن.",
-                color = Palette.TextFaint,
+                color = LocalPalette.current.TextFaint,
                 fontSize = 11.sp,
             )
             return@SectionCard
         }
         rows.forEach { row ->
             val color = when {
-                !row.pingable -> Palette.TextSecondary
-                row.medianMs == null -> Palette.TextFaint
+                !row.pingable -> LocalPalette.current.TextSecondary
+                row.medianMs == null -> LocalPalette.current.TextFaint
                 else -> when (Telemetry.grade(row.medianMs)) {
-                    LatencyGrade.Grade.GOOD -> Palette.Ok
-                    LatencyGrade.Grade.FAIR -> Palette.Warn
-                    LatencyGrade.Grade.POOR -> Palette.Bad
+                    LatencyGrade.Grade.GOOD -> LocalPalette.current.Ok
+                    LatencyGrade.Grade.FAIR -> LocalPalette.current.Warn
+                    LatencyGrade.Grade.POOR -> LocalPalette.current.Bad
                 }
             }
             Row(
@@ -377,7 +379,7 @@ private fun BenchmarkSection(configs: List<vpn.core.VpnConfig>, fresh: Map<Strin
                 Column(Modifier.weight(1f)) {
                     Text(
                         "${row.label} · ${row.total} سرور",
-                        color = Palette.TextPrimary,
+                        color = LocalPalette.current.TextPrimary,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -388,7 +390,7 @@ private fun BenchmarkSection(configs: List<vpn.core.VpnConfig>, fresh: Map<Strin
                             row.medianMs == null -> "در این موج اندازه‌گیری نشد"
                             else -> "میانه ${row.medianMs} ms · بهترین ${row.bestMs} ms · ${row.measured} اندازه‌گیری"
                         },
-                        color = Palette.TextFaint,
+                        color = LocalPalette.current.TextFaint,
                         fontSize = 9.5.sp,
                         fontFamily = FontFamily.Monospace,
                     )
@@ -429,7 +431,7 @@ private fun HealthSection(
     SectionCard(
         title = "بررسی سلامت و عدم نشت هویت",
         icon = Icons.Filled.Security,
-        tint = Palette.Ok,
+        tint = LocalPalette.current.Ok,
         badge = "ANDROID",
     ) {
         HealthRow(
@@ -500,18 +502,18 @@ private fun HealthRow(
     ) {
         IconTile(
             icon = if (ok) Icons.Filled.CheckCircle else Icons.Filled.Security,
-            tint = if (ok) Palette.Ok else Palette.Warn,
+            tint = if (ok) LocalPalette.current.Ok else LocalPalette.current.Warn,
             size = 30.dp,
             iconSize = 15.dp,
         )
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, color = Palette.TextPrimary, fontSize = 11.5.sp)
-            Text(detail, color = Palette.TextFaint, fontSize = 9.5.sp)
+            Text(title, color = LocalPalette.current.TextPrimary, fontSize = 11.5.sp)
+            Text(detail, color = LocalPalette.current.TextFaint, fontSize = 9.5.sp)
         }
         Text(
             verdict,
-            color = if (ok) Palette.Ok else Palette.Warn,
+            color = if (ok) LocalPalette.current.Ok else LocalPalette.current.Warn,
             fontSize = 10.sp,
             fontWeight = FontWeight.SemiBold,
         )

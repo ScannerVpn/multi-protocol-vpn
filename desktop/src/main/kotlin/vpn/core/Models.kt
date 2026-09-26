@@ -161,15 +161,33 @@ data class AetherSettings(
     var torBridgeLines: String = "",
     /** Ask BridgeDB for bridges in this country (e.g. "de"). */
     var torCountry: String = "",
+    var torHttpProxy: Boolean = false,
+    var torBridgeFile: String = "",
+    var torRelays: String = "auto",
+    var torRelayPorts: String = "web",
+    var psiphonMode: String = "off",
+    var psiphonVariant: String = "auto",
+    var psiphonConfig: String = "",
+    var psiphonCdnIps: String = "",
+    var psiphonCdnSni: String = "",
+    var psiphonRegion: String = "",
+    var psiphonDir: String = "",
+    var psiphonBin: String = "",
+    var psiphonHttpProxy: Boolean = false,
+    var psiphonReadySecs: Int = 180,
     // --- Routing rules ---
     /** comma/newline separated: domain, full:, keyword:, regexp:, CIDR, port:, private */
     var routeBlock: String = "",
     var routeDirect: String = "",
+    var exitLoc: String = "",
+    var exitLocSecs: Int = 60,
     // --- Performance / diagnostics ---
     /** "" = auto | low | medium | high. */
     var perf: String = "",
     /** error | warn | info | debug | trace. */
     var logLevel: String = "info",
+    var stats: Boolean = false,
+    var statsSecs: Int = 60,
     var validateSecs: Int = 10,
     var reconnectSecs: Int = 2,
 )

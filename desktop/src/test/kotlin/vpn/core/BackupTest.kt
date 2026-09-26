@@ -58,6 +58,59 @@ class BackupTest {
         assertTrue(!res.ok && res.message.contains("Wrong passphrase"), res.message)
     }
 
+    /**
+     * The v1/v2 split is detected by the byte right after the magic, and a v1
+     * archive's salt is RANDOM — so 1 v1 file in 256 has 0x32 ('2') there and
+     * looks like v2. The KDoc always promised a fallback for that collision;
+     * the code did not have one, so those archives were permanently
+     * unimportable ("Wrong passphrase or corrupted backup").
+     */
+    @Test
+    fun `a v1 archive whose salt starts with 0x32 still imports`() {
+        val pass = "legacy-passphrase".toCharArray()
+        val payload = Backup.Payload(
+            servers = listOf(
+                Storage.json.encodeToString(
+                    ServerConfig.serializer(),
+                    ServerConfig(id = "s9", name = "old", ip = "9.9.9.9", password = "pw"),
+                ),
+            ),
+            settings = Storage.json.encodeToString(AppSettings.serializer(), AppSettings()),
+            activeConfigId = "c9",
+        )
+        val plain = Storage.json.encodeToString(Backup.Payload.serializer(), payload)
+            .toByteArray(Charsets.UTF_8)
+
+        // v1 layout: MAGIC(8) + salt(16) + nonce(12) + ct, PBKDF2 210k.
+        val salt = ByteArray(16) { 0x11 }
+        salt[0] = 0x32 // the collision: v2's version byte
+        val nonce = ByteArray(12) { 0x22 }
+        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        val spec = javax.crypto.spec.PBEKeySpec(pass, salt, 210_000, 256)
+        val keyBytes = javax.crypto.SecretKeyFactory
+            .getInstance("PBKDF2WithHmacSHA256")
+            .generateSecret(spec).encoded
+        cipher.init(
+            javax.crypto.Cipher.ENCRYPT_MODE,
+            javax.crypto.spec.SecretKeySpec(keyBytes, "AES"),
+            javax.crypto.spec.GCMParameterSpec(128, nonce),
+        )
+        val ct = cipher.doFinal(plain)
+
+        val v1 = File.createTempFile("mvpn_backup_v1_", ".bin")
+        v1.deleteOnExit()
+        v1.outputStream().use { out ->
+            out.write("MVPNBAK".toByteArray(Charsets.US_ASCII))
+            out.write(salt)
+            out.write(nonce)
+            out.write(ct)
+        }
+
+        val res = Backup.import(v1, pass)
+        assertTrue(res.ok, "the v1 fallback did not fire: ${res.message}")
+        assertEquals("9.9.9.9", Storage.loadServers().single().ip)
+    }
+
     @Test
     fun `tampered file is rejected`() {
         val (servers, configs) = sampleData()

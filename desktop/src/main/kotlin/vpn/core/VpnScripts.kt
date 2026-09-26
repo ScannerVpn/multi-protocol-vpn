@@ -452,7 +452,7 @@ $removeProfiles
     }
     "OK" | Out-File -FilePath ${PS}ResultFile -Encoding utf8
 } catch {
-    "ERROR: ${PS}(${PS}_.Exception.Message)" | Out-File -FilePath ${PS}ResultFile -Encoding utf8
+    Write-Result "ERROR" ${PS}_.Exception.Message
 }
 """.trimIndent()).dollarize()
     }

@@ -68,11 +68,11 @@ fun ServersScreen() {
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("سرورها", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Palette.TextPrimary)
+                Text("سرورها", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = LocalPalette.current.TextPrimary)
                 Text(
                     if (servers.isEmpty()) "سرور خودت را با SSH اضافه کن؛ اپ خودش VPN را نصب می‌کند."
                     else "${servers.count { it.isReady }} از ${servers.size} سرور آماده است",
-                    color = Palette.TextSecondary,
+                    color = LocalPalette.current.TextSecondary,
                     fontSize = 11.sp,
                 )
             }
@@ -89,7 +89,7 @@ fun ServersScreen() {
             Spacer(Modifier.height(24.dp))
             Text(
                 "هنوز سروری نیست.\nبا «افزودن» یک VPS با دسترسی SSH اضافه کنید.",
-                color = Palette.TextSecondary,
+                color = LocalPalette.current.TextSecondary,
                 fontSize = 13.sp,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
@@ -114,7 +114,7 @@ fun ServersScreen() {
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .background(Palette.Glass, RoundedCornerShape(12.dp))
+                    .background(LocalPalette.current.Glass, RoundedCornerShape(12.dp))
                     .padding(10.dp)
                     .height(150.dp),
             ) {
@@ -122,7 +122,7 @@ fun ServersScreen() {
                     items(logLines.size) { i ->
                         Text(
                             logLines[i],
-                            color = Palette.TextSecondary,
+                            color = LocalPalette.current.TextSecondary,
                             fontSize = 9.sp,
                             fontFamily = FontFamily.Monospace,
                         )
@@ -135,7 +135,7 @@ fun ServersScreen() {
                     onClick = { AppModel.cancelProvisioning() },
                     shape = RoundedCornerShape(12.dp),
                 ) {
-                    Text("لغو نصب", fontSize = 12.sp, color = Palette.Warn)
+                    Text("لغو نصب", fontSize = 12.sp, color = LocalPalette.current.Warn)
                 }
             }
         }
@@ -184,44 +184,44 @@ private fun ServerRow(
             modifier = Modifier
                 .size(34.dp)
                 .background(
-                    if (server.isReady) Palette.Ok.copy(alpha = 0.25f) else Palette.Warn.copy(alpha = 0.20f),
+                    if (server.isReady) LocalPalette.current.Ok.copy(alpha = 0.25f) else LocalPalette.current.Warn.copy(alpha = 0.20f),
                     CircleShape,
                 ),
-        ) { Text("S", color = Palette.TextPrimary, fontWeight = FontWeight.Bold) }
+        ) { Text("S", color = LocalPalette.current.TextPrimary, fontWeight = FontWeight.Bold) }
         Spacer(Modifier.width(11.dp))
         Column(Modifier.weight(1f)) {
-            Text(server.name, color = Palette.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(server.name, color = LocalPalette.current.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
             Text(
                 "${server.ip}:${server.sshPort} · ${server.username}" +
                     if (configCount > 0) " · $configCount کانفیگ" else "",
-                color = Palette.TextSecondary,
+                color = LocalPalette.current.TextSecondary,
                 fontSize = 10.5.sp,
             )
         }
         Text(
             if (server.isReady) "آماده" else "نیاز به نصب",
-            color = if (server.isReady) Palette.Ok else Palette.Warn,
+            color = if (server.isReady) LocalPalette.current.Ok else LocalPalette.current.Warn,
             fontSize = 10.sp,
         )
         Box {
             IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Filled.MoreVert, "بیشتر", tint = Palette.TextFaint, modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.MoreVert, "بیشتر", tint = LocalPalette.current.TextFaint, modifier = Modifier.size(18.dp))
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 DropdownMenuItem(
-                    text = { Text("تست SSH", color = Palette.TextPrimary, fontSize = 13.sp) },
+                    text = { Text("تست SSH", color = LocalPalette.current.TextPrimary, fontSize = 13.sp) },
                     onClick = { menuOpen = false; onTest() },
                 )
                 DropdownMenuItem(
-                    text = { Text("نصب VPN روی سرور", color = Palette.TextPrimary, fontSize = 13.sp) },
+                    text = { Text("نصب VPN روی سرور", color = LocalPalette.current.TextPrimary, fontSize = 13.sp) },
                     onClick = { menuOpen = false; onSetup() },
                 )
                 DropdownMenuItem(
-                    text = { Text("وارد کردن از سرور", color = Palette.TextPrimary, fontSize = 13.sp) },
+                    text = { Text("وارد کردن از سرور", color = LocalPalette.current.TextPrimary, fontSize = 13.sp) },
                     onClick = { menuOpen = false; onImportFromServer() },
                 )
                 DropdownMenuItem(
-                    text = { Text("حذف", color = Palette.Bad, fontSize = 13.sp) },
+                    text = { Text("حذف", color = LocalPalette.current.Bad, fontSize = 13.sp) },
                     onClick = { menuOpen = false; onDelete() },
                 )
             }
@@ -251,12 +251,12 @@ private fun AddServerDialog(onDismiss: () -> Unit) {
                     if (added) onDismiss()
                 },
                 enabled = ip.isNotBlank() && password.isNotBlank(),
-            ) { Text("افزودن", color = Palette.Cyan) }
+            ) { Text("افزودن", color = LocalPalette.current.Cyan) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("انصراف", color = Palette.TextSecondary) }
+            TextButton(onClick = onDismiss) { Text("انصراف", color = LocalPalette.current.TextSecondary) }
         },
-        title = { Text("افزودن سرور (SSH)", color = Palette.TextPrimary, fontSize = 15.sp) },
+        title = { Text("افزودن سرور (SSH)", color = LocalPalette.current.TextPrimary, fontSize = 15.sp) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 DialogField("آدرس IP یا دامنه", ip, { ip = it }, singleLine = true)
@@ -272,12 +272,12 @@ private fun AddServerDialog(onDismiss: () -> Unit) {
                 DialogField("نام (اختیاری)", name, { name = it }, singleLine = true)
                 Text(
                     "رمز فقط روی همین دستگاه (Keystore) ذخیره می‌شود و کلید میزبان اولین اتصال pin می‌گردد.",
-                    color = Palette.TextFaint,
+                    color = LocalPalette.current.TextFaint,
                     fontSize = 10.sp,
                 )
             }
         },
-        containerColor = Palette.Surface,
+        containerColor = LocalPalette.current.Surface,
     )
 }
 
@@ -292,17 +292,17 @@ private fun DialogField(
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
-        placeholder = { Text(hint, color = Palette.TextFaint, fontSize = 12.sp) },
+        placeholder = { Text(hint, color = LocalPalette.current.TextFaint, fontSize = 12.sp) },
         singleLine = singleLine,
         visualTransformation = if (password) androidx.compose.ui.text.input.PasswordVisualTransformation() else
             androidx.compose.ui.text.input.VisualTransformation.None,
         modifier = Modifier.fillMaxWidth(),
         colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = Palette.Accent,
-            unfocusedBorderColor = Palette.Border,
-            focusedTextColor = Palette.TextPrimary,
-            unfocusedTextColor = Palette.TextPrimary,
-            cursorColor = Palette.Cyan,
+            focusedBorderColor = LocalPalette.current.Accent,
+            unfocusedBorderColor = LocalPalette.current.Border,
+            focusedTextColor = LocalPalette.current.TextPrimary,
+            unfocusedTextColor = LocalPalette.current.TextPrimary,
+            cursorColor = LocalPalette.current.Cyan,
         ),
     )
 }
@@ -314,14 +314,14 @@ private fun SetupProtocolDialog(server: ServerConfig, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         confirmButton = {},
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("انصراف", color = Palette.TextSecondary) }
+            TextButton(onClick = onDismiss) { Text("انصراف", color = LocalPalette.current.TextSecondary) }
         },
-        title = { Text("نصب چه چیزی روی «${server.name}»؟", color = Palette.TextPrimary, fontSize = 15.sp) },
+        title = { Text("نصب چه چیزی روی «${server.name}»؟", color = LocalPalette.current.TextPrimary, fontSize = 15.sp) },
         text = {
             Column {
                 Text(
                     "همان اسکریپت‌های نسخهٔ ویندوز، داخل اپ باندل شده‌اند. اگر سرور از قبل نصب داشته باشد، فقط لینک‌هایش خوانده می‌شود.",
-                    color = Palette.TextFaint,
+                    color = LocalPalette.current.TextFaint,
                     fontSize = 10.5.sp,
                 )
                 Spacer(Modifier.height(8.dp))
@@ -342,13 +342,13 @@ private fun SetupProtocolDialog(server: ServerConfig, onDismiss: () -> Unit) {
                             .padding(vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("●", color = Palette.Cyan, fontSize = 13.sp)
+                        Text("●", color = LocalPalette.current.Cyan, fontSize = 13.sp)
                         Spacer(Modifier.width(10.dp))
-                        Text(label, color = Palette.TextPrimary, fontSize = 13.sp)
+                        Text(label, color = LocalPalette.current.TextPrimary, fontSize = 13.sp)
                     }
                 }
             }
         },
-        containerColor = Palette.Surface,
+        containerColor = LocalPalette.current.Surface,
     )
 }

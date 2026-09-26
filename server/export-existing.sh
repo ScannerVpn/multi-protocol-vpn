@@ -44,7 +44,7 @@ read_xray_conf() {
 }
 
 if [ -n "$XRAY_CONF" ] && command -v python3 > /dev/null 2>&1; then
-    read_xray_conf | python3 -c "'import json, sys, base64, urllib.parse
+    read_xray_conf | python3 -c 'import json, sys, base64, urllib.parse
 conf = json.load(sys.stdin)
 host = sys.argv[1].strip("[]")
 if ":" in host:
@@ -183,7 +183,7 @@ for inb in conf.get("inbounds", []):
                 urllib.parse.urlencode(q2), urllib.parse.quote(name, safe="")))
             found += 1
 sys.stderr.write("clients found: %d\n" % found)
-'" "$(curl -fsS --max-time 8 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')" 2>/dev/null || true
+' "$(curl -fsS --max-time 8 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')" 2>/dev/null || true
 fi
 
 # ---- 2) WireGuard / AmneziaWG conf files (host, then docker) ---------------

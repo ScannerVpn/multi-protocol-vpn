@@ -283,28 +283,27 @@ if (-not $Force -and (Complete-Set $ovDir $ovFiles)) {
 }
 
 # -------------------------------------------------------------- aether
-Step 'aether (MASQUE / Gool / Zero Trust / Tor)'
+Step 'aether 2.1.0 (MASQUE / Gool / Zero Trust / Tor / Psiphon)'
 $aetherDir = Join-Path $binRoot 'aether'
-# lyrebird.exe is the obfs4 pluggable transport for the Tor chain; the
-# runtime degrades gracefully when it is missing (no bridges).
-$aetherFiles = @('aether.exe', 'lyrebird.exe')
+$aetherFiles = @('aether.exe', 'pt/lyrebird.exe', 'pt/psiphon-tunnel-core.exe')
 if (-not $Force -and (Complete-Set $aetherDir $aetherFiles)) {
     Info 'already present, skipping'
 } else {
     New-Item -ItemType Directory -Force -Path $aetherDir | Out-Null
-    $tag = Resolve-LatestTag 'CluvexStudio/Aether'
+    $tag = 'v2.1.0'
     Info "release $tag"
     $zip = Join-Path $temp 'aether.zip'
     Invoke-WebRequest -Uri "https://github.com/CluvexStudio/Aether/releases/download/$tag/aether-windows-x86_64.zip" -OutFile $zip
     Assert-PinnedSha256 $zip 'aether-windows-x86_64.zip'
-    Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $temp 'aether') -Force
+    $extract = Join-Path $temp 'aether'
+    Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
     foreach ($n in $aetherFiles) {
-        $src = Get-ChildItem -Recurse (Join-Path $temp 'aether') -Filter $n | Select-Object -First 1
-        if (-not $src) {
-            if ($n -eq 'lyrebird.exe') { Warn "archive did not contain $n (Tor bridges will be unavailable)"; continue }
-            throw "aether archive did not contain $n"
-        }
-        Copy-Item $src.FullName (Join-Path $aetherDir $n) -Force
+        $relative = $n.Replace('/', [IO.Path]::DirectorySeparatorChar)
+        $src = Join-Path $extract $relative
+        if (-not (Test-Path -LiteralPath $src)) { throw "aether archive did not contain $n" }
+        $dst = Join-Path $aetherDir $relative
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
+        Copy-Item -LiteralPath $src -Destination $dst -Force
     }
     Info "extracted $($aetherFiles.Count) files"
 }
@@ -433,6 +432,7 @@ $expected = [ordered]@{
     'xray'      = $xrayFiles
     'singbox'   = $sbFiles
     'openvpn'   = $ovFiles
+    'aether'    = $aetherFiles
     'wireproxy' = @('wireproxy.exe')
 }
 $missing = 0

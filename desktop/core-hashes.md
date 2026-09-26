@@ -9,7 +9,7 @@ This matters more than usual here: `openvpn.exe` is later executed **as SYSTEM**
 through a scheduled task (wintun demands it), so a tampered download is SYSTEM-
 level code execution on every user's machine.
 
-## What is pinned, and what was verified on 2026-08-29
+## What is pinned, and what was verified on 2026-09-24
 
 | key | artifact | verified |
 |---|---|---|
@@ -17,6 +17,7 @@ level code execution on every user's machine.
 | `hiddify-lib-windows-amd64.tar.gz` | hiddify/hiddify-core **v4.1.0** (25 123 721 B) | real gzip; contains `HiddifyCli.exe`, `hiddify-core.dll`, `libcronet.dll` |
 | `openvpn-amd64-msi` | **OpenVPN-2.5.10-I601-amd64.msi** (4 440 064 B) | real MSI; `Subject: OpenVPN 2.5.10-I601 amd64`, `Author: OpenVPN, Inc.` |
 | `wintun-0.14.1.zip` | wintun.net 0.14.1 (750 540 B) | real Zip; contains `wintun/bin/amd64/wintun.dll` |
+| `aether-windows-x86_64.zip` | CluvexStudio/Aether **v2.1.0** commit `6398931` (24 676 466 B) | SHA256 matched release metadata; contains `aether.exe`, `pt/lyrebird.exe`, `pt/psiphon-tunnel-core.exe` |
 
 The OpenVPN key is deliberately **constant** (`openvpn-amd64-msi`), not the file
 name: keying by the dynamic name would treat every upstream rename as

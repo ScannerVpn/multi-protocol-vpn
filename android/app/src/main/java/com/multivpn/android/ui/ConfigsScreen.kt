@@ -120,24 +120,24 @@ fun ConfigsScreen(onOpenServers: () -> Unit = {}) {
         // this very tab). Nothing was dropped: it moved one level down.
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("سرورها", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Palette.TextPrimary)
+                Text("سرورها", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = LocalPalette.current.TextPrimary)
                 Text(
                     if (configs.isEmpty()) "هنوز سروری نیست؛ از «افزودن کانفیگ» شروع کن."
                     else "${configs.size} سرور · ${configs.map { it.protocol }.distinct().size} پروتکل",
-                    color = Palette.TextSecondary,
+                    color = LocalPalette.current.TextSecondary,
                     fontSize = 11.sp,
                 )
             }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
-                    .background(Palette.Glass, RoundedCornerShape(12.dp))
+                    .background(LocalPalette.current.Glass, RoundedCornerShape(12.dp))
                     .clickable(onClick = onOpenServers)
                     .padding(horizontal = 10.dp, vertical = 7.dp),
             ) {
-                Icon(Icons.Filled.Dns, null, tint = Palette.Cyan, modifier = Modifier.size(15.dp))
+                Icon(Icons.Filled.Dns, null, tint = LocalPalette.current.Cyan, modifier = Modifier.size(15.dp))
                 Spacer(Modifier.width(5.dp))
-                Text("سرورهای من (SSH)", color = Palette.TextPrimary, fontSize = 11.sp)
+                Text("سرورهای من (SSH)", color = LocalPalette.current.TextPrimary, fontSize = 11.sp)
             }
         }
 
@@ -148,30 +148,30 @@ fun ConfigsScreen(onOpenServers: () -> Unit = {}) {
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Palette.Glass, RoundedCornerShape(12.dp))
+                .background(LocalPalette.current.Glass, RoundedCornerShape(12.dp))
                 .padding(horizontal = 10.dp, vertical = 2.dp),
         ) {
-            Icon(Icons.Filled.Search, null, tint = Palette.TextFaint, modifier = Modifier.size(17.dp))
+            Icon(Icons.Filled.Search, null, tint = LocalPalette.current.TextFaint, modifier = Modifier.size(17.dp))
             Spacer(Modifier.width(8.dp))
             OutlinedTextField(
                 value = search,
                 onValueChange = { AppModel.search.value = it },
-                placeholder = { Text("جستجوی سرور، آدرس یا پروتکل…", color = Palette.TextFaint, fontSize = 12.sp) },
+                placeholder = { Text("جستجوی سرور، آدرس یا پروتکل…", color = LocalPalette.current.TextFaint, fontSize = 12.sp) },
                 singleLine = true,
                 modifier = Modifier.weight(1f),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
                     unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
-                    focusedTextColor = Palette.TextPrimary,
-                    unfocusedTextColor = Palette.TextPrimary,
-                    cursorColor = Palette.Cyan,
+                    focusedTextColor = LocalPalette.current.TextPrimary,
+                    unfocusedTextColor = LocalPalette.current.TextPrimary,
+                    cursorColor = LocalPalette.current.Cyan,
                 ),
             )
             if (search.isNotEmpty()) {
                 Icon(
                     Icons.Filled.Close,
                     "پاک کردن جستجو",
-                    tint = Palette.TextFaint,
+                    tint = LocalPalette.current.TextFaint,
                     modifier = Modifier
                         .size(17.dp)
                         .clickable { AppModel.search.value = "" },
@@ -214,21 +214,21 @@ fun ConfigsScreen(onOpenServers: () -> Unit = {}) {
                 modifier = Modifier
                     .weight(1f)
                     .height(42.dp)
-                    .background(Palette.Glass, RoundedCornerShape(12.dp))
+                    .background(LocalPalette.current.Glass, RoundedCornerShape(12.dp))
                     .clickable { if (pingActive) AppModel.cancelPing() else AppModel.pingAll() },
                 horizontalArrangement = Arrangement.Center,
             ) {
                 Icon(
                     Icons.Filled.Speed,
                     null,
-                    tint = if (pingActive) Palette.Warn else Palette.Cyan,
+                    tint = if (pingActive) LocalPalette.current.Warn else LocalPalette.current.Cyan,
                     modifier = Modifier.size(16.dp),
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
                     Pinger.buttonLabel(pingActive, progress.first, progress.second),
                     fontSize = 11.5.sp,
-                    color = if (pingActive) Palette.Warn else Palette.TextPrimary,
+                    color = if (pingActive) LocalPalette.current.Warn else LocalPalette.current.TextPrimary,
                 )
             }
             Row(
@@ -236,13 +236,13 @@ fun ConfigsScreen(onOpenServers: () -> Unit = {}) {
                 modifier = Modifier
                     .weight(1f)
                     .height(42.dp)
-                    .background(Palette.Accent, RoundedCornerShape(12.dp))
+                    .background(LocalPalette.current.Accent, RoundedCornerShape(12.dp))
                     .clickable { showAdd = true },
                 horizontalArrangement = Arrangement.Center,
             ) {
-                Icon(Icons.Filled.Add, null, tint = Palette.Surface, modifier = Modifier.size(16.dp))
+                Icon(Icons.Filled.Add, null, tint = LocalPalette.current.Surface, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("افزودن کانفیگ", fontSize = 11.5.sp, color = Palette.Surface, fontWeight = FontWeight.Bold)
+                Text("افزودن کانفیگ", fontSize = 11.5.sp, color = LocalPalette.current.Surface, fontWeight = FontWeight.Bold)
             }
         }
 
@@ -256,23 +256,23 @@ fun ConfigsScreen(onOpenServers: () -> Unit = {}) {
                         Modifier
                             .fillMaxWidth()
                             .padding(vertical = 3.dp)
-                            .background(Palette.Glass, RoundedCornerShape(12.dp))
+                            .background(LocalPalette.current.Glass, RoundedCornerShape(12.dp))
                             .padding(horizontal = 10.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        IconTile(Icons.Filled.Refresh, Palette.Accent, size = 30.dp, iconSize = 15.dp)
+                        IconTile(Icons.Filled.Refresh, LocalPalette.current.Accent, size = 30.dp, iconSize = 15.dp)
                         Spacer(Modifier.width(8.dp))
                         Column(Modifier.weight(1f)) {
                             Text(
                                 sub.name,
-                                color = Palette.TextPrimary,
+                                color = LocalPalette.current.TextPrimary,
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                             )
                             Text(
                                 "${sub.configIds.size} کانفیگ · آخرین بروزرسانی: ${lastUpdateLabel(sub.lastUpdate)}",
-                                color = Palette.TextFaint,
+                                color = LocalPalette.current.TextFaint,
                                 fontSize = 9.sp,
                                 fontFamily = FontFamily.Monospace,
                                 maxLines = 1,
@@ -280,18 +280,18 @@ fun ConfigsScreen(onOpenServers: () -> Unit = {}) {
                         }
                         Text(
                             "بروزرسانی",
-                            color = Palette.Cyan,
+                            color = LocalPalette.current.Cyan,
                             fontSize = 10.5.sp,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier
-                                .background(Palette.GlassStrong, RoundedCornerShape(9.dp))
+                                .background(LocalPalette.current.GlassStrong, RoundedCornerShape(9.dp))
                                 .clickable { AppModel.refreshSubscription(sub) }
                                 .padding(horizontal = 8.dp, vertical = 5.dp),
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
                             "✕",
-                            color = Palette.TextFaint,
+                            color = LocalPalette.current.TextFaint,
                             fontSize = 12.sp,
                             modifier = Modifier.clickable { AppModel.removeSubscription(sub, withConfigs = false) },
                         )
@@ -335,7 +335,7 @@ fun ConfigsScreen(onOpenServers: () -> Unit = {}) {
                     Text(
                         Pinger.buttonLabel(pingActive, progress.first, progress.second),
                         fontSize = 11.5.sp,
-                        color = if (pingActive) Palette.Warn else Palette.TextPrimary,
+                        color = if (pingActive) LocalPalette.current.Warn else LocalPalette.current.TextPrimary,
                     )
                 }
                 Spacer(Modifier.width(8.dp))
@@ -365,7 +365,7 @@ fun ConfigsScreen(onOpenServers: () -> Unit = {}) {
             Text(
                 if (configs.isEmpty()) "هنوز کانفیگی نیست.\nاز دکمه‌های بالا لینک، ساب یا فایل اضافه کنید."
                 else "چیزی با این جستجو پیدا نشد.",
-                color = Palette.TextSecondary,
+                color = LocalPalette.current.TextSecondary,
                 fontSize = 13.sp,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
@@ -393,20 +393,20 @@ fun ConfigsScreen(onOpenServers: () -> Unit = {}) {
                         ) {
                             Text(
                                 if (isCollapsed) "▸" else "▾",
-                                color = Palette.TextFaint,
+                                color = LocalPalette.current.TextFaint,
                                 fontSize = 12.sp,
                                 modifier = Modifier.width(16.dp),
                             )
                             Text(
                                 group.title,
-                                color = Palette.TextSecondary,
+                                color = LocalPalette.current.TextSecondary,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.weight(1f),
                             )
                             Text(
                                 "${group.items.size}",
-                                color = Palette.TextFaint,
+                                color = LocalPalette.current.TextFaint,
                                 fontSize = 11.sp,
                             )
                         }
@@ -530,17 +530,17 @@ private fun ConfigRow(
             modifier = Modifier
                 .size(34.dp)
                 .background(
-                    if (selected) Palette.Accent.copy(alpha = 0.35f) else Palette.Glass,
+                    if (selected) LocalPalette.current.Accent.copy(alpha = 0.35f) else LocalPalette.current.Glass,
                     CircleShape,
                 ),
-        ) { Text(proto.take(1), color = Palette.TextPrimary, fontWeight = FontWeight.Bold) }
+        ) { Text(proto.take(1), color = LocalPalette.current.TextPrimary, fontWeight = FontWeight.Bold) }
         Spacer(Modifier.width(11.dp))
         Column(Modifier.weight(1f)) {
-            Text(config.name, color = Palette.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(config.name, color = LocalPalette.current.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "$proto${config.awgVersion?.let { " $it" } ?: ""} · ${config.serverIp}",
-                    color = Palette.TextSecondary,
+                    color = LocalPalette.current.TextSecondary,
                     fontSize = 10.5.sp,
                 )
             }
@@ -548,29 +548,29 @@ private fun ConfigRow(
         LatencyPill(freshMs = freshMs, cached = cached, failed = failed)
         if (selected) {
             Spacer(Modifier.width(6.dp))
-            Text("فعال", color = Palette.Ok, fontSize = 10.sp)
+            Text("فعال", color = LocalPalette.current.Ok, fontSize = 10.sp)
         }
         Box {
             IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Filled.MoreVert, "بیشتر", tint = Palette.TextFaint, modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.MoreVert, "بیشتر", tint = LocalPalette.current.TextFaint, modifier = Modifier.size(18.dp))
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 DropdownMenuItem(
-                    text = { Text("تغییر نام", color = Palette.TextPrimary, fontSize = 13.sp) },
+                    text = { Text("تغییر نام", color = LocalPalette.current.TextPrimary, fontSize = 13.sp) },
                     onClick = { menuOpen = false; onRename() },
                 )
                 if (config.xrayLink != null) {
                     DropdownMenuItem(
-                        text = { Text("ویرایش لینک", color = Palette.TextPrimary, fontSize = 13.sp) },
+                        text = { Text("ویرایش لینک", color = LocalPalette.current.TextPrimary, fontSize = 13.sp) },
                         onClick = { menuOpen = false; onEditLink() },
                     )
                     DropdownMenuItem(
-                        text = { Text("اشتراک‌گذاری لینک", color = Palette.TextPrimary, fontSize = 13.sp) },
+                        text = { Text("اشتراک‌گذاری لینک", color = LocalPalette.current.TextPrimary, fontSize = 13.sp) },
                         onClick = { menuOpen = false; onShare() },
                     )
                 }
                 DropdownMenuItem(
-                    text = { Text("حذف", color = Palette.Bad, fontSize = 13.sp) },
+                    text = { Text("حذف", color = LocalPalette.current.Bad, fontSize = 13.sp) },
                     onClick = { menuOpen = false; onDelete() },
                 )
             }
@@ -616,10 +616,10 @@ fun FolderChip(label: String, selected: Boolean, onClick: () -> Unit) {
     Text(
         label,
         fontSize = 11.5.sp,
-        color = if (selected) Palette.Surface else Palette.TextSecondary,
+        color = if (selected) LocalPalette.current.Surface else LocalPalette.current.TextSecondary,
         modifier = Modifier
             .clip(RoundedCornerShape(20.dp))
-            .background(if (selected) Palette.Cyan else Palette.Glass)
+            .background(if (selected) LocalPalette.current.Cyan else LocalPalette.current.Glass)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 7.dp),
     )

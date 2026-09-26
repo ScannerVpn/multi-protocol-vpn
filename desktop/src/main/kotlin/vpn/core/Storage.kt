@@ -255,6 +255,13 @@ object Storage {
         } else {
             AppSettings()
         }
+        val protectToken = s.aether.accessToken.isNotEmpty() &&
+            !SecretBox.isProtected(s.aether.accessToken)
+        val protectSecret = s.aether.accessSecret.isNotEmpty() &&
+            !SecretBox.isProtected(s.aether.accessSecret)
+        s.aether.accessToken = SecretBox.unwrap(s.aether.accessToken).orEmpty()
+        s.aether.accessSecret = SecretBox.unwrap(s.aether.accessSecret).orEmpty()
+        if (protectToken || protectSecret) saveSettings(s)
         // v3.2 migration: the old boolean TUN toggle becomes the "tun" mode
         // when no explicit mode was ever stored.
         if (s.mode !in VpnModes.ALL) {
@@ -275,6 +282,11 @@ object Storage {
             s.closeAction = migrated
             saveSettings(s)
         }
+        val scan = Aether.normalizeScanMode(s.aether.scan)
+        if (s.aether.scan != scan) {
+            s.aether.scan = scan
+            saveSettings(s)
+        }
         s
     } catch (e: Exception) {
         // P3-11 fix: a corrupt settings.json used to be reset to defaults
@@ -286,8 +298,15 @@ object Storage {
         AppSettings()
     }
 
-    fun saveSettings(s: AppSettings) =
-        atomicSave("settings.json", s, AppSettings.serializer())
+    fun saveSettings(s: AppSettings) {
+        val stored = s.copy(
+            aether = s.aether.copy(
+                accessToken = SecretBox.protect(s.aether.accessToken).orEmpty(),
+                accessSecret = SecretBox.protect(s.aether.accessSecret).orEmpty(),
+            ),
+        )
+        atomicSave("settings.json", stored, AppSettings.serializer())
+    }
 
     fun loadActiveConfigId(): String? = try {
         File(dataDir, "active_config_id.txt").takeIf { it.exists() }

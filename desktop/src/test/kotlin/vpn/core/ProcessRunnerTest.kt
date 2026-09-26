@@ -4,6 +4,7 @@ import kotlinx.coroutines.runBlocking
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -63,7 +64,7 @@ class ProcessRunnerTest {
         try {
             // Pretend the machine had no proxy before (isEnabled reads via
             // runRawAndWait; the fake's file never contains 0x1).
-            Proxy.enable(12345)
+            assertFalse(Proxy.enable(12345), "a missing registry readback must not report success")
             val joined = fake.runAndWaitCmds.joinToString("\n") { it.joinToString(" ") }
             assertTrue(joined.contains("ProxyServer"), "ProxyServer must be written")
             assertTrue(joined.contains("127.0.0.1:12345"), "the port must reach the registry value")

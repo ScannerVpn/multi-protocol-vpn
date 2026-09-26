@@ -20,6 +20,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import vpn.core.AppList
 import vpn.core.AppLog
 import vpn.core.AppSettings
+import vpn.core.Aether
 import vpn.core.Awg
 import vpn.core.InstalledApp
 import vpn.core.KillSwitchCleanup
@@ -1521,6 +1522,13 @@ object AppState {
     /** Ceiling for one attempt, so a stuck core cannot eat the whole budget. */
     private const val ATTEMPT_TIMEOUT_MS = 60_000L
 
+    private fun connectTimeoutMs(cfg: VpnConfig): Long =
+        if (VpnService.isAether(cfg)) {
+            Aether.connectAttempts(settings.aether).sumOf { it.timeoutMs + 15_000L } + 30_000L
+        } else {
+            CONNECT_TIMEOUT_MS
+        }
+
     fun connectActive() {
         val cfg = activeConfig ?: return
         // The user asked for a connection: clear the "they turned it off"
@@ -1561,10 +1569,10 @@ object AppState {
             try {
                 // withTimeout guarantees the spinner cannot run forever even if
                 // an inner step misbehaves.
-                val res = withTimeoutOrNull(CONNECT_TIMEOUT_MS) { connectWithRetry(cfg) }
+                val res = withTimeoutOrNull(connectTimeoutMs(cfg)) { connectWithFallback(cfg) }
                     ?: VpnResult(
                         false,
-                        "Connection timed out after ${CONNECT_TIMEOUT_MS / 1000}s. " +
+                        "Connection timed out after ${connectTimeoutMs(cfg) / 1000}s. " +
                             "The server may be unreachable or blocked on this network.",
                     )
                 if (res.ok) {
@@ -1622,27 +1630,58 @@ object AppState {
         }
     }
 
-    /**
-     * Attempts connection with exponential-backoff retry (3 attempts: 0s, 1.5s, 3s).
-     * Each attempt tears down partial state from previous tries and is capped
-     * by [ATTEMPT_TIMEOUT_MS] so one hung core cannot stall the whole flow.
-     */
-    private suspend fun connectWithRetry(cfg: VpnConfig): vpn.core.VpnResult {
-        val maxAttempts = 3
+    private suspend fun connectWithFallback(cfg: VpnConfig): vpn.core.VpnResult {
+        if (VpnService.isAether(cfg)) {
+            val attempts = Aether.connectAttempts(settings.aether)
+            var attemptNumber = 0
+            var successful: Aether.ConnectAttempt? = null
+            val result = Aether.runConnectAttempts(
+                attempts = attempts,
+                onAttempt = { attempt ->
+                    attemptNumber++
+                    AppLog.i("Aether", "attempt $attemptNumber/${attempts.size}: ${attempt.label}")
+                },
+                connect = { attempt ->
+                    VpnService.connect(cfg, aetherSettings = attempt.settings).also { connected ->
+                        if (connected.ok) successful = attempt
+                    }
+                },
+                cleanup = {
+                    withContext(NonCancellable) {
+                        withTimeoutOrNull(15_000) { runCatching { VpnService.abort(cfg) } }
+                    }
+                },
+            )
+            val chosen = successful
+            if (chosen != null) {
+                val preferred = settings.aether.copy(
+                    protocol = chosen.settings.protocol,
+                    h2 = chosen.settings.h2,
+                    scan = Aether.normalizeScanMode(chosen.settings.scan),
+                )
+                if (preferred != settings.aether) {
+                    settings = settings.copy(aether = preferred)
+                    Storage.saveSettings(settings)
+                }
+                if (attemptNumber > 1) {
+                    return result.copy(message = "${result.message} — fallback: ${chosen.label}")
+                }
+            }
+            return result
+        }
+
         var delayMs = 0L
-        var lastMessage = "Connection failed after $maxAttempts attempts"
-        repeat(maxAttempts) { i ->
+        var lastMessage = "Connection failed after 3 attempts"
+        repeat(3) { i ->
             if (i > 0) {
-                AppLog.i("VPN", "Retry $i/$maxAttempts in ${delayMs}ms...")
-                vpnStatus = VpnStatus.CONNECTING // keep UI showing CONNECTING
+                AppLog.i("VPN", "Retry $i/3 in ${delayMs}ms...")
+                vpnStatus = VpnStatus.CONNECTING
                 delay(delayMs)
-                delayMs = (delayMs + 1500).coerceAtMost(4500L) // 1500 → 3000 → 4500
+                delayMs = (delayMs + 1500).coerceAtMost(4500L)
             }
             val res = withTimeoutOrNull(ATTEMPT_TIMEOUT_MS) { VpnService.connect(cfg) }
             if (res != null && res.ok) return res
             lastMessage = res?.message ?: "Attempt ${i + 1} timed out after ${ATTEMPT_TIMEOUT_MS / 1000}s"
-            // Tear down partial state before next attempt. NonCancellable:
-            // a cancelled scope must still clean up the cores it started.
             withContext(NonCancellable) {
                 withTimeoutOrNull(15_000) { runCatching { VpnService.abort(cfg) } }
             }

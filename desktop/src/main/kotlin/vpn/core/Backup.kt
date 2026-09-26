@@ -27,7 +27,8 @@ import javax.crypto.spec.SecretKeySpec
  *   v2 (this version):   MAGIC(8) + ver(1) + salt(16) + nonce(12) + ct — PBKDF2 600k
  *   The two are told apart by the byte after MAGIC: a v1 file's salt byte is
  *   random, so the magic value 0x32 ('2') carries a 1/256 collision risk —
- *   and in that case v2 parsing fails the GCM tag and falls back to v1.
+ *   and in that case the v2 parse fails the GCM tag and [import] retries the
+ *   whole archive as v1.
  *
  * SECURITY (2026-09 audit):
  *  - P2-6: an archive is UNTRUSTED INPUT. ids reach path-joining call sites
@@ -127,15 +128,26 @@ object Backup {
                 return Result(false, "Not a MultiVPN backup file.")
             }
             val versionByte = bytes[header.size].toInt() and 0xFF
-            return if (versionByte == FILE_VERSION) {
-                importParsed(decryptAt(bytes, header.size + 1, passphrase, PBKDF2_ITERATIONS_V2), v2 = true)
-            } else {
-                // v1: the salt starts immediately after the magic. The 1/256
-                // chance that a v1 salt's first byte is 0x32 lands here and
-                // simply fails the v1 GCM tag below — handled by the caller
-                // of decryptAt with a clear message.
-                importParsed(decryptAt(bytes, header.size, passphrase, PBKDF2_ITERATIONS_V1), v2 = false)
+            if (versionByte == FILE_VERSION) {
+                // v2 layout. A v1 archive whose random salt byte happens to be
+                // 0x32 lands here too (1/256 of v1 files), and the v2 GCM tag
+                // then fails — so retry as v1 before declaring the archive
+                // broken. The KDoc always promised this fallback; without it a
+                // perfectly good v1 backup was permanently unimportable.
+                decryptAt(bytes, header.size + 1, passphrase, PBKDF2_ITERATIONS_V2)?.let {
+                    return importParsed(it, v2 = true)
+                }
+                return importParsed(
+                    decryptAt(bytes, header.size, passphrase, PBKDF2_ITERATIONS_V1),
+                    v2 = false,
+                )
             }
+            // v1: the salt starts immediately after the magic. A wrong
+            // passphrase fails the GCM tag here and reports a clear message.
+            return importParsed(
+                decryptAt(bytes, header.size, passphrase, PBKDF2_ITERATIONS_V1),
+                v2 = false,
+            )
         } catch (e: Exception) {
             return Result(false, "Restore failed: ${e.message}")
         }

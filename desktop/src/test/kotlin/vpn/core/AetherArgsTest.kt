@@ -1,7 +1,10 @@
 package vpn.core
 
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -25,10 +28,12 @@ class AetherArgsTest {
         assertEquals(Aether.BIND, args[1])
         assertEquals("masque", args[args.indexOf("--protocol") + 1])
         assertTrue("--http-proxy" in args, "httpProxy defaults to on")
+        assertTrue("--h3" in args, "HTTP/3 must be explicit so the hidden core never asks")
         assertFalse("--h2" in args, "HTTP/3 is the default transport")
         assertFalse("--no-quick-reconnect" in args)
         assertTrue("--quick-reconnect" in args)
-        assertFalse("-4" in args && "--dual" in args, "auto = no ip flag")
+        assertTrue("-4" in args, "auto must still pin an IP flag — the core asks interactively otherwise")
+        assertFalse("--dual" in args && "-6" in args, "auto = IPv4, the core's own default")
         // Every non-flag token must be the VALUE of the flag right before it.
         var expectingValue = false
         args.forEach { a ->
@@ -75,6 +80,91 @@ class AetherArgsTest {
     }
 
     @Test
+    fun `masque fallback tries reliable h2 before the other protocols`() {
+        val attempts = Aether.connectAttempts(defaults.copy(protocol = "masque", h2 = false))
+        assertEquals(
+            listOf("masque:true", "masque:false", "wg:false", "gool:false", "mim:true", "mim:false"),
+            attempts.map { "${it.settings.protocol}:${it.settings.h2}" },
+        )
+        attempts.forEach { attempt ->
+            assertTrue(
+                attempt.timeoutMs >= Aether.coldStartBudgetMs(attempt.settings),
+                "${attempt.label} was cancelled before its core scan could finish",
+            )
+        }
+    }
+
+    @Test
+    fun `wireguard fallback keeps the selection first and then races masque transports`() {
+        val attempts = Aether.connectAttempts(defaults.copy(protocol = "wg", h2 = true))
+        assertEquals(
+            listOf("wg:false", "masque:true", "masque:false", "gool:false", "mim:true", "mim:false"),
+            attempts.map { "${it.settings.protocol}:${it.settings.h2}" },
+        )
+    }
+
+    @Test
+    fun `Zero Trust never falls through to a personal WARP protocol`() {
+        val attempts = Aether.connectAttempts(defaults.copy(protocol = "zt", h2 = false))
+        assertEquals(setOf("zt"), attempts.map { it.settings.protocol }.toSet())
+    }
+
+    @Test
+    fun `reverse provider fallback does not repeat the same effective carrier`() {
+        val attempts = Aether.connectAttempts(defaults.copy(protocol = "wg", torMode = "reverse"))
+        assertEquals(setOf("masque", "mim"), attempts.map { Aether.effectiveCarrier(it.settings) }.toSet())
+        assertTrue(attempts.all { Aether.effectiveH2(it.settings) })
+        assertEquals(attempts.size, attempts.distinctBy {
+            Aether.effectiveCarrier(it.settings) to Aether.effectiveH2(it.settings)
+        }.size)
+    }
+
+    @Test
+    fun `failed attempt advances to the next protocol and cleans up`() = runBlocking {
+        val attempts = listOf(
+            Aether.ConnectAttempt(defaults.copy(protocol = "masque", h2 = false), 1_000L),
+            Aether.ConnectAttempt(defaults.copy(protocol = "masque", h2 = true), 1_000L),
+        )
+        val tried = mutableListOf<String>()
+        var cleanups = 0
+        val result = Aether.runConnectAttempts(
+            attempts = attempts,
+            onAttempt = { tried += it.label },
+            connect = { attempt ->
+                if (attempt.settings.h2) VpnResult(true, "connected") else VpnResult(false, "blocked")
+            },
+            cleanup = { cleanups++ },
+        )
+        assertTrue(result.ok)
+        assertEquals(listOf("MASQUE/H3", "MASQUE/H2"), tried)
+        assertEquals(1, cleanups)
+    }
+
+    @Test
+    fun `timed out attempt advances instead of consuming the whole connection`() = runBlocking {
+        val attempts = listOf(
+            Aether.ConnectAttempt(defaults.copy(protocol = "wg"), 20L),
+            Aether.ConnectAttempt(defaults.copy(protocol = "masque", h2 = true), 1_000L),
+        )
+        val tried = mutableListOf<String>()
+        val result = Aether.runConnectAttempts(
+            attempts = attempts,
+            onAttempt = { tried += it.label },
+            connect = { attempt ->
+                if (attempt.settings.protocol == "wg") {
+                    delay(500L)
+                    VpnResult(false, "unreachable")
+                } else {
+                    VpnResult(true, "connected")
+                }
+            },
+            cleanup = {},
+        )
+        assertTrue(result.ok)
+        assertEquals(listOf("WireGuard", "MASQUE/H2"), tried)
+    }
+
+    @Test
     fun `h2 and ech and fragment only make sense for masque`() {
         assertTrue("--h2" in Aether.buildArgs(defaults.copy(protocol = "masque", h2 = true)))
         assertFalse("--h2" in Aether.buildArgs(defaults.copy(protocol = "wg", h2 = true)))
@@ -103,7 +193,13 @@ class AetherArgsTest {
     fun `scan mode noise and perf are validated against known values`() {
         val scan = Aether.buildArgs(defaults.copy(scan = "ironclad"))
         assertEquals("ironclad", scan[scan.indexOf("--scan") + 1])
-        assertFalse("--scan" in Aether.buildArgs(defaults.copy(scan = "nuclear")))
+        // An unknown persisted scan value must NOT leave the flag out — the
+        // core asks for the scan mode interactively when nothing sets it and
+        // a hidden process hangs at the question forever. Fall back to the
+        // core's own default instead.
+        val bogus = Aether.buildArgs(defaults.copy(scan = "nuclear"))
+        assertTrue("--scan" in bogus)
+        assertEquals("balanced", bogus[bogus.indexOf("--scan") + 1])
         assertTrue("--noize gfw".split(" ").all { it in Aether.buildArgs(defaults.copy(noise = "gfw")) })
         assertFalse("--noize" in Aether.buildArgs(defaults.copy(noise = "loud")))
         assertEquals("low", Aether.buildArgs(defaults.copy(perf = "low"))[Aether.buildArgs(defaults.copy(perf = "low")).indexOf("--perf") + 1])
@@ -139,17 +235,172 @@ class AetherArgsTest {
     }
 
     @Test
-    fun `zero trust enrolment paths are mutually exclusive`() {
-        val token = Aether.buildArgs(defaults.copy(protocol = "zt", team = "acme", accessToken = "jwt"))
-        assertEquals("jwt", token[token.indexOf("--access-token") + 1])
-        assertFalse("--access-id" in token)
-        val svc = Aether.buildArgs(defaults.copy(protocol = "zt", accessId = "id", accessSecret = "sec"))
-        assertEquals("id", svc[svc.indexOf("--access-id") + 1])
-        assertEquals("sec", svc[svc.indexOf("--access-secret") + 1])
-        assertFalse("--access-token" in svc)
-        val mail = Aether.buildArgs(defaults.copy(protocol = "zt", accessEmail = "a@b.c"))
-        assertTrue("--access-email" in mail)
-        assertFalse("--access-id" in mail)
+    fun `tor reverse downgrades wg carriers to masque over h2`() {
+        // cli.rs refuses --wg/--gool under --tor-reverse (tor carries tcp
+        // only): the carrier must become masque + HTTP/2, not a dead core.
+        val args = Aether.buildArgs(defaults.copy(protocol = "wg", torMode = "reverse"))
+        assertEquals("masque", args[args.indexOf("--protocol") + 1])
+        assertTrue("--h2" in args)
+        assertTrue("--tor-reverse" in args)
+        assertFalse("--keepalive" in args, "wg keepalive is meaningless on the masque carrier")
+        // chain mode keeps the wireguard carrier — tor rides INSIDE the tunnel.
+        val chain = Aether.buildArgs(defaults.copy(protocol = "wg", torMode = "chain"))
+        assertEquals("wg", chain[chain.indexOf("--protocol") + 1])
+        assertFalse("--h2" in chain)
+    }
+
+    @Test
+    fun `verified replaces the legacy stealth scan name`() {
+        assertEquals("verified", Aether.normalizeScanMode("stealth"))
+        val args = Aether.buildArgs(defaults.copy(scan = "stealth"))
+        assertEquals("verified", args[args.indexOf("--scan") + 1])
+    }
+
+    @Test
+    fun `psiphon v2_1 flags and reverse downgrade reach the core`() {
+        val args = Aether.buildArgs(
+            defaults.copy(
+                protocol = "wg",
+                psiphonMode = "reverse",
+                psiphonVariant = "cdn",
+                psiphonRegion = "de",
+                psiphonConfig = "C:/config.json",
+                psiphonCdnIps = "1.1.1.1, 2.2.2.2",
+                psiphonCdnSni = "example.org",
+                psiphonDir = "C:/state",
+                psiphonBin = "C:/pt/psiphon-tunnel-core.exe",
+                psiphonHttpProxy = true,
+                psiphonReadySecs = 999_999,
+            ),
+            psiphonBind = "127.0.0.1:10923",
+            psiphonHttpBind = "127.0.0.1:10924",
+        )
+        assertEquals("masque", args[args.indexOf("--protocol") + 1])
+        assertTrue("--h2" in args)
+        assertEquals("cdn", args[args.indexOf("--psiphon-mode") + 1])
+        assertEquals("DE", args[args.indexOf("--psiphon-region") + 1])
+        assertEquals("C:/config.json", args[args.indexOf("--psiphon-config") + 1])
+        assertEquals("1.1.1.1, 2.2.2.2", args[args.indexOf("--psiphon-cdn-ips") + 1])
+        assertEquals("example.org", args[args.indexOf("--psiphon-cdn-sni") + 1])
+        assertEquals("C:/state", args[args.indexOf("--psiphon-dir") + 1])
+        assertEquals("C:/pt/psiphon-tunnel-core.exe", args[args.indexOf("--psiphon-bin") + 1])
+        assertEquals("127.0.0.1:10923", args[args.indexOf("--psiphon-bind") + 1])
+        assertEquals("127.0.0.1:10924", args[args.indexOf("--psiphon-http") + 1])
+        assertEquals(
+            "86400",
+            Aether.envFor(defaults.copy(psiphonMode = "reverse", psiphonReadySecs = 999_999))["AETHER_PSIPHON_READY_SECS"],
+        )
+    }
+
+    @Test
+    fun `provider only mode cannot be combined with another provider`() {
+        assertFailsWith<IllegalArgumentException> {
+            Aether.buildArgs(defaults.copy(torMode = "only", psiphonMode = "chain"))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            Aether.buildArgs(defaults.copy(psiphonMode = "only", torMode = "chain"))
+        }
+    }
+
+    @Test
+    fun `provider only modes expose HTTP on the provider listener`() {
+        val tor = Aether.buildArgs(
+            defaults.copy(torMode = "only", httpProxy = true),
+            torHttpBind = "127.0.0.1:10922",
+        )
+        assertFalse("--http-proxy" in tor)
+        assertEquals("127.0.0.1:10922", tor[tor.indexOf("--tor-http") + 1])
+        val psiphon = Aether.buildArgs(
+            defaults.copy(psiphonMode = "only", httpProxy = true),
+            psiphonHttpBind = "127.0.0.1:10924",
+        )
+        assertFalse("--http-proxy" in psiphon)
+        assertEquals("127.0.0.1:10924", psiphon[psiphon.indexOf("--psiphon-http") + 1])
+        assertEquals(Aether.TOR_HTTP_PORT, Aether.httpPort(defaults.copy(torMode = "only")))
+        assertEquals(Aether.PSIPHON_HTTP_PORT, Aether.httpPort(defaults.copy(psiphonMode = "only")))
+        assertEquals(Aether.HTTP_PORT, Aether.httpPort(defaults))
+    }
+
+    @Test
+    fun `tor v2_1 relay and bridge options reach the core`() {
+        val args = Aether.buildArgs(
+            defaults.copy(
+                torMode = "chain",
+                torHttpProxy = true,
+                torBridgeFile = "C:/tor-bridges.txt",
+                torRelays = "only:80",
+                torRelayPorts = "any",
+            ),
+            torHttpBind = "127.0.0.1:10922",
+        )
+        assertEquals("127.0.0.1:10922", args[args.indexOf("--tor-http") + 1])
+        assertEquals("C:/tor-bridges.txt", args[args.indexOf("--tor-bridge-file") + 1])
+        assertEquals("only:80", args[args.indexOf("--tor-relays") + 1])
+        assertEquals("any", args[args.indexOf("--tor-relay-ports") + 1])
+    }
+
+    @Test
+    fun `exit policy and periodic stats are validated and clamped`() {
+        val args = Aether.buildArgs(
+            defaults.copy(
+                exitLoc = "!ir, az",
+                exitLocSecs = 999_999,
+                stats = true,
+                statsSecs = 0,
+            ),
+        )
+        assertEquals("!IR,AZ", args[args.indexOf("--exit-loc") + 1])
+        assertEquals("86400", args[args.indexOf("--exit-loc-secs") + 1])
+        assertTrue("--stats" in args)
+        assertEquals("1", args[args.indexOf("--stats-secs") + 1])
+        assertFailsWith<IllegalArgumentException> {
+            Aether.buildArgs(defaults.copy(exitLoc = "not-a-country"))
+        }
+    }
+
+    @Test
+    fun `tor and psiphon reverse together are rejected`() {
+        assertFailsWith<IllegalArgumentException> {
+            Aether.buildArgs(defaults.copy(torMode = "reverse", psiphonMode = "reverse"))
+        }
+    }
+
+    @Test
+    fun `chain and reverse modes expose their secondary SOCKS providers`() {
+        assertEquals(
+            listOf(Aether.TOR_PORT to "Tor", Aether.PSIPHON_PORT to "Psiphon"),
+            Aether.secondarySocksPorts(
+                defaults.copy(torMode = "chain", psiphonMode = "reverse"),
+            ),
+        )
+        assertTrue(Aether.secondarySocksPorts(defaults.copy(torMode = "only")).isEmpty())
+    }
+
+    @Test
+    fun `provider startup budgets cover bridge discovery and configured Psiphon readiness`() {
+        val psiphon = Aether.connectAttempts(
+            defaults.copy(psiphonMode = "only", psiphonReadySecs = 86_400),
+        ).single()
+        assertTrue(psiphon.timeoutMs >= 86_460_000L)
+        assertTrue(Aether.coldStartBudgetMs(defaults.copy(torMode = "chain")) >= 480_000L)
+    }
+
+    @Test
+    fun `zero trust secrets stay out of the process command line`() {
+        val tokenSettings = defaults.copy(protocol = "zt", team = "acme", accessToken = "jwt")
+        val token = Aether.buildArgs(tokenSettings)
+        assertFalse("--access-token" in token)
+        assertEquals("jwt", Aether.envFor(tokenSettings)["AETHER_ACCESS_TOKEN"])
+        val serviceSettings = defaults.copy(protocol = "zt", accessId = "id", accessSecret = "sec")
+        val service = Aether.buildArgs(serviceSettings)
+        assertFalse("--access-id" in service)
+        assertFalse("--access-secret" in service)
+        assertEquals("id", Aether.envFor(serviceSettings)["AETHER_ACCESS_CLIENT_ID"])
+        assertEquals("sec", Aether.envFor(serviceSettings)["AETHER_ACCESS_CLIENT_SECRET"])
+        val mailSettings = defaults.copy(protocol = "zt", accessEmail = "a@b.c")
+        val mail = Aether.buildArgs(mailSettings)
+        assertFalse("--access-email" in mail)
+        assertEquals("a@b.c", Aether.envFor(mailSettings)["AETHER_ACCESS_EMAIL"])
     }
 
     @Test
@@ -207,6 +458,17 @@ class AetherArgsTest {
     }
 
     @Test
+    fun `exit deny policy survives the cmd launch wrapper`() {
+        val settings = defaults.copy(exitLoc = "!IR,AZ")
+        val line = Aether.buildLaunchLine(
+            "C:\\tools\\aether.exe",
+            Aether.buildArgs(settings),
+            "C:\\logs\\aether.log",
+        )
+        assertTrue("--exit-loc !IR,AZ" in line)
+    }
+
+    @Test
     fun `launch line redirects the core log through cmd with safe quoting`() {
         val line = Aether.buildLaunchLine(
             "C:\\Users\\te st\\aether.exe",
@@ -226,8 +488,50 @@ class AetherArgsTest {
     }
 
     @Test
+    fun `netstat listener parser identifies only the requested port`() {
+        val output = """
+            TCP    127.0.0.1:10819       0.0.0.0:0       LISTENING       4242
+            TCP    127.0.0.1:10820       0.0.0.0:0       LISTENING       4343
+        """.trimIndent()
+        assertEquals(4242, parseListeningPid(output, 10819))
+        assertEquals(4343, parseListeningPid(output, 10820))
+        assertNull(parseListeningPid(output, 10821))
+    }
+
+    @Test
+    fun `launch line rejects cmd metacharacters before process creation`() {
+        assertFailsWith<IllegalArgumentException> {
+            Aether.buildLaunchLine("C:\\tools\\aether.exe", listOf("--team", "bad&calc"), "C:\\logs\\a.log")
+        }
+        assertFailsWith<IllegalArgumentException> {
+            Aether.buildLaunchLine("C:\\tools\\aether.exe", listOf("--dns", "%PATH%"), "C:\\logs\\a.log")
+        }
+    }
+
+    @Test
+    fun `child environment keeps inherited variables and replaces them case insensitively`() {
+        val merged = mergeEnvironment(
+            linkedMapOf(
+                "Path" to "parent",
+                "SystemRoot" to "C:\\Windows",
+                "AETHER_TOR" to "stale-parent-setting",
+            ),
+            linkedMapOf("PATH" to "child", "AETHER_TOR_COUNTRY" to "de"),
+        )
+        assertEquals("child", merged.entries.single { it.key.equals("PATH", ignoreCase = true) }.value)
+        assertEquals("C:\\Windows", merged["SystemRoot"])
+        assertEquals("de", merged["AETHER_TOR_COUNTRY"])
+        assertTrue(merged.keys.none { it.equals("AETHER_TOR", ignoreCase = true) })
+        assertTrue(
+            mergeEnvironment(mapOf("AETHER_TOR" to "stale"), emptyMap()).keys.none {
+                it.startsWith("AETHER_", ignoreCase = true)
+            },
+        )
+    }
+
+    @Test
     fun `environment block matches the CreateProcessW layout`() {
-        assertEquals("A=1\u0000B=2\u0000\u0000", environmentBlock(linkedMapOf("A" to "1", "B" to "2")))
+        assertEquals("A=1\u0000B=2\u0000\u0000", environmentBlock(linkedMapOf("B" to "2", "A" to "1")))
         assertEquals("K=\u0000\u0000", environmentBlock(mapOf("K" to "")))
         assertTrue(environmentBlock(emptyMap()).endsWith("\u0000\u0000"))
     }

@@ -123,7 +123,9 @@ object KillSwitchCleanup {
      * the very end.
      */
     internal fun buildCleanupScript(resultFile: String, legacyMarkerPath: String, doneMarkerPath: String): String {
-        fun psEscape(s: String) = s.replace("`", "``").replace("$", "`$").replace("\"", "`\"")
+        fun psEscape(s: String) =
+            s.replace("`", "``").replace("$", "`$").replace("\"", "`\"")
+                .replace(VpnScripts.PS, "") // a value can never inject the placeholder
         return """
 ${VpnScripts.PS}ErrorActionPreference = "Stop"
 ${VpnScripts.PS}ResultFile = "${psEscape(resultFile)}"
@@ -136,7 +138,7 @@ ${VpnScripts.PS}isAdmin = ([Security.Principal.WindowsPrincipal][Security.Princi
 if (-not ${VpnScripts.PS}isAdmin) {
     try {
         ${VpnScripts.PS}script = ${VpnScripts.PS}MyInvocation.MyCommand.Path
-        Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `\"${VpnScripts.PS}script`\"" -Wait
+        Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"${VpnScripts.PS}script`"" -Wait
     } catch {
         Write-Result "ERROR" "Admin elevation was declined"
     }

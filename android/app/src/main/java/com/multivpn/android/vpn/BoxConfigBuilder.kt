@@ -151,6 +151,42 @@ object BoxConfigBuilder {
         return Render(sb.toString(), nodes.first.map { it.configId }, nodes.second)
     }
 
+    /**
+     * Builds the KILL-SWITCH config: a real TUN whose only outbound is
+     * `block`, so every packet the device sends while the tunnel is down is
+     * dropped instead of falling out to the bare network.
+     *
+     * It is a genuine tunnel on purpose. Android allows ONE active VPN, so a
+     * firewall-style kill switch is not available; the only way to own the
+     * traffic is to keep holding the VPN slot and route it into a sink.
+     *
+     * Per-app split is deliberately NOT applied here: the point is to capture
+     * everything, not to honour a bypass list while unprotected.
+     */
+    fun buildBlock(): String {
+        val sb = StringBuilder()
+        sb.append("{\n")
+        sb.append("  \"log\": { \"level\": \"warn\", \"timestamp\": true },\n")
+        sb.append("  \"dns\": {\n")
+        sb.append("    \"servers\": [ { \"tag\": \"local\", \"type\": \"local\" } ],\n")
+        sb.append("    \"final\": \"local\"\n")
+        sb.append("  },\n")
+        sb.append(tunInbound(Settings(), null, null))
+        sb.append("  \"outbounds\": [\n")
+        sb.append("    { \"type\": \"block\", \"tag\": \"block\" }\n")
+        sb.append("  ],\n")
+        sb.append("  \"route\": {\n")
+        sb.append("    \"rules\": [\n")
+        sb.append("      { \"protocol\": \"dns\", \"action\": \"hijack-dns\" }\n")
+        sb.append("    ],\n")
+        sb.append("    \"final\": \"block\",\n")
+        sb.append("    \"default_domain_resolver\": \"local\",\n")
+        sb.append("    \"auto_detect_interface\": true\n")
+        sb.append("  }\n")
+        sb.append("}")
+        return sb.toString()
+    }
+
     /** Single-config render, kept for the schema tests and diagnostics. */
     fun build(config: VpnConfig, settings: Settings = Settings()): Result<String> =
         runCatching { buildTunnel(listOf(config), config.id, settings).json }

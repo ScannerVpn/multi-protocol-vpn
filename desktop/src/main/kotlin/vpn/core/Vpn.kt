@@ -268,7 +268,10 @@ object VpnService {
     // Connect / disconnect (protocol dispatch)
     // ------------------------------------------------------------------
 
-    suspend fun connect(config: VpnConfig): VpnResult = withContext(Dispatchers.IO) {
+    suspend fun connect(
+        config: VpnConfig,
+        aetherSettings: AetherSettings? = null,
+    ): VpnResult = withContext(Dispatchers.IO) {
         // Snapshot the session's traffic mode NOW: disconnect/cancel must use
         // the same decision, even if the user changes settings mid-connect.
         val startSettings = Storage.loadSettings()
@@ -286,7 +289,7 @@ object VpnService {
                 isXray(config) -> connectXray(config)
                 isWireGuard(config) -> connectWireProxy(config)
                 isSingBox(config) -> connectSingBox(config)
-                isAether(config) -> connectAether(config)
+                isAether(config) -> connectAether(config, aetherSettings)
                 config.protocol == "openvpn" -> connectOpenvpn(config)
                 else -> connectIkev2(config)
             }
@@ -315,7 +318,12 @@ object VpnService {
                 when {
                     isXray(config) -> Proxy.enable(Xray.HTTP_PORT)
                     isSingBox(config) -> Proxy.enable(SingBox.MIXED_PORT)
-                    isAether(config) -> Proxy.enable(Aether.HTTP_PORT)
+                    isAether(config) -> {
+                        val enabled = Proxy.enable(
+                            Aether.httpPort(aetherSettings ?: Storage.loadSettings().aether),
+                        )
+                        if (!enabled) result = VpnResult(false, "Windows system proxy could not be enabled")
+                    }
                     else -> Proxy.enable(WireProxy.HTTP_PORT)
                 }
             }
@@ -409,6 +417,7 @@ object VpnService {
         runCatching { SingBox.kill() }
         runCatching { WireProxy.kill() }
         runCatching { Aether.kill() }
+        runCatching { killElevatedCoresDetached() }
         runCatching { Proxy.restoreState() }
         if (!isProxyMode(config)) {
             // IKEv2/OpenVPN: drop a half-open dial.
@@ -441,6 +450,7 @@ object VpnService {
         runCatching { SingBox.kill() }
         runCatching { WireProxy.kill() }
         runCatching { Aether.kill() }
+        runCatching { killElevatedCoresDetached() }
         if (OpenVpn.marker.exists()) runCatching { OpenVpn.stopDetached() }
         // Sweep stale multivpn_* leftovers (scripts, results, downloads) that
         // earlier runs — including crashed ones — left behind in %TEMP%.
@@ -1058,9 +1068,26 @@ object VpnService {
      * validateSecs — unlike the per-config protocols there is no fixed
      * server endpoint to poll first.
      */
-    private suspend fun connectAether(config: VpnConfig): VpnResult {
+    private suspend fun connectAether(
+        config: VpnConfig,
+        aetherSettings: AetherSettings?,
+    ): VpnResult {
         val settings = Storage.loadSettings()
-        val a = settings.aether
+        val persisted = aetherSettings ?: settings.aether
+        // The core binds SOCKS5 and HTTP CONNECT on SEPARATE ports, and every
+        // mode except Proxy-only ends up pointing the Windows system proxy at
+        // [Aether.HTTP_PORT] — directly in System-proxy mode, and as the
+        // TUN-declined fallback otherwise. With the "HTTP proxy" toggle off
+        // there would be nothing listening on that port, and enabling the
+        // system proxy against a dead port takes the whole machine offline.
+        // So the listener is forced on for every mode that can use it; the
+        // toggle only decides whether Proxy-only mode exposes it too.
+        val a = if (settings.mode == VpnModes.PROXY_ONLY) persisted
+        else persisted.copy(httpProxy = true)
+        Aether.killStaleOwned()
+        if (Aether.isRunning()) {
+            return VpnResult(false, "Aether port ${Aether.SOCKS_PORT} is owned by another process")
+        }
         val core = Aether.ensureCore() ?: return VpnResult(
             false,
             "The Aether core is missing (fetch-cores.ps1 step 'aether' did not run?). " +
@@ -1071,9 +1098,9 @@ object VpnService {
             a,
             routesFile = routes?.absolutePath,
             ptDir = Aether.ptDir()?.absolutePath,
+            psiphonBinPath = Aether.psiphonBin()?.absolutePath,
         )
         AppLog.i("Aether", "starting core (protocol=${Aether.normalizeProtocol(a.protocol)}, scan=${a.scan})")
-        Aether.kill()
         // Launch through cmd.exe with stdout+stderr redirected into a log
         // file, then recover the REAL aether pid from cmd's pid. Before this
         // the core's output went nowhere: the 2026-09-21 regression (an
@@ -1088,12 +1115,14 @@ object VpnService {
         val launchLine = Aether.buildLaunchLine(core.absolutePath, args, coreLog.absolutePath)
         val cmdPid = HiddenRun.startDetachedRaw(launchLine, core.parentFile, Aether.envFor(a))
             ?: return VpnResult(false, "could not start aether.exe (process creation failed)")
+        Aether.trackPid(cmdPid)
         val pid = HiddenRun.findChildPid(cmdPid, "aether.exe", attempts = 20) ?: cmdPid
         Aether.trackPid(pid)
 
         // Wait for the local SOCKS listener. The core binds it once its
-        // gateway is validated (or immediately in --no-data-check mode).
-        val budgetMs = (30 + a.validateSecs * 6).coerceAtMost(180) * 1000L
+        // gateway is validated (or immediately in --no-data-check mode), and
+        // the budget must cover its own scan — see [Aether.coldStartBudgetMs].
+        val budgetMs = Aether.coldStartBudgetMs(a)
         var waited = 0L
         var sentLines = 0
         while (waited < budgetMs && !Aether.isRunning()) {
@@ -1112,14 +1141,39 @@ object VpnService {
         }
         if (!Aether.isRunning()) {
             Aether.kill()
+            // The advice is protocol-aware because the failure modes are
+            // genuinely different. Measured on 2026-09-24: MASQUE's scan
+            // deadline is 120 s and a QUIC-blocking network never yields a
+            // gateway, while WireGuard/gool found one in seconds — so telling a
+            // user stuck on MASQUE to "try another scan mode" sends them down
+            // the wrong path entirely.
+            val advice = if (Aether.normalizeProtocol(a.protocol) == "masque") {
+                "This network appears to block QUIC/HTTP-3, which MASQUE needs — " +
+                    "switch the protocol to WireGuard (or enable the HTTP/2 transport), " +
+                    "or pick a stronger scan mode."
+            } else {
+                "Try a stronger scan mode, the MASQUE protocol, or a different IP mode."
+            }
             return VpnResult(
                 false,
-                "Aether did not open its local proxy — the scan found no reachable gateway " +
-                    "(try another scan mode, the HTTP/2 transport, or a different IP mode)." +
-                    aetherLogTail(coreLog),
+                "Aether did not open its local proxy — the scan found no reachable gateway. " +
+                    advice + aetherLogTail(coreLog),
             )
         }
-        if (!Aether.verifyTraffic(15_000)) {
+        if (!Aether.ownsListener(Aether.SOCKS_PORT)) {
+            Aether.kill()
+            return VpnResult(false, "Aether SOCKS listener is not owned by the launched core.")
+        }
+        val trafficReady = if (Aether.providerOnly(a)) {
+            val readinessBudget = (budgetMs - waited)
+                .coerceAtLeast(30_000L)
+                .coerceAtMost(Int.MAX_VALUE.toLong())
+                .toInt()
+            Aether.verifyPrimaryProvider(a, readinessBudget)
+        } else {
+            Aether.verifyTraffic(15_000)
+        }
+        if (!trafficReady) {
             Aether.kill()
             Proxy.restoreState()
             return VpnResult(
@@ -1129,6 +1183,55 @@ object VpnService {
                     "or check whether this network blocks QUIC." + aetherLogTail(coreLog),
             )
         }
+
+        if (a.httpProxy && !Aether.verifyHttp(a)) {
+            Aether.kill()
+            Proxy.restoreState()
+            return VpnResult(
+                false,
+                "Aether SOCKS started but its HTTP listener carried no traffic." + aetherLogTail(coreLog),
+            )
+        }
+
+        val secondaryProviders = Aether.secondarySocksPorts(a)
+        if (secondaryProviders.isNotEmpty()) {
+            var providerWaited = 0L
+            val providerBudget = Aether.coldStartBudgetMs(a)
+            while (
+                providerWaited < providerBudget &&
+                secondaryProviders.any { (port, _) -> !Aether.isPortOpen(port) } &&
+                HiddenRun.isPidAlive(pid)
+            ) {
+                delay(500)
+                providerWaited += 500
+            }
+            val readinessTimeoutMs = (providerBudget - providerWaited)
+                .coerceAtLeast(30_000L)
+                .coerceAtMost(Int.MAX_VALUE.toLong())
+                .toInt()
+            val unownedProvider = secondaryProviders.firstOrNull { (port, _) -> !Aether.ownsListener(port) }
+            if (unownedProvider != null) {
+                Aether.kill()
+                Proxy.restoreState()
+                return VpnResult(
+                    false,
+                    "Aether privacy provider ${unownedProvider.second} is not owned by the launched core.",
+                )
+            }
+            if (!Aether.verifySecondaryProviders(a, readinessTimeoutMs)) {
+                Aether.kill()
+                Proxy.restoreState()
+                return VpnResult(
+                    false,
+                    "Aether tunnel started but its privacy provider did not become ready. " +
+                        secondaryProviders.joinToString(", ") { "${it.second}:${it.first}" } +
+                        aetherLogTail(coreLog),
+                )
+            }
+        }
+
+        val httpPort = Aether.httpPort(a)
+        val httpBind = Aether.httpBind(a)
 
         // TUN mode: wrap the running Aether SOCKS into the sing-box engine —
         // the same full-system/split machinery every proxy protocol uses.
@@ -1146,7 +1249,7 @@ object VpnService {
                 ),
             )
             if (!started) {
-                Proxy.enable(Aether.HTTP_PORT)
+                aetherProxyFailure(httpPort)?.let { return it }
                 AppLog.i("Aether", "TUN declined — connected via system proxy instead")
                 return VpnResult(true, "Connected (system proxy) — ⚠ $TUN_DECLINED_MSG")
             }
@@ -1157,22 +1260,22 @@ object VpnService {
             if (!SingBox.isRunning()) {
                 SingBox.kill()
                 killTunCore()
-                Proxy.enable(Aether.HTTP_PORT)
+                aetherProxyFailure(httpPort)?.let { return it }
                 AppLog.i("Aether", "TUN core did not come up — connected via system proxy instead")
                 return VpnResult(
                     true,
-                    "Connected (system proxy on ${Aether.HTTP_BIND}) — " +
+                    "Connected (system proxy on $httpBind) — " +
                         "⚠ TUN mode could not start, so this session is not a full-system tunnel.",
                 )
             }
             if (split == null) {
                 if (!SingBox.verifyDirectTraffic() && !SingBox.verifyTraffic()) {
                     killTunCore()
-                    Proxy.enable(Aether.HTTP_PORT)
+                    aetherProxyFailure(httpPort)?.let { return it }
                     AppLog.e("Aether", "TUN up but no traffic passed")
                     return VpnResult(
                         true,
-                        "Connected (system proxy on ${Aether.HTTP_BIND}) — " +
+                        "Connected (system proxy on $httpBind) — " +
                             "⚠ TUN mode came up but carried no traffic.",
                     )
                 }
@@ -1190,10 +1293,10 @@ object VpnService {
                             "Run as administrator or check the wintun driver (app log).",
                     )
                 }
-                Proxy.enable(Aether.HTTP_PORT)
+                aetherProxyFailure(httpPort)?.let { return it }
                 return VpnResult(
                     true,
-                    "Connected (system proxy on ${Aether.HTTP_BIND}) — " +
+                    "Connected (system proxy on $httpBind) — " +
                         "the per-app component did not start, so routing is not restricted by app.",
                 )
             }
@@ -1201,10 +1304,10 @@ object VpnService {
                 AppLog.e("Aether", "tunnel up but the DIRECT leg carries nothing - whole-proxy fallback")
                 SingBox.kill()
                 killTunCore()
-                Proxy.enable(Aether.HTTP_PORT)
+                aetherProxyFailure(httpPort)?.let { return it }
                 return VpnResult(
                     true,
-                    "Connected through system proxy on ${Aether.HTTP_BIND} for ALL apps — ⚠ " +
+                    "Connected through system proxy on $httpBind for ALL apps — ⚠ " +
                         "per-app routing was aborted: the non-VPN internet path failed verification.",
                 )
             }
@@ -1217,17 +1320,30 @@ object VpnService {
         }
 
         if (settings.mode == VpnModes.PROXY_ONLY) {
-            val eps = Preflight.endpointSummary("aether")
+            // Aether's ports are FIXED (outside the base-port pool), so the
+            // summary must name them — the ProxyPorts defaults would print
+            // ports nothing listens on in this mode.
+            val eps = if (a.httpProxy) {
+                Preflight.endpointSummary("aether", base = Aether.SOCKS_PORT, httpPort = httpPort)
+            } else {
+                "SOCKS ${Aether.BIND}"
+            }
             AppLog.i("Aether", "Connected via Aether (proxy only): $eps")
             return VpnResult(
                 true,
-                "Connected — LOCAL PROXY ONLY: SOCKS ${Aether.BIND}, HTTP ${Aether.HTTP_BIND}. " +
-                    "Windows settings are untouched.",
+                "Connected — LOCAL PROXY ONLY: SOCKS ${Aether.BIND}, HTTP " +
+                    "${if (a.httpProxy) httpBind else "off"}. Windows settings are untouched.",
             )
         }
-        Proxy.enable(Aether.HTTP_PORT)
+        aetherProxyFailure(httpPort)?.let { return it }
         AppLog.i("Aether", "Connected via Aether (system proxy)")
-        return VpnResult(true, "Connected (system proxy on ${Aether.HTTP_BIND})")
+        return VpnResult(true, "Connected (system proxy on $httpBind)")
+    }
+
+    private fun aetherProxyFailure(port: Int): VpnResult? {
+        if (Proxy.enable(port)) return null
+        Proxy.restoreState()
+        return VpnResult(false, "Windows system proxy could not be enabled on port $port")
     }
 
     /**

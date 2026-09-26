@@ -35,12 +35,48 @@ data class Settings(
     var autoReconnect: Boolean = true,
     /** Sort the config list by measured latency instead of insertion order. */
     var sortByLatency: Boolean = false,
+    /**
+     * Kill switch: the instant a live tunnel drops on its own, capture the
+     * device's traffic into a sink that routes nowhere, so nothing escapes to
+     * the bare network while the tunnel is down.
+     *
+     * Desktop parity: the Windows build does this with firewall rules
+     * (KillSwitchCleanup). Android has one VPN slot, so the sink is a real
+     * second tunnel whose only outbound is `block`.
+     */
+    var killSwitch: Boolean = false,
+    /** Visual theme — one of [THEMES]: "dark" (default) or "light". */
+    var theme: String = THEME_DARK,
+    /** Whether decorative motion plays at all (desktop: animationsEnabled). */
+    var animationsEnabled: Boolean = true,
+    /** Motion intensity — "full" | "reduced" | "off" (desktop: animationLevel). */
+    var animationLevel: String = ANIM_FULL,
 ) {
     companion object {
         const val DEFAULT_DNS = "1.1.1.1"
 
         /** Resolvers offered in the settings picker (all DoH-capable). */
         val DNS_CHOICES = listOf("1.1.1.1", "8.8.8.8", "9.9.9.9", "208.67.222.222")
+
+        const val THEME_DARK = "dark"
+        const val THEME_LIGHT = "light"
+        val THEMES = listOf(THEME_DARK, THEME_LIGHT)
+
+        const val ANIM_FULL = "full"
+        const val ANIM_REDUCED = "reduced"
+        const val ANIM_OFF = "off"
+        val ANIM_LEVELS = listOf(ANIM_FULL, ANIM_REDUCED, ANIM_OFF)
+
+        fun themeLabel(theme: String): String = when (theme) {
+            THEME_LIGHT -> "روشن"
+            else -> "تیره"
+        }
+
+        fun animLabel(level: String): String = when (level) {
+            ANIM_REDUCED -> "کم"
+            ANIM_OFF -> "خاموش"
+            else -> "کامل"
+        }
     }
 }
 

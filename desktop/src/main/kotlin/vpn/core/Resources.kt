@@ -18,8 +18,12 @@ object Resources {
             return false
         }
         target.parentFile?.mkdirs()
+        // Files.copy does NOT close its source: the jar-backed stream stayed
+        // open for the whole app run, leaking one handle per extracted core
+        // file (and on Windows an open handle also blocks the jar from being
+        // replaced/updated). Close it explicitly on every path.
         runCatching {
-            Files.copy(stream, target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            stream.use { Files.copy(it, target.toPath(), StandardCopyOption.REPLACE_EXISTING) }
         }.onFailure { e ->
             AppLog.e("Resources", "Failed to copy $resourcePath: ${e.message}")
             return false

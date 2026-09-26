@@ -115,7 +115,7 @@ internal object VpnStatusProbe {
         var heading: String? = null
         for (rawLine in ipconfigText.lineSequence()) {
             val line = rawLine.trim()
-            if (ADAPTER_SECTION_START.matches(line)) {
+            if (isAdapterHeading(line)) {
                 if (live) return true
                 // New adapter block: reset state.
                 mediaDisconnected = false
@@ -182,6 +182,23 @@ internal object VpnStatusProbe {
             line.contains("연간됨", ignoreCase = true) || // ko
             line.contains("verbroken", ignoreCase = true) || // nl
             line.contains("odłączon", ignoreCase = true) // pl
+
+    /**
+     * Shape of an adapter HEADING line, e.g. "Ethernet adapter Ethernet:" or
+     * "Unknown adapter MultiVPN:".
+     *
+     * The `. .` guard is defensive, not load-bearing: ipconfig prints the
+     * property line `Connection-specific DNS Suffix  . :` inside every adapter
+     * block, but [ADAPTER_SECTION_START]'s leading `^[^\s]` already consumes
+     * that line's first character, so "Connection" can never match — and the
+     * same holds for the localized spellings ("Verbindungsspezifisches…",
+     * "…propre à la connexion"). Pinned by TunnelStatusTest so a future
+     * rewrite of the pattern cannot silently turn every DNS-suffix line into a
+     * block boundary (which would drop the real heading and make our own
+     * 172.19.x TUN address read as down).
+     */
+    private fun isAdapterHeading(line: String): Boolean =
+        !line.contains(". .") && ADAPTER_SECTION_START.matches(line)
 
     private val ADAPTER_SECTION_START =
         Regex("^[^\\s].*(adapter|Adapter|Connection|Verbindung|Connexion|connessione).*:\\s*$")

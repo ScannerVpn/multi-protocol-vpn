@@ -113,7 +113,15 @@ else
     fi
     "$EASYRSA/easyrsa" --batch --days=3650 gen-req server nopass > /dev/null 2>&1
     "$EASYRSA/easyrsa" --batch sign-req server server > /dev/null 2>&1
-    openvpn --genkey secret "$PKI/tls-crypt.key" > /dev/null 2>&1
+    # `openvpn --genkey secret <file>` is the OpenVPN 2.5+ spelling; 2.4
+    # (Ubuntu 20.04, Debian 10) only understands `--genkey --secret <file>`.
+    # The old single form failed silently (output discarded) and left
+    # server.conf pointing at a tls-crypt.key that was never created, so the
+    # service came up dead on every 2.4 host.
+    if ! openvpn --genkey secret "$PKI/tls-crypt.key" > /dev/null 2>&1; then
+        openvpn --genkey --secret "$PKI/tls-crypt.key" > /dev/null 2>&1 || \
+            warn "could not generate tls-crypt.key (openvpn --genkey failed)"
+    fi
     cp "$PKI/issued/server.crt" "$PKI/private/server.key" "$PKI/ca.crt" "$PKI/tls-crypt.key" /etc/openvpn/server/ 2>/dev/null || true
     PORT=1194; PROTO=udp; CA="$PKI/ca.crt"; TA="$PKI/tls-crypt.key"
 
@@ -192,7 +200,12 @@ for p in "$PKI/issued/server.crt" "/etc/openvpn/server/server.crt" "/etc/openvpn
 done
 SERVER_CN=""
 if [ -n "$SERVER_CRT" ]; then
-    SERVER_CN="$(openssl x509 -in "$SERVER_CRT" -noout -subject 2>/dev/null | sed -n 's/.*CN=\([^,/]*\).*/\1/p' | tr -d ' ' || true)"
+    # OpenSSL 3 prints "subject=CN = server" (spaces around '='); OpenSSL 1.1
+    # printed "subject=CN=server". The old pattern required a literal "CN=", so
+    # on every OpenSSL 3 host it matched nothing and the CN silently fell back
+    # to "server" — pinning the wrong name for any PKI with a custom CN.
+    SERVER_CN="$(openssl x509 -in "$SERVER_CRT" -noout -subject 2>/dev/null \
+        | sed -n 's/.*CN[[:space:]]*=[[:space:]]*\([^,/]*\).*/\1/p' | tr -d ' ' || true)"
 fi
 [ -z "$SERVER_CN" ] && SERVER_CN="server"
 

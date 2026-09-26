@@ -85,7 +85,14 @@ object WireProxy {
         val sb = StringBuilder()
         sb.appendLine("[Interface]")
         sb.appendLine("PrivateKey = $privateKey")
-        sb.appendLine("Address = ${address.split(',').first().trim()}")
+        // Prefer the IPv4 address: the wireproxy netstack device is IPv4-only
+        // (which is also why `::/0` is stripped from AllowedIPs below), so a
+        // conf that lists an IPv6 address FIRST — common in third-party and
+        // AmneziaWG exports — used to hand the device an address it cannot
+        // carry and the tunnel never came up.
+        val addresses = address.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+        val chosenAddress = addresses.firstOrNull { !it.contains(':') } ?: addresses.first()
+        sb.appendLine("Address = $chosenAddress")
         sb.appendLine("DNS = ${dns.joinToString(", ")}")
         sb.appendLine("MTU = $mtu")
         if (amnezia) {

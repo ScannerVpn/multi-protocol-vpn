@@ -131,6 +131,14 @@ class PreflightTest {
     }
 
     @Test
+    fun `aether uses its fixed listeners instead of the shared proxy pool`() {
+        assertEquals(
+            "SOCKS 127.0.0.1:10819 · HTTP 127.0.0.1:10820",
+            Preflight.endpointSummary("aether"),
+        )
+    }
+
+    @Test
     fun `isElevated never claims elevation off-Windows`() {
         assertEquals(false, Preflight.isElevated(windows = false))
     }

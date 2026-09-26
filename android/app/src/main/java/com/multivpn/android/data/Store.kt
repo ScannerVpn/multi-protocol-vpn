@@ -47,11 +47,31 @@ class Store(private val dir: File) {
 
     fun loadConfigs(): List<VpnConfig> =
         loadList("configs.json", VpnConfig.serializer())
-            .map { c -> c.copy(xrayLink = SecretKeeper.unwrap(c.xrayLink)) }
+            .map { c ->
+                c.copy(
+                    xrayLink = SecretKeeper.unwrap(c.xrayLink),
+                    p12Pass = SecretKeeper.unwrap(c.p12Pass),
+                    psk = SecretKeeper.unwrap(c.psk),
+                )
+            }
 
     fun saveConfigs(list: List<VpnConfig>) =
-        atomicSaveList("configs.json", list.map { c -> c.copy(xrayLink = SecretKeeper.protect(c.xrayLink)) },
-            VpnConfig.serializer())
+        atomicSaveList(
+            "configs.json",
+            list.map { c ->
+                c.copy(
+                    xrayLink = SecretKeeper.protect(c.xrayLink),
+                    // p12Pass is the IKEv2 client-key passphrase and psk is the
+                    // WireGuard pre-shared key. Both are credentials, and the
+                    // shared model documents them as encrypted at rest — the
+                    // desktop wraps exactly these three fields. Wrapping only
+                    // xrayLink left them as plaintext in configs.json.
+                    p12Pass = SecretKeeper.protect(c.p12Pass),
+                    psk = SecretKeeper.protect(c.psk),
+                )
+            },
+            VpnConfig.serializer(),
+        )
 
     // ------------------------------------------------------------------
     // Subscriptions (with the lenient rescue)
@@ -169,19 +189,30 @@ class Store(private val dir: File) {
         writeAtomically(name, json.encodeToString(ListSerializer(serializer), list))
     }
 
-    /** writeText() truncates first; write to a temp sibling then rename. */
-    private fun writeAtomically(name: String, text: String) {
+    /**
+     * writeText() truncates first; write to a temp sibling then rename.
+     *
+     * @return true when the target really was replaced. A false means the
+     *         caller's change is NOT on disk — the previous body swallowed the
+     *         failure entirely (a full disk or a locked file discarded every
+     *         settings/config change while the UI reported success), so the
+     *         outcome is reported and logged now.
+     */
+    private fun writeAtomically(name: String, text: String): Boolean {
         val target = File(dir, name)
         val tmp = File(dir, "$name.tmp")
-        runCatching {
+        val ok = runCatching {
             tmp.writeText(text)
             try {
                 Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
             } catch (_: Exception) {
                 Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
             }
-        }
+        }.onFailure { e ->
+            AppLog.e("Store", "could not save $name: ${e.message}")
+        }.isSuccess
         if (tmp.exists()) tmp.delete()
+        return ok
     }
 
     companion object {
