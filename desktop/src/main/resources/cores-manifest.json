@@ -3,22 +3,22 @@
   "cores": {
     "xray": {
       "archive": "xray.zip",
-      "sha256": "246bc7a790c62a92fb8356f45fd6004f14be3fdc93cd73ac5b97e5d4ca155ae2",
+      "sha256": "403f238a5dc31c652befce509b3a82227f3cf0f9c6863cb933d8fb33b24941c0",
       "version": "Xray-core v26.3.27"
     },
     "singbox": {
       "archive": "singbox.zip",
-      "sha256": "3bf89013ce1e94c196a313a887605f3f2ddcc83e1ec050d2e7cdc1c4e2ba2fb1",
+      "sha256": "3f92dd104b14eaeec5a85099964ee35cb088ac49d2beea4d337e68d08e92f933",
       "version": "hiddify-core v4.1.0"
     },
     "wireproxy": {
       "archive": "wireproxy.zip",
-      "sha256": "0b2aa811363a29e4f649c3f9cb7c7519c4ec6a8d48b6c3b3e06630c5ff21d06e",
+      "sha256": "8ea14460b9968cd2b7d8ca20006c2d45c61c34a063bb2015d8bdae9fefffe10a",
       "version": "awg31"
     },
     "aether": {
       "archive": "aether.zip",
-      "sha256": "d424f1e8af3fa913f8381f48fe539e47d6eeed49a42467a9c0d9857e424566e4",
+      "sha256": "3f25a949c1a460342c6b51b082d668f3b1081c0b2a75c1ecc9494e88b9a01f84",
       "version": "2.1.0"
     }
   }

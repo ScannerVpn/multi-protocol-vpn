@@ -68,6 +68,13 @@ foreach ($core in $cores.Keys) {
     try {
         foreach ($s in $sources) {
             $entry = $zip.CreateEntry(($s.Rel -replace '\\', '/'), [System.IO.Compression.CompressionLevel]::Optimal)
+            # Deterministic archive: the zip format stores each entry's file
+            # mtime, and those mtimes change with every checkout/copy (fetch
+            # scripts rewrite the files), so re-packing byte-identical cores
+            # would yield a DIFFERENT sha256 and a slim build would reject
+            # its own published archive. Pin every entry to one fixed stamp so
+            # the same inputs always produce the same zip.
+            $entry.LastWriteTime = [datetimeoffset]::new(2020, 1, 1, 0, 0, 0, [timespan]::Zero)
             $es = $entry.Open()
             try {
                 $fs = [System.IO.File]::OpenRead($s.Path)
