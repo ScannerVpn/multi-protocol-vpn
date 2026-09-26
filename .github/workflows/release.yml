@@ -65,10 +65,15 @@ jobs:
             --repo "${{ github.repository }}" \
             --name MultiVPN-Windows-x64 \
             --dir dist
-          # EXE only: drop the source-commit marker, keep the checksum file.
+          # EXE only: drop the source-commit marker.
           rm -f dist/wireproxy-source-commit.txt
           test -n "$(ls dist/*.exe 2>/dev/null)" \
             || { echo "::error::the artifact contained no .exe"; exit 1; }
+          # REGENERATE the checksum file. The one windows-build stages covers
+          # every file in ITS stage dir, including the marker just deleted — so
+          # shipping it verbatim would make `sha256sum -c SHA256SUMS.txt` fail
+          # with "no such file" on a release that is otherwise fine.
+          ( cd dist && sha256sum ./*.exe > SHA256SUMS.txt && cat SHA256SUMS.txt )
           ls -la dist
 
       - name: Verify the EXE name matches the tag version
