@@ -1,0 +1,106 @@
+name: release
+
+# Publishes the GitHub release for a version tag, EXE only.
+#
+# Why this is a SEPARATE workflow instead of a job inside windows-build.yml:
+# windows-build is path-filtered to desktop/**, and GitHub applies `paths` to
+# tag pushes as well — so a tag pointing at a commit that only touched docs
+# (or a tag created after the fact) would silently never fire it. Tag pushes
+# here are never path-filtered, so a release can always be cut.
+#
+# It does NOT rebuild. It pulls the EXE artifact from the newest green
+# windows-build run, so the released binary is exactly the one whose tests
+# passed. GitHub's artifact blob storage is reachable from a runner (a local
+# sandbox/proxy may not be), which is why publishing lives here.
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release, e.g. v3.6.19'
+        required: true
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    name: Publish release (EXE only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Resolve the tag
+        id: tag
+        run: |
+          set -euo pipefail
+          TAG='${{ github.event.inputs.tag || github.ref_name }}'
+          case "$TAG" in
+            v*) ;;
+            *) echo "::error::tag '$TAG' must start with 'v' (e.g. v3.6.19)"; exit 1 ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "releasing $TAG"
+
+      # A runner has unrestricted network; a local sandbox often cannot reach
+      # productionresultssa*.blob.core.windows.net at all.
+      - name: Download the EXE artifact from the newest green build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN_ID="$(gh api \
+            "repos/${{ github.repository }}/actions/workflows/windows-build.yml/runs?status=success&per_page=1" \
+            --jq '.workflow_runs[0].id')"
+          [ -n "$RUN_ID" ] || { echo "::error::no successful windows-build run found"; exit 1; }
+          echo "using windows-build run $RUN_ID"
+          gh run download "$RUN_ID" \
+            --repo "${{ github.repository }}" \
+            --name MultiVPN-Windows-x64 \
+            --dir dist
+          # EXE only: drop the source-commit marker, keep the checksum file.
+          rm -f dist/wireproxy-source-commit.txt
+          test -n "$(ls dist/*.exe 2>/dev/null)" \
+            || { echo "::error::the artifact contained no .exe"; exit 1; }
+          ls -la dist
+
+      - name: Verify the EXE name matches the tag version
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          WANT="MultiVPN-${VERSION}.exe"
+          ACTUAL="$(basename "$(ls dist/*.exe | head -1)")"
+          echo "artifact: $ACTUAL / tag expects: $WANT"
+          if [ "$ACTUAL" != "$WANT" ]; then
+            echo "::error::artifact is $ACTUAL but the tag expects $WANT — the newest green build is for a different version. Bump desktop/build.gradle.kts (val appVersion), let windows-build go green, then tag."
+            exit 1
+          fi
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "release $TAG already exists — uploading assets (clobber)"
+            gh release upload "$TAG" dist/* \
+              --repo "${{ github.repository }}" --clobber
+          else
+            gh release create "$TAG" dist/* \
+              --repo "${{ github.repository }}" \
+              --title "MultiVPN $VERSION" \
+              --generate-notes
+          fi
+          gh release view "$TAG" --repo "${{ github.repository }}" \
+            --json url,assets \
+            --jq '"\(.url)\n" + (.assets[] | "  \(.name)  \(.size) bytes")'
