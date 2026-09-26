@@ -362,8 +362,7 @@ fun App() {
 }
 
 /**
- * Compact-mode navigation, restyled to the user's mockup (2026-09-15) so the
- * desktop and Android bars are the same object:
+ * Compact-mode navigation, restyled to the user's mockup (2026-09-15):
  *
  *  - `bg-surface-container-lowest/85 backdrop-blur-xl` → a near-opaque
  *    [C.BgBottom] sheet that keeps the aurora faintly visible behind it;
