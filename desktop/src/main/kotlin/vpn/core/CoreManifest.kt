@@ -18,9 +18,18 @@ import java.io.File
  */
 internal object CoreManifest {
 
-    /** Resource dir + files for xray (vless / trojan / shadowsocks). */
+    /**
+     * Resource dir + files for xray (vless / trojan / shadowsocks).
+     *
+     * Only the exe ships: the client config used to reference exactly ONE geo
+     * rule (`geoip:private` for LAN bypass), and that rule is now written as
+     * literal private CIDRs (see `Xray.buildClientJson`). With no rule reading
+     * them, `geoip.dat`/`geosite.dat` were 29 MB of dead weight in the jar,
+     * the installer and every first-run/core-repair download — so they were
+     * dropped. Do not re-add them without a routing rule that needs them.
+     */
     const val XRAY_RES = "/bin/xray"
-    val XRAY_FILES = listOf("xray.exe", "geoip.dat", "geosite.dat")
+    val XRAY_FILES = listOf("xray.exe")
 
     /**
      * sing-box (hiddify-core) — hysteria2 and the TUN engine.
