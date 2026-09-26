@@ -256,12 +256,10 @@ object SshService {
             ?.use { it.readBytes() }?.decodeToString()
             ?: throw IllegalStateException("setup-wireguard.sh resource missing")
 
-        val prefix = if (server.username == "root") "" else "sudo "
-        val ipQuoted = shQuote(server.ip)
-        val mode = shQuote(if (amnezia) "amnezia" else "standard")
-        val versionArg = if (amnezia && awgVersion != null) " " + shQuote(awgVersion) else ""
-        val command = "${prefix}bash -s -- $ipQuoted $mode$versionArg <<'__VPN_SETUP_SCRIPT__'\n" +
-            script + "\n__VPN_SETUP_SCRIPT__"
+        val wgArgs = if (amnezia && awgVersion != null)
+            listOf(server.ip, if (amnezia) "amnezia" else "standard", awgVersion)
+        else listOf(server.ip, if (amnezia) "amnezia" else "standard")
+        val command = provisionCommand(script, server.username == "root", *wgArgs.toTypedArray())
 
         runCommandStreaming(server, command, timeoutSec = 600, onLine = onLine)
 
@@ -292,10 +290,7 @@ object SshService {
         onLine: (String) -> Unit = {},
     ): OvpnProvisionResult {
         val script = loadScript("setup-openvpn.sh")
-        val prefix = if (server.username == "root") "" else "sudo "
-        val ipQuoted = shQuote(server.ip)
-        val command = "${prefix}bash -s -- $ipQuoted <<'__VPN_SETUP_SCRIPT__'\n" +
-            script + "\n__VPN_SETUP_SCRIPT__"
+        val command = provisionCommand(script, server.username == "root", server.ip)
         runCommandStreaming(server, command, timeoutSec = 600, onLine = onLine)
         return withContext(Dispatchers.IO) {
             connect(server).use { client ->
@@ -323,10 +318,7 @@ object SshService {
         onLine: (String) -> Unit = {},
     ): String {
         val script = loadScript("setup-xray.sh")
-        val prefix = if (server.username == "root") "" else "sudo "
-        val ipQuoted = shQuote(server.ip)
-        val command = "${prefix}bash -s -- $ipQuoted ${shQuote(variant)} <<'__VPN_SETUP_SCRIPT__'\n" +
-            script + "\n__VPN_SETUP_SCRIPT__"
+        val command = provisionCommand(script, server.username == "root", server.ip, variant)
         return runCommandStreaming(server, command, timeoutSec = 600, onLine = onLine)
     }
 
@@ -336,9 +328,31 @@ object SshService {
      * escaped but sibling args (mode, awgVersion, variant) were not, and
      * awgVersion is derived from REMOTE scan output — a `'` in it broke out
      * of the quoting.
+     *
+     * `internal` (not private) solely so unit tests can pin the escaping:
+     * this is the only break-out guard on the root-shell provisioning path.
      */
-    private fun shQuote(value: String): String =
+    internal fun shQuote(value: String): String =
         "'" + value.replace("'", "'\\''") + "'"
+
+    /**
+     * Assemble the remote provisioning command: `[sudo ]bash -s -- <args> <<
+     * heredoc carrying [script]`. Every variadic [args] element goes through
+     * [shQuote]; with no args the `--` separator is omitted (scan-tunnels
+     * shape). Byte-for-byte identical to the command strings the provision
+     * call sites previously built inline (proven by scratch test before the
+     * call sites were switched; pinned by SshCommandTest).
+     */
+    internal fun provisionCommand(
+        script: String,
+        asRoot: Boolean,
+        vararg args: String,
+    ): String {
+        val prefix = if (asRoot) "" else "sudo "
+        val argPart = if (args.isEmpty()) "" else " -- " + args.joinToString(" ") { shQuote(it) }
+        return "${prefix}bash -s$argPart <<'__VPN_SETUP_SCRIPT__'\n" +
+            script + "\n__VPN_SETUP_SCRIPT__"
+    }
 
     private fun loadScript(name: String): String =
         SshService::class.java.classLoader?.getResourceAsStream(name)
@@ -352,8 +366,7 @@ object SshService {
      */
     suspend fun scanTunnels(server: ServerConfig, onLine: (String) -> Unit = {}): List<TunnelFound> {
         val script = loadScript("scan-tunnels.sh")
-        val prefix = if (server.username == "root") "" else "sudo "
-        val command = "${prefix}bash -s <<'__VPN_SETUP_SCRIPT__'\n$script\n__VPN_SETUP_SCRIPT__"
+        val command = provisionCommand(script, server.username == "root")
         val output = runCommandStreaming(server, command, timeoutSec = 120, onLine = onLine)
         return ScanTunnels.parse(output)
     }
@@ -364,10 +377,7 @@ object SshService {
         onLine: (String) -> Unit = {},
     ): String {
         val script = loadScript("setup-xray.sh")
-        val prefix = if (server.username == "root") "" else "sudo "
-        val ipQuoted = shQuote(server.ip)
-        val command = "${prefix}bash -s -- $ipQuoted 'vless' 'scan' <<'__VPN_SETUP_SCRIPT__'\n" +
-            script + "\n__VPN_SETUP_SCRIPT__"
+        val command = provisionCommand(script, server.username == "root", server.ip, "vless", "scan")
         return runCommandStreaming(server, command, timeoutSec = 300, onLine = onLine)
     }
 
