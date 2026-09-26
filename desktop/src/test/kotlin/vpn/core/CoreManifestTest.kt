@@ -8,12 +8,14 @@ import kotlin.test.assertTrue
 import kotlin.test.fail
 
 /**
- * Pins the three independent descriptions of "which files does each core need"
+ * Pins the four independent descriptions of "which files does each core need"
  * against each other:
  *
  *  1. [CoreManifest] — what the app extracts and checks at runtime;
  *  2. `fetch-cores.ps1` — what the build downloads into resources;
- *  3. the actual resource tree, when it has been populated.
+ *  3. `package-cores.ps1` — what goes into the pinned cores-v1 archives that
+ *     slim builds download at runtime;
+ *  4. the actual resource tree, when it has been populated.
  *
  * These lists used to be copy-pasted into four Kotlin files plus the fetcher,
  * and the README itself warned: "Adding a core file without updating its list
@@ -43,6 +45,25 @@ class CoreManifestTest {
     private fun psArray(script: String, name: String): List<String> {
         val m = Regex("\\$$name\\s*=\\s*@\\(([^)]*)\\)", RegexOption.DOT_MATCHES_ALL)
             .find(script) ?: fail("could not find \$$name in fetch-cores.ps1")
+        return Regex("'([^']+)'").findAll(m.groupValues[1])
+            .map { it.groupValues[1] }.toList()
+    }
+
+    private fun packagerScript(): String {
+        val f = File(moduleRoot(), "package-cores.ps1")
+        assertTrue(f.isFile, "package-cores.ps1 not found at ${f.absolutePath}")
+        return f.readText()
+    }
+
+    /**
+     * Extracts the `files = @(...)` list of one core from package-cores.ps1's
+     * `$cores = [ordered]@{...}` block — same parsing trick as [psArray], one
+     * step deeper into the nested hashtable literals.
+     */
+    private fun packagerFiles(core: String): List<String> {
+        val m = Regex("$core\\s*=\\s*@\\{[^}]*files\\s*=\\s*@\\(([^)]*)\\)", RegexOption.DOT_MATCHES_ALL)
+            .find(packagerScript())
+            ?: fail("could not find the '$core' files list in package-cores.ps1's \$cores block")
         return Regex("'([^']+)'").findAll(m.groupValues[1])
             .map { it.groupValues[1] }.toList()
     }
@@ -106,6 +127,48 @@ class CoreManifestTest {
             CoreManifest.AETHER_FILES.sorted(),
             psArray(fetchScript(), "aetherFiles").sorted(),
             "CoreManifest.AETHER_FILES and fetch-cores.ps1's \$aetherFiles disagree",
+        )
+    }
+
+    // package-cores.ps1 ships the cores-v1 archives the slim build downloads
+    // at runtime, and its header claims its file lists are "a copy of
+    // CoreManifest.kt ... CoreManifestTest pins all copies against each other"
+    // — these four tests are that pin. A drift means the published archive
+    // misses a file the app's completeness check demands, and a slim build
+    // then downloads a core it can never accept.
+    @Test
+    fun `xray file list matches the packager`() {
+        assertEquals(
+            CoreManifest.XRAY_FILES.sorted(),
+            packagerFiles("xray").sorted(),
+            "CoreManifest.XRAY_FILES and package-cores.ps1's xray files list disagree",
+        )
+    }
+
+    @Test
+    fun `singbox file list matches the packager`() {
+        assertEquals(
+            CoreManifest.SINGBOX_FILES.sorted(),
+            packagerFiles("singbox").sorted(),
+            "CoreManifest.SINGBOX_FILES and package-cores.ps1's singbox files list disagree",
+        )
+    }
+
+    @Test
+    fun `wireproxy file list matches the packager`() {
+        assertEquals(
+            CoreManifest.WIREPROXY_FILES.sorted(),
+            packagerFiles("wireproxy").sorted(),
+            "CoreManifest.WIREPROXY_FILES and package-cores.ps1's wireproxy files list disagree",
+        )
+    }
+
+    @Test
+    fun `aether file list matches the packager`() {
+        assertEquals(
+            CoreManifest.AETHER_FILES.sorted(),
+            packagerFiles("aether").sorted(),
+            "CoreManifest.AETHER_FILES and package-cores.ps1's aether files list disagree",
         )
     }
 
