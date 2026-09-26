@@ -10,7 +10,7 @@
     extract. Run this once before your first build.
 
     Fetched from the official upstream releases:
-      xray.exe + geoip.dat + geosite.dat   XTLS/Xray-core
+      xray.exe                             XTLS/Xray-core
       HiddifyCli.exe + hiddify-core.dll
         + libcronet.dll + wintun.dll       hiddify/hiddify-core
       openvpn.exe + OpenSSL DLLs           swupdate.openvpn.org (MSI)
@@ -164,7 +164,7 @@ New-Item -ItemType Directory -Force -Path $binRoot | Out-Null
 # ---------------------------------------------------------------- xray
 Step 'xray (vless / trojan / shadowsocks)'
 $xrayDir = Join-Path $binRoot 'xray'
-$xrayFiles = @('xray.exe', 'geoip.dat', 'geosite.dat')
+$xrayFiles = @('xray.exe')
 if (-not $Force -and (Complete-Set $xrayDir $xrayFiles)) {
     Info 'already present, skipping'
 } else {

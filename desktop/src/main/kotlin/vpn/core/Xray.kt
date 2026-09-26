@@ -172,7 +172,10 @@ $outbound,
     {"protocol": "freedom", "tag": "direct"}
   ],
   "routing": {"rules": [
-    {"type": "field", "ip": ["geoip:private"], "outboundTag": "direct"}
+    {"type": "field", "ip": [
+      "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
+      "172.16.0.0/12", "192.168.0.0/16", "::1/128", "fc00::/7", "fe80::/10"
+    ], "outboundTag": "direct"}
   ]}
 }
         """.trimIndent()
@@ -297,8 +300,8 @@ $outbound,
         if (forceDownload) {
             return@withContext downloadXrayBinary()
         }
-        // Repairs a partial download (exe without geoip.dat/geosite.dat) on the
-        // first call of the run; NOT on every ping (see extractBundleOnce).
+        // Repairs a missing/broken bundled exe on the first call of the
+        // run; NOT on every ping (see extractBundleOnce).
         extractBundleOnce()
         if (xrayComplete()) return@withContext exe()
 
@@ -326,7 +329,7 @@ $outbound,
                 }
                 java.util.zip.ZipFile(zip).use { zf ->
                     zf.entries().asSequence()
-                        .filter { it.name.endsWith("xray.exe") || it.name.endsWith(".dat") }
+                        .filter { it.name.endsWith("xray.exe") }
                         .forEach { e ->
                             // Files.copy does NOT close its source; the entry
                             // stream stayed open (one leaked handle per core
