@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import vpn.core.AppLog
+import vpn.core.SecretBox
 import vpn.core.Storage
 import vpn.core.VpnService
 import vpn.core.VpnStatus
@@ -161,6 +162,22 @@ fun SettingsScreen() {
         Spacer(Modifier.height(16.dp))
         SectionTitle("Maintenance")
         GlassCard {
+            // P3-12: SecretBox.protect fails OPEN — when Windows DPAPI errors
+            // the value is stored as PLAINTEXT and lastProtectFailed is set.
+            // Surface the degraded at-rest protection here so the user can
+            // act (check the app log) instead of never finding out. Off
+            // Windows protect() never sets the flag, so the guard keeps this
+            // row invisible on Linux/macOS.
+            if (SecretBox.isWindows && SecretBox.lastProtectFailed) {
+                Text(
+                    "Windows could not encrypt some secrets — they are stored as plain text on this PC. " +
+                        "Check the app log for details.",
+                    color = C.Error,
+                    fontSize = 11.5.sp,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                )
+                Spacer(Modifier.height(4.dp))
+            }
             ActionRow(Icons.Filled.FolderOpen, "Open data folder", "Configs, certificates, cores and logs") {
                 runCatching { Desktop.getDesktop().open(Storage.dataDir) }
             }
