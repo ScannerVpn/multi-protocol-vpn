@@ -441,12 +441,34 @@ $route}""".trimIndent()
     ): String {
         val p = link.params
         val sni = p["sni"] ?: p["peer"] ?: ""
-        val insecure = p["insecure"] == "1" || p["allowInsecure"] == "1" || sni.isBlank()
+        // SECURITY: insecure is ONLY honored from an explicit user parameter.
+        // A blank SNI used to disable verification silently, so any ordinary
+        // hysteria2 link without the optional sni/peer param ran with no
+        // certificate checks — an on-path attacker could terminate the TLS
+        // inside "the VPN". Unverifiable must fail loudly, not run unverified.
+        val insecure = p["insecure"] == "1" || p["allowInsecure"] == "1"
+        // Effective server name: explicit SNI wins; otherwise fall back to the
+        // hostname when the server is named (an IP literal cannot serve as a
+        // meaningful TLS SNI / certificate name).
+        val effectiveSni = when {
+            sni.isNotBlank() -> sni
+            !isIpLiteral(link.address) -> link.address
+            else -> {
+                if (!insecure) {
+                    AppLog.e(
+                        "SingBox",
+                        "hysteria2 server ${link.address} has no SNI: certificate " +
+                            "verification stays ON, the connection may fail",
+                    )
+                }
+                ""
+            }
+        }
         val obfs = if (p["obfs"].isNullOrBlank()) "" else """
             ,
       "obfs": {"type": ${q(p["obfs"])}, "password": ${q(p["obfs-password"] ?: p["obfs_password"])}}
         """.trimIndent()
-        val sniLine = if (sni.isBlank()) "" else ", \"server_name\": ${q(sni)}"
+        val sniLine = if (effectiveSni.isBlank()) "" else ", \"server_name\": ${q(effectiveSni)}"
         val inbounds = if (tun) tunInbounds() else "[\n    ${mixedInbound()}\n  ]"
         val route = if (tun) {
             splitRoute(splitMode, splitApps, "hy2-out")
@@ -497,6 +519,13 @@ $route
             throw IllegalStateException("sing-box route references missing outbound '$it'")
         }
         return json
+    }
+
+    /** True for IPv4 dotted-quad and IPv6 (colon-bearing, brackets stripped) literals. */
+    private fun isIpLiteral(host: String): Boolean {
+        if (host.contains(':')) return true // IPv6 literal (ProxyLink already drops the brackets)
+        val parts = host.split('.')
+        return parts.size == 4 && parts.all { it.isNotEmpty() && it.all(Char::isDigit) }
     }
 
     // ------------------------------------------------------------------
