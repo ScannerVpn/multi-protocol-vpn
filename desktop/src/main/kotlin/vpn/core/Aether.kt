@@ -160,18 +160,42 @@ object Aether {
             fileSha256(File(dir, "pt/lyrebird.exe")) == LYREBIRD_SHA256 &&
             fileSha256(File(dir, "pt/psiphon-tunnel-core.exe")) == PSIPHON_SHA256
 
-    private fun extractBundleOnce() {
+    private fun extractBundleOnce(allowDownload: Boolean) {
         if (!CoreManifest.shouldExtract(extractAttempts.get(), coreComplete())) return
         synchronized(extractLock) {
             if (!CoreManifest.shouldExtract(extractAttempts.get(), coreComplete())) return
             extractAttempts.incrementAndGet()
-            val copied = Resources.extractAll(CoreManifest.AETHER_RES, CoreManifest.AETHER_FILES, dir)
-            if (copied > 0) AppLog.i("Aether", "Extracted $copied/${CoreManifest.AETHER_FILES.size} files from resources")
+            // Acquisition (bundled extract first, pinned download only if the
+            // bundle cannot satisfy the SHA-256 pins) now lives in
+            // [CoreAcquire.ensure]; the throttle/lock above is unchanged.
+            CoreAcquire.ensure(
+                "aether", CoreManifest.AETHER_RES, CoreManifest.AETHER_FILES, dir,
+                allowDownload, complete = { coreComplete() },
+            )
         }
     }
 
-    fun ensureCore(allowExtract: Boolean = true): File? {
-        if (allowExtract) extractBundleOnce()
+    /**
+     * Returns the core exe only when every pinned hash matches
+     * ([coreComplete]). [allowDownload] additionally permits acquiring a
+     * missing/broken core from the pinned [CoreCatalog] archive (the archive
+     * is built FROM our bundled files, so its contents still satisfy the
+     * per-file SHA-256 constants above).
+     *
+     * It defaults to true ON PURPOSE: the slim build (`-PslimCores`) ships no
+     * bundled cores, and the catalog download is the only way it can ever
+     * acquire Aether — a false default makes the protocol permanently
+     * unconnectable there (Vpn.kt connects via `Aether.ensureCore()`). This
+     * mirrors SingBox and WireProxy, which also default to true. The risk the
+     * old false default guarded against — repeated re-acquisition on the ping
+     * hot path — does not exist here: Aether measures latency THROUGH the
+     * running session core (see the class KDoc), so no per-ping `ensureCore`
+     * fan-out can turn into a download storm, and [extractBundleOnce] keeps
+     * the per-run shouldExtract/MAX_EXTRACT_ATTEMPTS/lock throttle around
+     * every acquisition attempt regardless of which source serves it.
+     */
+    fun ensureCore(allowExtract: Boolean = true, allowDownload: Boolean = true): File? {
+        if (allowExtract) extractBundleOnce(allowDownload)
         return exe()?.takeIf { coreComplete() }
     }
 

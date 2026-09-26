@@ -36,11 +36,37 @@ object WireProxy {
 
     fun exe(): File? = File(dir, "wireproxy.exe").takeIf { it.exists() }
 
-    /** Extracts the bundled binary; null when it is missing from resources. */
-    suspend fun ensureCore(): File? = withContext(Dispatchers.IO) {
-        if (exe() == null) {
-            Resources.extractAll(CoreManifest.WIREPROXY_RES, CoreManifest.WIREPROXY_FILES, dir)
-            AppLog.i("WireProxy", "Extracted wireproxy from resources")
+    /**
+     * Per-run acquire guard — same shape as [Xray.extractBundleOnce]: with a
+     * missing core the ping path calls [ensureCore] once per config, and the
+     * bundled extract (or a pinned download) must not become a copy/fetch
+     * storm. Bounded by [CoreManifest.MAX_EXTRACT_ATTEMPTS].
+     */
+    private val acquireAttempts = java.util.concurrent.atomic.AtomicInteger(0)
+    private val acquireLock = Any()
+
+    /** Test seam: forget this run's acquisition so the next call acquires again. */
+    internal fun resetAcquisitionState() = acquireAttempts.set(0)
+
+    /**
+     * Makes the core available: bundled resources first, then — when the
+     * bundle is absent/incomplete AND [allowDownload] — the sha256-pinned
+     * archive from [CoreCatalog] via [CoreAcquire.ensure]. Never an ad-hoc
+     * URL guess.
+     */
+    suspend fun ensureCore(allowDownload: Boolean = true): File? = withContext(Dispatchers.IO) {
+        val complete = CoreManifest.allPresent(dir, CoreManifest.WIREPROXY_FILES)
+        if (!complete) {
+            synchronized(acquireLock) {
+                val now = CoreManifest.allPresent(dir, CoreManifest.WIREPROXY_FILES)
+                if (!now && CoreManifest.shouldExtract(acquireAttempts.get(), false)) {
+                    acquireAttempts.incrementAndGet()
+                    CoreAcquire.ensure(
+                        "wireproxy", CoreManifest.WIREPROXY_RES,
+                        CoreManifest.WIREPROXY_FILES, dir, allowDownload,
+                    )
+                }
+            }
         }
         exe()
     }
