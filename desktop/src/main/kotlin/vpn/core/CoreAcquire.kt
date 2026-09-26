@@ -1,6 +1,7 @@
 package vpn.core
 
 import java.io.File
+import java.io.FileOutputStream
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -110,24 +111,39 @@ internal object CoreAcquire {
         // The ONLY URL we will touch: baseUrl + the checked-in archive name.
         val url = "${catalog.baseUrl}/${entry.archive}"
         AppLog.i("CoreAcquire", "$core: downloading ${entry.archive} (${entry.version})")
+        // Publish the fetch for the Settings progress bar. The seam [fetchArchive]
+        // (and the real [httpFetch]) reports bytes back into CoreProgress.
+        CoreProgress.begin(core)
         val zip = File.createTempFile("multivpn_core_${core}_", ".zip")
         try {
             if (!fetchArchive(url, zip) || !zip.exists() || zip.length() == 0L) {
                 AppLog.e("CoreAcquire", "$core: fetch failed")
+                CoreProgress.error("Download failed")
                 return false
             }
             // MANDATORY pin check. Wrong/short/non-hex hash -> hard failure;
             // we NEVER unpack, let alone execute, an unverified archive.
+            CoreProgress.phase(CoreProgress.Phase.Verifying)
             if (!CoreCatalog.verifyArchive(zip, entry.sha256)) {
                 AppLog.e("CoreAcquire", "$core: sha256 mismatch - archive rejected, nothing installed")
+                CoreProgress.error("Checksum mismatch - archive rejected")
                 return false
             }
-            if (!unpack(zip, targetDir)) return false
+            CoreProgress.phase(CoreProgress.Phase.Extracting)
+            if (!unpack(zip, targetDir)) {
+                CoreProgress.error("Extraction failed")
+                return false
+            }
             val ok = complete(targetDir)
-            if (!ok) AppLog.e("CoreAcquire", "$core: archive verified but files still incomplete")
+            if (ok) CoreProgress.done()
+            else {
+                AppLog.e("CoreAcquire", "$core: archive verified but files still incomplete")
+                CoreProgress.error("Files still incomplete after install")
+            }
             return ok
         } catch (t: Throwable) {
             AppLog.e("CoreAcquire", "$core: download failed: ${t.message}")
+            CoreProgress.error(t.message ?: "Download failed")
             return false
         } finally {
             runCatching { zip.delete() }
@@ -180,18 +196,36 @@ internal object CoreAcquire {
     }
 
     /** java.net.http GET, 300 s timeout, 2xx check, follows redirects —
-     * the shape of the (now deleted) Xray downloader, minus the URL guessing. */
+     * the shape of the (now deleted) Xray downloader, minus the URL guessing.
+     * Streams the body in 64 KB chunks so [CoreProgress] can render a real
+     * byte/percent bar (Content-Length when present, indeterminate otherwise). */
     private fun httpFetch(url: String, dest: File): Boolean = try {
         val client = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build()
         val req = HttpRequest.newBuilder(URI.create(url))
             .timeout(Duration.ofSeconds(300)).GET().build()
-        val resp = client.send(req, HttpResponse.BodyHandlers.ofFile(dest.toPath()))
+        val resp = client.send(req, HttpResponse.BodyHandlers.ofInputStream())
         if (resp.statusCode() !in 200..299) {
+            runCatching { resp.body().close() }
             AppLog.e("CoreAcquire", "download failed: HTTP ${resp.statusCode()}")
             false
         } else {
+            val total = resp.headers().firstValueAsLong("content-length").orElse(-1L)
+            dest.parentFile?.mkdirs()
+            resp.body().use { input ->
+                FileOutputStream(dest).use { out ->
+                    val buf = ByteArray(64 * 1024)
+                    var received = 0L
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        received += n
+                        CoreProgress.bytes(received, total)
+                    }
+                }
+            }
             true
         }
     } catch (t: Throwable) {

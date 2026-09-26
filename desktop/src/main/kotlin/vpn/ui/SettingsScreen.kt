@@ -27,16 +27,20 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,9 +50,12 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import vpn.core.AppLog
+import vpn.core.CorePanel
+import vpn.core.CoreProgress
 import vpn.core.SecretBox
 import vpn.core.Storage
 import vpn.core.VpnService
@@ -160,6 +167,12 @@ fun SettingsScreen() {
         }
 
         Spacer(Modifier.height(16.dp))
+        SectionTitle("Cores")
+        GlassCard {
+            CoresCard()
+        }
+
+        Spacer(Modifier.height(16.dp))
         SectionTitle("Maintenance")
         GlassCard {
             // P3-12: SecretBox.protect fails OPEN — when Windows DPAPI errors
@@ -250,6 +263,151 @@ fun SettingsScreen() {
 
     if (showLog) {
         AppLogDialog(onDismiss = { showLog = false })
+    }
+}
+
+/** "12.3 MB" from a byte count, one decimal. */
+private fun formatMb(bytes: Long): String = String.format("%.1f MB", bytes / 1048576.0)
+
+/**
+ * Settings → Cores: one row per downloadable core (label, pinned version,
+ * installed state) with a per-core Download plus a Download-all, and a LIVE
+ * progress bar for whichever core is being acquired right now.
+ *
+ * The bar reads [CoreProgress], which [vpn.core.CoreAcquire] updates from the
+ * download's IO thread. Because that store is a plain volatile snapshot (not
+ * Compose state) we poll it on a short tick while a download is in flight and
+ * stop the moment it reaches a terminal phase — the only way to observe it
+ * without threading a callback through the connect paths, which must never
+ * throw. Acquisition runs on the IO dispatcher via [CorePanel.acquire], the
+ * SAME bundled→cached→sha256-pinned path a live connection uses, so nothing
+ * here can install an unverified core.
+ */
+@Composable
+private fun CoresCard() {
+    var rows by remember { mutableStateOf(CorePanel.rows()) }
+    var busyKey by remember { mutableStateOf<String?>(null) }
+    var snap by remember { mutableStateOf(CoreProgress.current) }
+    val scope = rememberCoroutineScope()
+
+    // Poll while a download is active; break on a terminal phase so a failed
+    // fetch can't spin the loop forever.
+    LaunchedEffect(busyKey) {
+        if (busyKey == null) return@LaunchedEffect
+        while (true) {
+            snap = CoreProgress.current
+            val p = snap.phase
+            if (p == CoreProgress.Phase.Done || p == CoreProgress.Phase.Error) break
+            delay(120)
+        }
+    }
+
+    fun runDownloads(cores: List<CorePanel.Core>) {
+        if (busyKey != null || cores.isEmpty()) return
+        scope.launch {
+            for (c in cores) {
+                CoreProgress.reset()
+                busyKey = c.key
+                snap = CoreProgress.current
+                CorePanel.acquire(c)
+                rows = CorePanel.rows()
+                delay(300) // let one terminal tick land before advancing
+            }
+            busyKey = null
+        }
+    }
+
+    Text(
+        "The VPN engines. This build fetches a core the first time a protocol " +
+            "needs it and verifies it by SHA-256 before running it.",
+        fontSize = 11.5.sp,
+        color = C.TextSecondary,
+    )
+    Spacer(Modifier.height(8.dp))
+
+    rows.forEach { row ->
+        val active = busyKey == row.core.key
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(row.core.label, fontSize = 12.5.sp, color = C.TextPrimary, fontWeight = FontWeight.Medium)
+                val status = if (row.installed) "Installed" else "Not installed"
+                val version = if (row.version.isNotBlank()) "v${row.version}" else "pinned"
+                Text(
+                    "$version · $status",
+                    fontSize = 10.5.sp,
+                    color = if (row.installed) C.Success else C.TextFaint,
+                )
+            }
+            if (!row.installed) {
+                TextButton(
+                    onClick = { runDownloads(listOf(row.core)) },
+                    enabled = busyKey == null,
+                ) {
+                    Text(if (active) "Downloading…" else "Download", fontSize = 11.sp)
+                }
+            }
+        }
+        if (active) {
+            CoreProgressBar(snap)
+            Spacer(Modifier.height(4.dp))
+        }
+    }
+
+    val missing = rows.count { !it.installed }
+    Spacer(Modifier.height(4.dp))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        TextButton(
+            onClick = { runDownloads(rows.filter { !it.installed }.map { it.core }) },
+            enabled = busyKey == null && missing > 0,
+        ) {
+            Text(if (busyKey != null) "Downloading…" else "Download all ($missing)", fontSize = 11.sp)
+        }
+    }
+}
+
+/** Determinate %/MB bar while streaming, indeterminate during verify/extract. */
+@Composable
+private fun CoreProgressBar(snap: CoreProgress.Snapshot) {
+    val label: String = when (snap.phase) {
+        CoreProgress.Phase.Downloading ->
+            if (snap.measurable)
+                "Downloading… ${snap.percent}% · ${formatMb(snap.bytes)} / ${formatMb(snap.total)}"
+            else
+                "Downloading… ${formatMb(snap.bytes)}"
+        CoreProgress.Phase.Verifying -> "Verifying checksum…"
+        CoreProgress.Phase.Extracting -> "Installing files…"
+        CoreProgress.Phase.Done -> "Installed"
+        CoreProgress.Phase.Error -> snap.message.ifBlank { "Download failed" }
+        CoreProgress.Phase.Idle -> ""
+    }
+    val color = when (snap.phase) {
+        CoreProgress.Phase.Error -> C.Error
+        CoreProgress.Phase.Done -> C.Success
+        else -> C.Accent
+    }
+    when {
+        snap.phase == CoreProgress.Phase.Downloading && snap.measurable ->
+            LinearProgressIndicator(
+                progress = { snap.fraction },
+                modifier = Modifier.fillMaxWidth().height(6.dp),
+                color = color,
+                trackColor = C.Border,
+            )
+        snap.phase == CoreProgress.Phase.Downloading ||
+            snap.phase == CoreProgress.Phase.Verifying ||
+            snap.phase == CoreProgress.Phase.Extracting ->
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth().height(6.dp),
+                color = color,
+                trackColor = C.Border,
+            )
+    }
+    if (label.isNotBlank()) {
+        Spacer(Modifier.height(3.dp))
+        Text(label, fontSize = 10.5.sp, color = color)
     }
 }
 
