@@ -1,9 +1,10 @@
 #!/bin/bash
 # IKEv2 VPN Server Setup Script (Windows-client compatible)
 # Usage: sudo bash setup-ikev2.sh [your-domain-or-ip] [p12-export-pass]
-#   p12-export-pass: random passphrase the MultiVPN app generates per install;
-#     manual runs without it fall back to the historical fixed "ikev2"
-#     (accepted so servers set up by older app versions keep working).
+#   p12-export-pass: optional passphrase protecting the exported client p12.
+#     Resolution order: injected CLIENT_P12_PASS (app provisions) > $2 (manual
+#     runs) > freshly generated random value, printed once in the summary.
+#     The historical fixed default is gone - see the block near CLIENT_P12_PASS.
 # Supports: Ubuntu 20.04+, Debian 10+
 
 set -e
@@ -37,12 +38,26 @@ IKE_PROPOSAL="aes256-sha256-modp2048,aes256-sha384-modp2048,aes256gcm16-prfsha38
 # proposal has to offer modp2048 first.
 ESP_PROPOSAL="aes256-sha256-modp2048,aes256-sha256,aes256gcm16,aes128-sha256"
 
-# Windows requires an export password to import the PFX. The MultiVPN app
-# passes a RANDOM per-install passphrase as $2 (see SshService.generateP12Password);
-# it is only used for `openssl pkcs12 -export` on THIS box and stored DPAPI-
-# encrypted in the client app. Manual runs default to the legacy fixed value.
-# passphrase arrives via stdin as an export line (never in remote argv)
-CLIENT_P12_PASS="${CLIENT_P12_PASS:-ikev2}"
+# Windows requires an export password to import the PFX. It is only used for
+# `openssl pkcs12 -export` on THIS box and stored DPAPI-encrypted in the
+# client app. The MultiVPN app injects a RANDOM per-install passphrase as a
+# CLIENT_P12_PASS assignment line arriving via stdin (never in remote argv);
+# manual runs may pass $2. The historical fixed default is REMOVED: a p12
+# private key must never be protected by a publicly documented literal -
+# with neither source the script generates a fresh random passphrase below.
+# Precedence: injected env (app provisions) > $2 (manual) > freshly generated.
+if [ -z "${CLIENT_P12_PASS:-}" ]; then
+    CLIENT_P12_PASS="${2:-}"
+fi
+if [ -z "$CLIENT_P12_PASS" ]; then
+    CLIENT_P12_PASS="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 24 || true)"
+    if [ -z "$CLIENT_P12_PASS" ]; then
+        # `error` is not defined yet at this point in the script.
+        echo "[-] could not generate an export passphrase" >&2
+        exit 1
+    fi
+    P12_PASS_GENERATED=1
+fi
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -261,5 +276,11 @@ info ""
 info "  client.p12   - Client certificate (import in VPN app)"
 info "  ca.crt       - CA certificate"
 info "  client.sswan - Config file (import in VPN app)"
+if [ -n "${P12_PASS_GENERATED:-}" ]; then
+    info ""
+    info "The client.p12 export passphrase was generated randomly for this run."
+    info "It is shown ONCE below and is NOT saved anywhere - store it now:"
+    echo "$CLIENT_P12_PASS"
+fi
 info ""
 warn "Open UDP ports 500 and 4500 in your cloud firewall!"
