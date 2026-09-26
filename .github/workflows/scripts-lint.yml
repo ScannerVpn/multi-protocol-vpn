@@ -1,0 +1,46 @@
+name: scripts-lint
+
+# The bash setup scripts under server/ (and their byte-identical twins in
+# desktop/src/main/resources) are piped through SSH and executed as ROOT on
+# every user's VPS. A syntax error there is invisible to the Kotlin build and
+# would detonate mid-provisioning on a live server, so gate them with bash -n
+# on every change.
+
+on:
+  push:
+    paths:
+      - 'server/**'
+      - 'desktop/src/main/resources/*.sh'
+  pull_request:
+    paths:
+      - 'server/**'
+      - 'desktop/src/main/resources/*.sh'
+
+# Least privilege: this workflow only reads the repo.
+permissions:
+  contents: read
+
+jobs:
+  bash-syntax:
+    name: bash -n on all server scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # Fail fast and name the offending file: bash -n parses without
+      # executing, so a green run means every script is syntactically
+      # loadable by the same interpreter that will run it on the VPS.
+      - name: Syntax-check every script
+        run: |
+          for f in server/*.sh; do
+            if ! bash -n "$f"; then
+              echo "::error::bash syntax error in $f"
+              exit 1
+            fi
+            echo "OK $f"
+          done
