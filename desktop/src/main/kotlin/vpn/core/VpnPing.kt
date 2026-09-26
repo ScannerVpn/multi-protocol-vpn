@@ -431,22 +431,37 @@ internal object VpnPing {
             if (e is CancellationException) throw e
             return@withPermit RealPingResult.Skipped
         }
-        val conf = File.createTempFile("multivpn_xping_", ".json")
-        // P3-2 fix: conf.writeText used to run OUTSIDE the try — an IOException
-        // here escaped without releasing the scratch ports or the temp file,
-        // and the slot stayed claimed until the 20 s TTL stole it back.
-        try {
-            conf.writeText(Xray.buildClientJson(parsed, socksPort = ports.first, httpPort = ports.second))
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            conf.delete()
-            releaseScratchPorts(ports)
-            return@withPermit RealPingResult.Skipped
-        }
         var myPid: Int? = null
+        var conf: File? = null
+        // P3-2 fix (extended): the temp-config ALLOCATION and its WRITE now
+        // both run INSIDE the try whose finally releases the scratch pair.
+        // They used to sit outside it — `File.createTempFile` had no guard at
+        // all — so an IOException there (temp dir full, AV lock while a
+        // 16-wide wave creates files at once) escaped without
+        // releaseScratchPorts and burned the claimed pair until the 20 s TTL
+        // stole it back, manufacturing spurious Skipped rows for unrelated
+        // configs mid-wave. IO trouble is an infra problem, not a dead server,
+        // so the inner catches below still map it to Skipped exactly like the
+        // old writeText branch — and they never release or clean up inline,
+        // because this finally owns that for every path after a claim.
         try {
+            val confFile = try {
+                File.createTempFile("multivpn_xping_", ".json")
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                // Nothing was created: conf stays null, the finally's
+                // conf?.delete() is a no-op and only releases the ports.
+                return@withPermit RealPingResult.Skipped
+            }
+            conf = confFile
+            try {
+                confFile.writeText(Xray.buildClientJson(parsed, socksPort = ports.first, httpPort = ports.second))
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                return@withPermit RealPingResult.Skipped
+            }
             val pid = HiddenRun.startDetached(
-                listOf(exe.absolutePath, "run", "-c", conf.absolutePath),
+                listOf(exe.absolutePath, "run", "-c", confFile.absolutePath),
                 workingDir = exe.parentFile,
             ) ?: return@withPermit RealPingResult.Skipped
             myPid = pid
@@ -489,7 +504,7 @@ internal object VpnPing {
             // murder sibling racers' cores. lastPid (session state) untouched.
             Xray.killPid(myPid ?: 0)
             releaseScratchPorts(ports)
-            conf.delete()
+            conf?.delete()
         }
     }
 
