@@ -887,25 +887,30 @@ object VpnService {
         // hours). Under dataDir it sits behind the user profile ACL and the
         // finally below removes it on every exit path.
         try {
+        // Invariant: each attempt owns its `portOpen` verdict, and a success
+        // must exit the loop before any kill can tear down the healthy core.
         var portOpen = false
-        repeat(2) { attempt ->
+        for (attempt in 0..1) {
+            portOpen = false
             Xray.kill()
             SingBox.kill()
             val pid = HiddenRun.startDetached(
                 listOf(exe.absolutePath, "run", "-c", conf.absolutePath),
                 workingDir = exe.parentFile,
-            ) ?: run {
+            )
+            if (pid == null) {
                 // Process creation failed outright — no point polling a port.
                 AppLog.e("Xray", "could not start xray.exe (process creation failed)")
-                return@repeat
+                continue
             }
             Xray.trackPid(pid)
             var tries = 0
             while (tries < 15) {
-                if (Xray.isRunning()) { portOpen = true; return@repeat }
+                if (Xray.isRunning()) { portOpen = true; break }
                 delay(400)
                 tries++
             }
+            if (portOpen) break
             AppLog.i("Xray", "proxy port did not open (attempt ${attempt + 1})")
         }
         if (!portOpen) {
