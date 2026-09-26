@@ -92,7 +92,6 @@ kover {
 dependencies {
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
-    implementation(compose.materialIconsExtended)
     // Coroutines 1.10.2 is the last line that pairs with Kotlin 2.1 without
     // pulling the 2.2-era stdlib expectations of 1.11.x.
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
