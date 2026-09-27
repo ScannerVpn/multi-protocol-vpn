@@ -31,8 +31,8 @@ they run the same app and differ only in how the VPN engines arrive.
 
 | File | Size | The VPN engines |
 |------|------|-----------------|
-| `MultiVPN-<ver>.exe` — **Full** | ~210 MB | bundled inside the installer; works with no internet the first time |
-| `MultiVPN-<ver>-core-fetch.exe` — **Core-Fetch** | ~140 MB | downloaded on demand, the first time a protocol needs one |
+| `MultiVPN-<ver>.exe` — **Full** | ~138 MB | bundled inside the installer; works with no internet the first time |
+| `MultiVPN-<ver>-core-fetch.exe` — **Core-Fetch** | ~75 MB | downloaded on demand, the first time a protocol needs one |
 
 In both builds **Settings → Cores** lists every engine with its pinned version
 and installed state, downloads a missing one with a live progress bar, and has
@@ -97,7 +97,7 @@ cd multi-protocol-vpn
 
 ### 2. Fetch the core binaries
 
-The five VPN cores are third-party binaries (~200 MB unpacked) and are **not
+The five VPN cores are third-party binaries (~170 MB between them) and are **not
 committed**. Fetch them with the included script — it downloads each one from
 its official upstream release, extracts exactly the files the app expects, and
 prints a summary table:
@@ -153,11 +153,11 @@ for the wireproxy commit pin.
 ```powershell
 $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.19.10-hotspot"
 
-.\gradlew.bat test                       # 397 tests, all offline
-.\gradlew.bat createDistributable        # portable app folder
-.\gradlew.bat packageExe                 # Full installer,  ~210 MB (needs WiX 3.x)
-.\gradlew.bat packageExe -PslimCores=true # Core-Fetch installer, ~140 MB
-.\gradlew.bat koverHtmlReport            # coverage -> build/reports/kover/html
+.\gradlew.bat test                        # 397 tests, all offline
+.\gradlew.bat createDistributable         # portable app folder
+.\gradlew.bat packageExe                  # Full installer,       ~138 MB (needs WiX 3.x)
+.\gradlew.bat packageExe -PslimCores=true # Core-Fetch installer, ~75 MB
+.\gradlew.bat koverHtmlReport             # coverage -> build/reports/kover/html
 ```
 
 `-PslimCores=true` is the **Core-Fetch** variant: the four big cores

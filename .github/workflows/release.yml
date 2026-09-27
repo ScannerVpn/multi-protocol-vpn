@@ -112,8 +112,8 @@ jobs:
             cat > notes.md <<'MD'
           Two Windows x64 installers, both with Settings -> Cores (check for core updates, per-core download, SHA-256 verification):
 
-          * `MultiVPN-VERSION-core-fetch.exe` - **Core-Fetch**: about 70 MB smaller; each VPN engine is downloaded the first time its protocol is used.
-          * `MultiVPN-VERSION.exe` - **Full**: every engine is bundled inside the installer.
+          * `MultiVPN-VERSION-core-fetch.exe` - **Core-Fetch** (~75 MB): about 65 MB smaller; each VPN engine is downloaded the first time its protocol is used.
+          * `MultiVPN-VERSION.exe` - **Full** (~138 MB): every engine is bundled inside the installer.
           MD
             sed -i "s/VERSION/${VERSION}/g" notes.md
             gh release create "$TAG" dist/* \
