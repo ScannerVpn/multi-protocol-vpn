@@ -325,4 +325,31 @@ class AppUpdateTest {
         assertTrue(keep.exists(), "cleanup must stay inside updates/")
         runCatching { keep.delete() }
     }
+
+    @Test
+    fun `an installer that never ran is reported once on the next start`() {
+        // `launchInstaller` true only means the helper started: a declined UAC
+        // prompt leaves the app on the old version and, without this record,
+        // says nothing about it.
+        AppUpdate.markPendingUpdate("9.9.9")
+        assertEquals("9.9.9", AppUpdate.takeUnappliedUpdate("3.6.22"))
+        assertNull(AppUpdate.takeUnappliedUpdate("3.6.22"), "the notice shows once, not forever")
+
+        AppUpdate.markPendingUpdate("9.9.9")
+        assertNull(
+            AppUpdate.takeUnappliedUpdate("9.9.9"),
+            "if this build IS the recorded target the update landed",
+        )
+    }
+
+    @Test
+    fun `the pending record cannot carry a path`() {
+        AppUpdate.markPendingUpdate("9.9.9/../evil")
+        val pending = java.io.File(java.io.File(Storage.dataDir, "updates"), "update-pending.txt")
+        val stored = pending.readText()
+        assertFalse('/' in stored || '\\' in stored, "a network version string must not keep separators: $stored")
+        assertEquals(AppUpdate.sanitizeVersion("9.9.9/../evil"), stored)
+        assertEquals(stored, AppUpdate.takeUnappliedUpdate("3.6.22"))
+        assertFalse(pending.exists())
+    }
 }

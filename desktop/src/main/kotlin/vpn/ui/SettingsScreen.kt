@@ -306,6 +306,10 @@ private fun CoresCard() {
     var updates by remember { mutableStateOf<List<UpdateInfo>?>(null) }
     var checking by remember { mutableStateOf(false) }
     var checkFailed by remember { mutableStateOf(false) }
+    // core key -> why its last install failed. The progress bar unmounts the
+    // moment the phase goes terminal, so without this the reason was on screen
+    // for one 300 ms tick: the user saw a bar fill to 100% and nothing happen.
+    var failed by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     val scope = rememberCoroutineScope()
 
     // Poll while a download is active; break on a terminal phase so a failed
@@ -327,11 +331,16 @@ private fun CoresCard() {
         scope.launch {
             for (c in cores) {
                 CoreProgress.reset()
+                failed = failed - c.key
                 busyKey = c.key
                 snap = CoreProgress.current
                 val ok = action(c)
                 rows = CorePanel.rows()
-                if (ok) updates = updates?.map { if (it.core == c.key) it.copy(available = false) else it }
+                if (ok) {
+                    updates = updates?.map { if (it.core == c.key) it.copy(available = false) else it }
+                } else {
+                    failed = failed + (c.key to CoreProgress.current.message.ifBlank { "Download failed" })
+                }
                 delay(300) // let one terminal tick land before advancing
             }
             busyKey = null
@@ -405,6 +414,9 @@ private fun CoresCard() {
                         fontSize = 10.5.sp,
                         color = C.Accent,
                     )
+                }
+                failed[row.core.key]?.let { reason ->
+                    Text(reason, fontSize = 10.5.sp, color = C.Error)
                 }
             }
             when {
@@ -539,6 +551,11 @@ private fun AppUpdateCard() {
                 runCatching { AppUpdate.launchInstaller(file) }.getOrDefault(false)
             }
             if (launched) {
+                // Record the intent before leaving: `launched` only proves the
+                // helper got as far as showing UAC. If the user declines or the
+                // app still holds its files, the next start can say so instead
+                // of quietly staying on the old version.
+                AppUpdate.markPendingUpdate(target.latestVersion)
                 // Real exit, through the window's own quit path: shutdown hooks
                 // restore the system proxy and stop the cores first.
                 val exit = AppState.exitApp
@@ -606,6 +623,16 @@ private fun AppUpdateCard() {
     }
     if (busyKey != null && snap.core == AppUpdate.PROGRESS_KEY && installing == null) {
         CoreProgressBar(snap, doneLabel = "Verified — starting the installer")
+    }
+    AppState.appUpdateSkipped?.let { missed ->
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "The update to v$missed was handed to Windows but never landed — " +
+                "this is still v${vpn.BuildInfo.VERSION}. Close any running " +
+                "connection and install again.",
+            fontSize = 10.5.sp,
+            color = C.Error,
+        )
     }
     failed?.let {
         Spacer(Modifier.height(4.dp))

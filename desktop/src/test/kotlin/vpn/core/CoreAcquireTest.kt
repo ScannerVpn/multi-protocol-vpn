@@ -9,6 +9,7 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -30,11 +31,16 @@ class CoreAcquireTest {
 
     private val defaultFetch = CoreAcquire.fetchArchive
     private val defaultLoader = CoreAcquire.catalogLoader
+    private val defaultSwap = CoreAcquire.swapInto
+    private val defaultMove = CoreAcquire.moveInto
 
     @AfterTest
     fun restoreSeams() {
         CoreAcquire.fetchArchive = defaultFetch
         CoreAcquire.catalogLoader = defaultLoader
+        CoreAcquire.swapInto = defaultSwap
+        CoreAcquire.moveInto = defaultMove
+        CoreProgress.reset()
     }
 
     /** A resBase that guarantees the bundled-extract step finds nothing. */
@@ -193,5 +199,121 @@ class CoreAcquireTest {
             CoreAcquire.ensure("xray", noBundle, listOf("xray.exe"), dir, allowDownload = true),
             "a verified-but-corrupt archive must fail cleanly",
         )
+    }
+
+    // ------------------------------------------------------------- updating
+
+    private fun catalogWith(core: String, sha: String, version: String) =
+        CoreCatalog(
+            baseUrl = "https://example.invalid/cores-v1",
+            cores = mapOf(core to CoreArchive(archive = "a.zip", sha256 = sha, version = version)),
+        )
+
+    @Test
+    fun `forceUpdate replaces a core that is already on disk`() {
+        val dir = tempTargetDir()
+        File(dir, "xray.exe").writeBytes(byteArrayOf(1, 1, 1))
+        val zip = zipOf("xray.exe" to byteArrayOf(2, 2, 2, 2))
+        val catalog = catalogWith("xray", sha256(zip), "Xray-core v26.9.10")
+        CoreAcquire.fetchArchive = { _, dest -> dest.writeBytes(zip); true }
+        assertTrue(CoreAcquire.forceUpdate("xray", listOf("xray.exe"), dir, catalog))
+        assertTrue(File(dir, "xray.exe").readBytes().contentEquals(byteArrayOf(2, 2, 2, 2)))
+    }
+
+    @Test
+    fun `the installed core is recorded with its version and pin`() {
+        // Without this the Settings row keeps reporting the BUNDLED pin after a
+        // real update, which reads to the user as "nothing was installed".
+        val dir = tempTargetDir()
+        val zip = zipOf("xray.exe" to byteArrayOf(2))
+        val sha = sha256(zip)
+        CoreAcquire.fetchArchive = { _, dest -> dest.writeBytes(zip); true }
+        assertTrue(CoreAcquire.forceUpdate("xray", listOf("xray.exe"), dir, catalogWith("xray", sha, "Xray-core v26.9.10")))
+        val rec = CoreAcquire.installedCore(dir)
+        assertEquals("Xray-core v26.9.10", rec?.version)
+        assertEquals(sha, rec?.sha256, "the recorded pin is what a later check compares against")
+    }
+
+    @Test
+    fun `a refused version record never claims an update happened`() {
+        val dir = tempTargetDir()
+        val zip = zipOf("xray.exe" to byteArrayOf(2))
+        CoreAcquire.fetchArchive = { _, dest -> dest.writeBytes(zip); true }
+        CoreAcquire.swapInto = { _, _ -> throw java.nio.file.FileSystemException("Access is denied") }
+        assertFalse(CoreAcquire.forceUpdate("xray", listOf("xray.exe"), dir, catalogWith("xray", sha256(zip), "v9")))
+        assertNull(CoreAcquire.installedCore(dir), "a failed install must not record anything")
+    }
+
+    @Test
+    fun `a swap that Windows refuses leaves the running core byte-intact`() {
+        // The reported bug: the bar reached 100% and the exe was still the old
+        // one, because the copy was attempted straight onto a loaded image.
+        val dir = tempTargetDir()
+        File(dir, "xray.exe").writeBytes(byteArrayOf(1, 1, 1))
+        val zip = zipOf("xray.exe" to byteArrayOf(2, 2, 2))
+        CoreAcquire.fetchArchive = { _, dest -> dest.writeBytes(zip); true }
+        CoreAcquire.swapInto = { _, _ -> throw java.nio.file.FileSystemException("Access is denied") }
+        assertFalse(CoreAcquire.forceUpdate("xray", listOf("xray.exe"), dir, catalogWith("xray", sha256(zip), "v9")))
+        assertTrue(
+            File(dir, "xray.exe").readBytes().contentEquals(byteArrayOf(1, 1, 1)),
+            "a failed swap must not truncate the installed core",
+        )
+        assertTrue(
+            dir.listFiles()?.none { it.name.endsWith(".part") } == true,
+            "the staging file must not be left behind: ${dir.listFiles()?.map { it.name }}",
+        )
+        val snap = CoreProgress.current
+        assertEquals(CoreProgress.Phase.Error, snap.phase)
+        assertTrue(
+            snap.message.contains("xray.exe") && snap.message.contains("in use"),
+            "the bar must name the file and the reason, got: ${snap.message}",
+        )
+    }
+
+    @Test
+    fun `a loaded image is moved aside so the new core can land`() {
+        // Windows refuses to WRITE over a running exe but allows it to be
+        // RENAMED, and CreateProcess opens the image with FILE_SHARE_DELETE.
+        // Model exactly that: the move is refused only while the target exists.
+        val dir = tempTargetDir()
+        File(dir, "xray.exe").writeBytes(byteArrayOf(1, 1, 1))
+        val zip = zipOf("xray.exe" to byteArrayOf(2, 2, 2))
+        CoreAcquire.fetchArchive = { _, dest -> dest.writeBytes(zip); true }
+        CoreAcquire.moveInto = { s, d ->
+            if (d.exists()) throw java.nio.file.FileSystemException("Access is denied")
+            java.nio.file.Files.move(s.toPath(), d.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        }
+        assertTrue(
+            CoreAcquire.forceUpdate("xray", listOf("xray.exe"), dir, catalogWith("xray", sha256(zip), "v9")),
+            "an update must be able to land while the old core is still running",
+        )
+        assertTrue(File(dir, "xray.exe").readBytes().contentEquals(byteArrayOf(2, 2, 2)))
+        assertTrue(
+            dir.listFiles()?.none { it.name.contains(".old-") || it.name.endsWith(".part") } == true,
+            "scratch files must be cleaned up: ${dir.listFiles()?.map { it.name }}",
+        )
+    }
+
+    @Test
+    fun `scratch files from an earlier aborted install are swept`() {
+        val dir = tempTargetDir()
+        File(dir, "xray.exe").writeBytes(byteArrayOf(1))
+        File(dir, "xray.exe.part").writeBytes(byteArrayOf(3))
+        File(dir, "hiddify-core.dll.old-12345").writeBytes(byteArrayOf(4))
+        val zip = zipOf("xray.exe" to byteArrayOf(2))
+        CoreAcquire.fetchArchive = { _, dest -> dest.writeBytes(zip); true }
+        assertTrue(CoreAcquire.forceUpdate("xray", listOf("xray.exe"), dir, catalogWith("xray", sha256(zip), "v9")))
+        assertFalse(File(dir, "xray.exe.part").exists())
+        assertFalse(File(dir, "hiddify-core.dll.old-12345").exists())
+    }
+
+    @Test
+    fun `an unsafe entry reports a reason instead of a bare failed bar`() {
+        val dir = tempTargetDir()
+        val zip = zipOf("../escape.exe" to byteArrayOf(1))
+        serveArchive(zip)
+        assertFalse(CoreAcquire.ensure("xray", noBundle, listOf("xray.exe"), dir, allowDownload = true))
+        assertEquals(CoreProgress.Phase.Error, CoreProgress.current.phase)
+        assertTrue(CoreProgress.current.message.isNotBlank(), "the bar must say why it failed")
     }
 }

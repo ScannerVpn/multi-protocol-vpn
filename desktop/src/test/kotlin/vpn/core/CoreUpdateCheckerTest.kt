@@ -24,12 +24,22 @@ class CoreUpdateCheckerTest {
         CoreUpdateChecker.fetchUrl = defaultFetch
     }
 
+    /**
+     * Catalog fixture. The archive pin is derived from the version string, so
+     * "a newer version" also means "different bytes" — which is the rule
+     * [CoreUpdateChecker.plan] applies; two entries with the same version
+     * compare as the same archive.
+     */
     private fun cat(vararg versions: Pair<String, String>) = CoreCatalog(
         baseUrl = "https://github.com/ScannerVpn/multi-protocol-vpn/releases/download/cores-v1",
         cores = versions.associate { (k, v) ->
-            k to CoreArchive(archive = "$k.zip", sha256 = "0".repeat(64), version = v)
+            k to CoreArchive(archive = "$k.zip", sha256 = pin(v), version = v)
         },
     )
+
+    private fun pin(version: String): String =
+        java.security.MessageDigest.getInstance("SHA-256")
+            .digest(version.toByteArray()).joinToString("") { "%02x".format(it) }
 
     @Test
     fun `versionLessThan compares numeric segments not strings`() {
@@ -53,6 +63,40 @@ class CoreUpdateCheckerTest {
         assertEquals("26.4.0", byCore.getValue("xray").latestVersion)
         assertFalse(byCore.getValue("aether").available, "same version -> no update")
         assertFalse("wireproxy" in byCore, "a core missing remotely yields no row")
+    }
+
+    @Test
+    fun `a manifest that only bumps the label over the same bytes offers nothing`() {
+        // What actually happened on 2026-09-27: a demo release raised xray's
+        // version string while its archive pin still pointed at the old bytes.
+        // The app offered an update, downloaded 13 MB, verified it, installed
+        // the same exe, and the bar ended at 100% with nothing changed.
+        val bundled = cat("xray" to "26.3.27")
+        val remote = CoreCatalog(
+            baseUrl = bundled.baseUrl,
+            cores = mapOf("xray" to CoreArchive("xray.zip", sha256 = pin("26.3.27"), version = "26.9.10")),
+        )
+        assertFalse(CoreUpdateChecker.plan(bundled, remote).single().available)
+    }
+
+    @Test
+    fun `what is on disk decides, not what this build shipped with`() {
+        val bundled = cat("xray" to "26.3.27")
+        val remote = cat("xray" to "26.4.0")
+        // Already updated to the remote bytes: the bundled catalog still says
+        // 26.3.27, so without the record the row would offer the same update
+        // again after every restart.
+        val done = mapOf("xray" to InstalledCore("26.4.0", pin("26.4.0")))
+        assertFalse(CoreUpdateChecker.plan(bundled, remote, done).single().available)
+        // And the row shows the installed version, not the stale bundled one.
+        assertEquals("26.4.0", CoreUpdateChecker.plan(bundled, remote, done).single().currentVersion)
+        // A different pin, newer label -> a real update.
+        assertTrue(CoreUpdateChecker.plan(bundled, remote).single().available)
+    }
+
+    @Test
+    fun `an older remote archive is never offered as an update`() {
+        assertTrue(CoreUpdateChecker.plan(cat("xray" to "26.4.0"), cat("xray" to "26.3.27")).single().available == false)
     }
 
     @Test

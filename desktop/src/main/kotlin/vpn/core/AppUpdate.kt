@@ -217,6 +217,35 @@ internal object AppUpdate {
     internal fun psQuote(value: String): String = "'" + value.replace("'", "''") + "'"
 
     /**
+     * The one outcome this process cannot observe: whether Windows went on to
+     * run the installer. [launchInstaller] returns as soon as the detached
+     * helper is alive — before the UAC prompt is answered — and a declined
+     * prompt, or files still held by a slow shutdown, leaves the app on the old
+     * version having said nothing. So the intent is recorded before exiting and
+     * [takeUnappliedUpdate] reports it on the next start.
+     */
+    fun markPendingUpdate(version: String) {
+        runCatching { pendingFile().writeText(sanitizeVersion(version)) }
+            .onFailure { AppLog.e("AppUpdate", "could not record the pending update: ${it.message}") }
+    }
+
+    /**
+     * Called at startup, BEFORE [cleanStaleInstallers] (which wipes the dir).
+     * Returns the version an earlier Install aimed at when this build is still
+     * not on it — i.e. the update never happened — and drops the record either
+     * way, so the notice appears once, not forever.
+     */
+    fun takeUnappliedUpdate(currentVersion: String): String? {
+        val f = pendingFile()
+        val target = runCatching { f.takeIf { it.isFile }?.readText()?.trim() }.getOrNull().orEmpty()
+        if (target.isEmpty()) return null
+        runCatching { f.delete() }
+        return target.takeIf { it != sanitizeVersion(currentVersion) }
+    }
+
+    private fun pendingFile(): File = File(updateDir(), "update-pending.txt")
+
+    /**
      * Delete leftover installers at startup: once we are running again, a
      * staged exe has either been installed (useless) or abandoned (dead
      * weight). A file the running installer still holds open simply fails to

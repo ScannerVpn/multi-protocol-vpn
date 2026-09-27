@@ -118,20 +118,39 @@ internal object CoreUpdateChecker {
     }
 
     /**
-     * Pure diff of the bundled vs remote catalogs, one row per core the app
-     * already knows how to install. [UpdateInfo.available] is true only when
-     * the remote version is strictly newer by numeric segment comparison --
-     * equal or older never prompts an update (no downgrades).
+     * Pure diff of what is installed against the remote catalog, one row per
+     * core the app already knows how to install.
+     *
+     * [installed] carries the records [CoreAcquire] wrote on disk; a core with
+     * no record falls back to the [bundled] pin, which is what the files came
+     * from if nothing replaced them.
+     *
+     * An update is offered only when BOTH hold, because a version STRING is not
+     * a payload:
+     *  - the remote archive is pinned to different bytes than the ones on disk;
+     *  - the remote label is not older (no downgrades).
+     * A manifest that bumps only the label over an unchanged archive — the
+     * exact shape of a mis-published test release — therefore offers nothing,
+     * instead of running a 100% download of bytes identical to the installed
+     * core and leaving the version line staring at the old number.
      */
-    fun plan(bundled: CoreCatalog, remote: CoreCatalog): List<UpdateInfo> =
+    fun plan(
+        bundled: CoreCatalog,
+        remote: CoreCatalog,
+        installed: Map<String, InstalledCore> = emptyMap(),
+    ): List<UpdateInfo> =
         bundled.cores.keys.sorted().mapNotNull { key ->
             val b = bundled.entry(key) ?: return@mapNotNull null
             val r = remote.entry(key) ?: return@mapNotNull null
+            val onDisk = installed[key]
+            val currentVersion = onDisk?.version?.takeIf { it.isNotBlank() } ?: b.version
+            val currentSha = onDisk?.sha256?.takeIf { it.isNotBlank() } ?: b.sha256
             UpdateInfo(
                 core = key,
-                currentVersion = b.version,
+                currentVersion = currentVersion,
                 latestVersion = r.version,
-                available = r.version.isNotBlank() && versionLessThan(b.version, r.version),
+                available = r.version.isNotBlank() && r.sha256.isNotBlank() &&
+                    r.sha256 != currentSha && !versionLessThan(r.version, currentVersion),
             )
         }
 

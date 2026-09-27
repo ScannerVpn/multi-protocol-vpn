@@ -35,12 +35,32 @@ internal object CorePanel {
     fun present(core: Core, base: File = Storage.dataDir): Boolean =
         CoreManifest.allPresent(dirOf(core, base), core.files)
 
-    /** Pinned version string from the catalog, or "" when unknown/not loaded. */
-    fun version(core: Core): String = CoreAcquire.catalogLoader()?.entry(core.key)?.version ?: ""
+    /**
+     * Version to display for [core]: what is actually installed when an
+     * acquire/update recorded it, else the pinned version of the catalog
+     * compiled into this build.
+     *
+     * The record matters because the bundled catalog cannot know about an
+     * update: reading only the catalog made a successful update keep showing
+     * the old version, which looks exactly like an update that did nothing.
+     */
+    fun version(core: Core, base: File = Storage.dataDir): String =
+        CoreAcquire.installedCore(dirOf(core, base))?.version?.takeIf { it.isNotBlank() }
+            ?: CoreAcquire.catalogLoader()?.entry(core.key)?.version ?: ""
+
+    /**
+     * What the last install left on disk, per core key. The update comparison
+     * needs this: the bundled catalog describes the bytes this build shipped
+     * with, not the ones a previous update replaced them with.
+     */
+    fun installed(base: File = Storage.dataDir): Map<String, InstalledCore> =
+        Core.entries.mapNotNull { c ->
+            CoreAcquire.installedCore(dirOf(c, base))?.let { c.key to it }
+        }.toMap()
 
     /** Snapshot of all cores for the UI, in fixed display order. */
     fun rows(base: File = Storage.dataDir): List<Row> =
-        Core.entries.map { Row(it, version(it), present(it, base)) }
+        Core.entries.map { Row(it, version(it, base), present(it, base)) }
 
     /**
      * Fetch/install [core] if missing, on the IO dispatcher, using the SAME
@@ -74,7 +94,7 @@ internal object CorePanel {
         val bundled = CoreAcquire.catalogLoader() ?: return@withContext null
         val remote = CoreUpdateChecker.fetchRemoteCatalog() ?: return@withContext null
         remoteCatalog = remote
-        CoreUpdateChecker.plan(bundled, remote)
+        CoreUpdateChecker.plan(bundled, remote, installed())
     }
 
     /**

@@ -36,8 +36,6 @@ class CorePanelTest {
 
     @Test
     fun `each core reuses the canonical CoreManifest dir and files`() {
-        // Guard against drift: the panel must acquire the SAME files the
-        // connect paths do, or "Installed" here lies about a broken core.
         assertEquals(CoreManifest.XRAY_FILES, CorePanel.Core.Xray.files)
         assertEquals(CoreManifest.SINGBOX_FILES, CorePanel.Core.SingBox.files)
         assertEquals(CoreManifest.WIREPROXY_FILES, CorePanel.Core.WireProxy.files)
@@ -91,5 +89,44 @@ class CorePanelTest {
 
         CoreAcquire.catalogLoader = { null }
         assertTrue(CorePanel.rows(base).all { it.version.isEmpty() }, "no catalog -> blank versions, never a crash")
+    }
+
+    @Test
+    fun `an installed core outranks the bundled catalog version`() {
+        // The bug this pins: the row used to quote only the catalog compiled
+        // into this build, so after a real update it still showed the OLD
+        // version and the user read that as "the update did nothing".
+        val base = tempBase()
+        CoreAcquire.catalogLoader = {
+            CoreCatalog(
+                baseUrl = "https://example.invalid/cores",
+                cores = mapOf(
+                    "xray" to CoreArchive(
+                        archive = "xray.zip",
+                        sha256 = "b".repeat(64),
+                        version = "Xray-core v26.3.27",
+                    ),
+                ),
+            )
+        }
+        val dir = CorePanel.dirOf(CorePanel.Core.Xray, base).apply { mkdirs() }
+        val record = File(dir, CoreAcquire.INSTALLED_FILE)
+        assertEquals("Xray-core v26.3.27", CorePanel.version(CorePanel.Core.Xray, base))
+
+        record.writeText("Xray-core v26.9.10\n${"a".repeat(64)}\n")
+        assertEquals("Xray-core v26.9.10", CorePanel.version(CorePanel.Core.Xray, base))
+        assertEquals("a".repeat(64), CorePanel.installed(base)["xray"]?.sha256)
+
+        record.writeText("   \n")
+        assertEquals(
+            "Xray-core v26.3.27",
+            CorePanel.version(CorePanel.Core.Xray, base),
+            "a blank record must fall back, never show an empty version",
+        )
+
+        // A pin too short to be a sha256 is no pin: it must not be trusted as
+        // "these bytes are already installed".
+        record.writeText("Xray-core v26.9.10\nnot-a-hash\n")
+        assertEquals("", CorePanel.installed(base)["xray"]?.sha256)
     }
 }

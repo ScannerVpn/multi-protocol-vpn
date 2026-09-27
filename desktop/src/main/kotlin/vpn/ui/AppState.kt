@@ -156,6 +156,14 @@ object AppState {
         private set
 
     /**
+     * A version an earlier "Install" handed to Windows while this build is
+     * still the one running: the installer was declined at UAC, or it met the
+     * app still holding its files. Shown once, then the record is dropped.
+     */
+    var appUpdateSkipped by mutableStateOf<String?>(null)
+        private set
+
+    /**
      * The application's real exit path, handed over by `Main` at startup.
      * Needed by the app updater: the staged installer runs elevated and cannot
      * replace files this process still holds open, so the update is
@@ -658,9 +666,13 @@ object AppState {
             // unless an adopted tunnel is genuinely up; the user decides when
             // to press connect (reported 2 Sep 2026: the app connected the
             // moment it opened, which must never happen).
-            // App update: drop the installer a previous update left behind,
-            // then ask (display only) whether a newer build exists.
-            withContext(Dispatchers.IO) { runCatching { AppUpdate.cleanStaleInstallers() } }
+            // App update: a previous Install that never landed leaves a record,
+            // and the notice must be read BEFORE the sweep deletes it; then drop
+            // the leftover installer and ask (display only) for a newer build.
+            withContext(Dispatchers.IO) {
+                runCatching { appUpdateSkipped = AppUpdate.takeUnappliedUpdate(vpn.BuildInfo.VERSION) }
+                runCatching { AppUpdate.cleanStaleInstallers() }
+            }
             if (settings.checkAppUpdates) checkForAppUpdate()
             // A link copied before launching the app is the commonest first
             // action there is, so look once — the user still has to confirm.
