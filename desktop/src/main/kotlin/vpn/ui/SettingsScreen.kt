@@ -336,8 +336,12 @@ private fun CoresCard() {
     }
 
     Text(
-        "The VPN engines. This build fetches a core the first time a protocol " +
-            "needs it and verifies it by SHA-256 before running it.",
+        if (vpn.BuildInfo.SLIM_CORES)
+            "The VPN engines. This ${vpn.BuildInfo.VARIANT} build downloads a core " +
+                "the first time a protocol needs it and verifies it by SHA-256 before running it."
+        else
+            "The VPN engines. This ${vpn.BuildInfo.VARIANT} build ships them all; " +
+                "an update installs the new SHA-256-verified core over the bundled one.",
         fontSize = 11.5.sp,
         color = C.TextSecondary,
     )
@@ -374,23 +378,31 @@ private fun CoresCard() {
             Column(Modifier.weight(1f)) {
                 Text(row.core.label, fontSize = 12.5.sp, color = C.TextPrimary, fontWeight = FontWeight.Medium)
                 val status = if (row.installed) "Installed" else "Not installed"
-                val version = if (row.version.isNotBlank()) "v${row.version}" else "pinned"
+                // Catalog versions already carry their own product name and
+                // prefix ("Xray-core v26.3.27", "awg31"), so no "v" is added.
                 Text(
-                    "$version · $status",
+                    row.version.ifBlank { "pinned" } + " · $status",
                     fontSize = 10.5.sp,
                     color = if (row.installed) C.Success else C.TextFaint,
                 )
                 if (upd != null) {
                     Text(
-                        "Update available: v${upd.currentVersion} → v${upd.latestVersion}",
+                        "Update available: ${upd.currentVersion} → ${upd.latestVersion}",
                         fontSize = 10.5.sp,
                         color = C.Accent,
                     )
                 }
             }
             when {
+                // A missing core with a newer release goes straight to the
+                // newer one; otherwise the bundled catalog's version would be
+                // installed first and immediately look outdated again.
                 !row.installed -> TextButton(
-                    onClick = { runCores(listOf(row.core)) { CorePanel.acquire(it) } },
+                    onClick = {
+                        runCores(listOf(row.core)) {
+                            if (upd != null) CorePanel.update(it) else CorePanel.acquire(it)
+                        }
+                    },
                     enabled = busyKey == null,
                 ) { Text(if (active) "Downloading…" else "Download", fontSize = 11.sp) }
 

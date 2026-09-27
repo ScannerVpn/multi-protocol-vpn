@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   build:
-    name: Package Windows EXE
+    name: Package Windows EXE (Full + Core-Fetch)
     runs-on: windows-latest
     timeout-minutes: 60
     defaults:
@@ -100,29 +100,53 @@ jobs:
       # for formats nobody was using. packageExe still builds the app image
       # first (createDistributable) as a task dependency. The task exists
       # because build.gradle.kts declares targetFormats(AppImage, Msi, Exe).
-      - name: Package
+      #
+      # TWO variants, sequentially, from the SAME fetched cores:
+      #   Full        every core baked in (the historical build),
+      #   Core-Fetch  -PslimCores: the four big cores are excluded from the jar
+      #               and fetched on demand. Both keep the Settings -> Cores
+      #               update section.
+      # packageExe wipes build/compose/binaries/main/app on every run, so each
+      # installer is copied out of the exe dir BEFORE the next build starts.
+      - name: Package Full
         working-directory: desktop
         run: ./gradlew.bat --no-daemon packageExe
+
+      - name: Stage the Full installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force stage | Out-Null
+          $exe = Get-ChildItem 'desktop/build/compose/binaries/main/exe/*.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'packageExe produced no installer' }
+          Copy-Item $exe.FullName (Join-Path 'stage' $exe.Name)
+          # The version is whatever the build produced - release.yml checks the
+          # filename against the tag, so it must not be hardcoded here.
+          $exe.Name | Out-File -Encoding ascii stage/BUILT_VERSION_HINT.txt
+
+      - name: Package Core-Fetch
+        working-directory: desktop
+        run: ./gradlew.bat --no-daemon packageExe -PslimCores=true
 
       - name: Stage artifacts
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $stage = Join-Path $PWD 'stage'
-          New-Item -ItemType Directory -Force $stage | Out-Null
-          # EXE only — and a missing exe must fail the step outright (no
-          # SilentlyContinue), or upload-artifact would ship a checksum file
-          # alone and look green.
-          Copy-Item 'desktop/build/compose/binaries/main/exe/*.exe' $stage
+          $exe = Get-ChildItem 'desktop/build/compose/binaries/main/exe/*.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'packageExe (Core-Fetch) produced no installer' }
+          # MultiVPN-<ver>.exe -> MultiVPN-<ver>-core-fetch.exe
+          $ver = $exe.BaseName -replace '^MultiVPN-', ''
+          Copy-Item $exe.FullName (Join-Path 'stage' "MultiVPN-$ver-core-fetch.exe")
           if (Test-Path 'wireproxy-source-commit.txt') {
-            Copy-Item 'wireproxy-source-commit.txt' $stage
+            Copy-Item 'wireproxy-source-commit.txt' stage
           }
+          Remove-Item stage/BUILT_VERSION_HINT.txt -ErrorAction SilentlyContinue
           # Publish SHA256 of every artifact so a download can be verified
           # against this build's log.
-          Get-ChildItem $stage -File |
+          Get-ChildItem stage -File |
             ForEach-Object { "{0}  {1}" -f (Get-FileHash -Algorithm SHA256 $_.FullName).Hash, $_.Name } |
-            Tee-Object -FilePath "$stage/SHA256SUMS.txt"
-          Get-ChildItem $stage | Format-Table Name, Length
+            Tee-Object -FilePath "stage/SHA256SUMS.txt"
+          Get-ChildItem stage | Format-Table Name, Length
 
       - name: Upload artifacts
         uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0

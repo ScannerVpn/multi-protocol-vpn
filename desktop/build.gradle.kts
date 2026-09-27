@@ -23,7 +23,7 @@ plugins {
  * said 3.6.11. The generateBuildInfo task below emits vpn.BuildInfo from this
  * value, and every UI string reads it, so drift is now impossible.
  */
-val appVersion = "3.6.20"
+val appVersion = "3.6.21"
 
 /**
  * SLIM CORES VARIANT (`gradlew createDistributable -PslimCores=true`).
@@ -53,6 +53,9 @@ val generateBuildInfo by tasks.registering {
     val outDir = generatedSrcDir
     val v = appVersion
     val slim = slimCores
+    // The name USERS see on the download page and in the UI footer. The Gradle
+    // property stays `-PslimCores` (it is what the resource filter keys on).
+    val variant = if (slim) "Core-Fetch" else "Full"
     inputs.property("version", v)
     inputs.property("slimCores", slim)
     outputs.dir(outDir)
@@ -69,8 +72,10 @@ val generateBuildInfo by tasks.registering {
                 const val ARCH: String = "x86_64"
                 /** True when built with -PslimCores (cores download on demand). */
                 const val SLIM_CORES: Boolean = $slim
-                /** "v3.6.12 · x86_64" */
-                val LABEL: String get() = "v${'$'}VERSION · ${'$'}ARCH"
+                /** "Full" or "Core-Fetch" - which packaging variant this is. */
+                const val VARIANT: String = "$variant"
+                /** "v3.6.21 · x86_64 · Core-Fetch" */
+                val LABEL: String get() = "v${'$'}VERSION · ${'$'}ARCH · ${'$'}VARIANT"
             }
 
             """.trimIndent(),

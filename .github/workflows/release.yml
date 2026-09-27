@@ -1,6 +1,7 @@
 name: release
 
-# Publishes the GitHub release for a version tag, EXE only.
+# Publishes the GitHub release for a version tag: both EXE installers
+# (Full and Core-Fetch), nothing else.
 #
 # Why this is a SEPARATE workflow instead of a job inside windows-build.yml:
 # windows-build is path-filtered to desktop/**, and GitHub applies `paths` to
@@ -32,7 +33,7 @@ permissions:
 
 jobs:
   publish:
-    name: Publish release (EXE only)
+    name: Publish release (both EXE variants)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -76,18 +77,23 @@ jobs:
           ( cd dist && sha256sum ./*.exe > SHA256SUMS.txt && cat SHA256SUMS.txt )
           ls -la dist
 
-      - name: Verify the EXE name matches the tag version
+      # Both packaging variants ship in one release: the Full installer and the
+      # Core-Fetch one that downloads cores on demand. Missing either means the
+      # build we are releasing is not the build windows-build produced, so this
+      # is a hard gate rather than a warning.
+      - name: Verify the EXE names match the tag version
         env:
           VERSION: ${{ steps.tag.outputs.version }}
         run: |
           set -euo pipefail
-          WANT="MultiVPN-${VERSION}.exe"
-          ACTUAL="$(basename "$(ls dist/*.exe | head -1)")"
-          echo "artifact: $ACTUAL / tag expects: $WANT"
-          if [ "$ACTUAL" != "$WANT" ]; then
-            echo "::error::artifact is $ACTUAL but the tag expects $WANT — the newest green build is for a different version. Bump desktop/build.gradle.kts (val appVersion), let windows-build go green, then tag."
-            exit 1
-          fi
+          for WANT in "MultiVPN-${VERSION}.exe" "MultiVPN-${VERSION}-core-fetch.exe"; do
+            if [ ! -f "dist/$WANT" ]; then
+              echo "::error::dist has no $WANT — the newest green build is for a different version. Bump desktop/build.gradle.kts (val appVersion), let windows-build go green, then tag."
+              ls -la dist
+              exit 1
+            fi
+          done
+          echo "releasing: $(ls dist/*.exe | tr '\n' ' ')"
 
       - name: Create or update the release
         env:
@@ -101,10 +107,19 @@ jobs:
             gh release upload "$TAG" dist/* \
               --repo "${{ github.repository }}" --clobber
           else
+            # Quoted heredoc: nothing expands inside it, and the VERSION
+            # placeholder keeps the release text readable in the YAML.
+            cat > notes.md <<'MD'
+          Two Windows x64 installers, both with Settings -> Cores (check for core updates, per-core download, SHA-256 verification):
+
+          * `MultiVPN-VERSION-core-fetch.exe` - **Core-Fetch**: about 70 MB smaller; each VPN engine is downloaded the first time its protocol is used.
+          * `MultiVPN-VERSION.exe` - **Full**: every engine is bundled inside the installer.
+          MD
+            sed -i "s/VERSION/${VERSION}/g" notes.md
             gh release create "$TAG" dist/* \
               --repo "${{ github.repository }}" \
               --title "MultiVPN $VERSION" \
-              --generate-notes
+              --notes-file notes.md
           fi
           gh release view "$TAG" --repo "${{ github.repository }}" \
             --json url,assets \
