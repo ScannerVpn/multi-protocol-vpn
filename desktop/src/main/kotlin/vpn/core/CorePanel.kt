@@ -56,4 +56,38 @@ internal object CorePanel {
             Core.Aether -> Aether.ensureCore(allowDownload = true) != null
         }
     }
+
+    /** Remote "latest" catalog from the last successful [checkUpdates], so a
+     *  following [update] installs exactly what the check reported. */
+    private var remoteCatalog: CoreCatalog? = null
+
+    /** Drop the cached remote catalog (used by tests to force a re-fetch). */
+    fun clearRemoteCatalog() { remoteCatalog = null }
+
+    /**
+     * Ask the source ([CoreUpdateChecker]) whether any core has a newer pinned
+     * version. Returns null when the source is unreachable/unparseable (the UI
+     * shows "check failed"), otherwise one row per known core. This ONLY reads
+     * version strings — it never installs anything.
+     */
+    suspend fun checkUpdates(): List<UpdateInfo>? = withContext(Dispatchers.IO) {
+        val bundled = CoreAcquire.catalogLoader() ?: return@withContext null
+        val remote = CoreUpdateChecker.fetchRemoteCatalog() ?: return@withContext null
+        remoteCatalog = remote
+        CoreUpdateChecker.plan(bundled, remote)
+    }
+
+    /**
+     * Update [core] to the version from the checked remote catalog: force a
+     * re-download that is still sha256-verified before unpacking (via
+     * [CoreAcquire.forceUpdate]). Manual-only — no connect path calls this.
+     * Returns false (never throws) when no catalog is available or the install
+     * did not verify.
+     */
+    suspend fun update(core: Core): Boolean = withContext(Dispatchers.IO) {
+        val remote = remoteCatalog
+            ?: CoreUpdateChecker.fetchRemoteCatalog().also { remoteCatalog = it }
+            ?: return@withContext false
+        CoreAcquire.forceUpdate(core = core.key, files = core.files, targetDir = dirOf(core), catalog = remote)
+    }
 }

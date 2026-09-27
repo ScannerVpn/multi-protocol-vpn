@@ -87,7 +87,8 @@ internal object CoreAcquire {
                     AppLog.i("CoreAcquire", "$core: incomplete and downloads not allowed")
                     return false
                 }
-                download(core, files, targetDir, complete)
+                val catalog = catalogLoader() ?: return false
+                download(core, files, targetDir, complete, catalog)
             }
         } catch (t: Throwable) {
             // The contract: failures are logged, never exceptions.
@@ -96,13 +97,35 @@ internal object CoreAcquire {
         }
     }
 
+    /**
+     * Force a re-download + reinstall of [core] from an explicit [catalog],
+     * bypassing the cached/bundled short-circuits that make [ensure] cheap.
+     * This is the ONLY way to replace an already-present core (i.e. update it),
+     * and it is deliberately NOT on any connect path — only a user-confirmed
+     * Settings action reaches it. The download is still sha256-verified against
+     * [catalog] and unpacked behind the ZIP-SLIP guard, so an update can never
+     * install bytes that do not match the pinned hash. Never throws.
+     */
+    fun forceUpdate(
+        core: String,
+        files: List<String>,
+        targetDir: File,
+        catalog: CoreCatalog,
+        complete: (File) -> Boolean = { CoreManifest.allPresent(it, files) },
+    ): Boolean = try {
+        synchronized(lockFor(core)) { download(core, files, targetDir, complete, catalog) }
+    } catch (t: Throwable) {
+        AppLog.e("CoreAcquire", "$core: update failed: ${t.javaClass.simpleName}: ${t.message}")
+        false
+    }
+
     private fun download(
         core: String,
         files: List<String>,
         targetDir: File,
         complete: (File) -> Boolean,
+        catalog: CoreCatalog,
     ): Boolean {
-        val catalog = catalogLoader() ?: return false
         val entry = catalog.entry(core)
         if (entry == null) {
             AppLog.e("CoreAcquire", "$core: not in the pinned catalog - refusing to guess a URL")

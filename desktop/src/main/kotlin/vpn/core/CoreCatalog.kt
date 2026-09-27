@@ -61,9 +61,18 @@ internal data class CoreCatalog(
                 return@runCatching null
             }
             // trimStart: a stray UTF-8 BOM would otherwise crash the Json parser.
-            val text = stream.use { it.readBytes().toString(Charsets.UTF_8) }.trimStart('\uFEFF')
-            json.decodeFromString<CoreCatalog>(text)
+            parse(stream.use { it.readBytes().toString(Charsets.UTF_8) })
         }.onFailure { AppLog.e("CoreCatalog", "manifest parse failed: ${it.message}") }.getOrNull()
+
+        /**
+         * Parses manifest JSON into a [CoreCatalog], or null on any malformed
+         * input. Shared by [load] (bundled jar resource) and
+         * [CoreUpdateChecker] (the remote "latest" manifest) so both go through
+         * one parser. Never throws.
+         */
+        fun parse(text: String): CoreCatalog? = runCatching {
+            json.decodeFromString<CoreCatalog>(text.trimStart('\uFEFF'))
+        }.getOrNull()
 
         /**
          * True when [file]'s bytes hash to [expected].

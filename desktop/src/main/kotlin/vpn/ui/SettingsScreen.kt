@@ -57,6 +57,7 @@ import vpn.core.AppLog
 import vpn.core.CorePanel
 import vpn.core.CoreProgress
 import vpn.core.SecretBox
+import vpn.core.UpdateInfo
 import vpn.core.Storage
 import vpn.core.VpnService
 import vpn.core.VpnStatus
@@ -288,6 +289,9 @@ private fun CoresCard() {
     var rows by remember { mutableStateOf(CorePanel.rows()) }
     var busyKey by remember { mutableStateOf<String?>(null) }
     var snap by remember { mutableStateOf(CoreProgress.current) }
+    var updates by remember { mutableStateOf<List<UpdateInfo>?>(null) }
+    var checking by remember { mutableStateOf(false) }
+    var checkFailed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     // Poll while a download is active; break on a terminal phase so a failed
@@ -302,18 +306,32 @@ private fun CoresCard() {
         }
     }
 
-    fun runDownloads(cores: List<CorePanel.Core>) {
+    // Sequentially run [action] (acquire or update) over [cores], one at a time,
+    // so the single CoreProgress slot always maps to the visible row.
+    fun runCores(cores: List<CorePanel.Core>, action: suspend (CorePanel.Core) -> Boolean) {
         if (busyKey != null || cores.isEmpty()) return
         scope.launch {
             for (c in cores) {
                 CoreProgress.reset()
                 busyKey = c.key
                 snap = CoreProgress.current
-                CorePanel.acquire(c)
+                val ok = action(c)
                 rows = CorePanel.rows()
+                if (ok) updates = updates?.map { if (it.core == c.key) it.copy(available = false) else it }
                 delay(300) // let one terminal tick land before advancing
             }
             busyKey = null
+        }
+    }
+
+    fun check() {
+        if (busyKey != null || checking) return
+        checking = true
+        checkFailed = false
+        scope.launch {
+            val res = CorePanel.checkUpdates()
+            checking = false
+            if (res == null) checkFailed = true else updates = res
         }
     }
 
@@ -325,8 +343,30 @@ private fun CoresCard() {
     )
     Spacer(Modifier.height(8.dp))
 
+    // Update-check header: reads the pinned source for newer versions. Never
+    // installs on its own — an available update needs an explicit click.
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Updates", fontSize = 12.5.sp, color = C.TextPrimary, fontWeight = FontWeight.Medium)
+            val n = updates?.count { it.available } ?: 0
+            val info = when {
+                checking -> "Checking the core source…"
+                checkFailed -> "Could not reach the core source."
+                updates == null -> "Check for newer pinned cores from the source."
+                n == 0 -> "All cores are up to date."
+                else -> "$n update${if (n > 1) "s" else ""} available."
+            }
+            Text(info, fontSize = 10.5.sp, color = if (checkFailed) C.Error else C.TextSecondary)
+        }
+        TextButton(onClick = { check() }, enabled = busyKey == null && !checking) {
+            Text(if (checking) "Checking…" else "Check for updates", fontSize = 11.sp)
+        }
+    }
+    Spacer(Modifier.height(6.dp))
+
     rows.forEach { row ->
         val active = busyKey == row.core.key
+        val upd = updates?.firstOrNull { it.core == row.core.key && it.available }
         Row(
             Modifier.fillMaxWidth().padding(vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -340,14 +380,24 @@ private fun CoresCard() {
                     fontSize = 10.5.sp,
                     color = if (row.installed) C.Success else C.TextFaint,
                 )
-            }
-            if (!row.installed) {
-                TextButton(
-                    onClick = { runDownloads(listOf(row.core)) },
-                    enabled = busyKey == null,
-                ) {
-                    Text(if (active) "Downloading…" else "Download", fontSize = 11.sp)
+                if (upd != null) {
+                    Text(
+                        "Update available: v${upd.currentVersion} → v${upd.latestVersion}",
+                        fontSize = 10.5.sp,
+                        color = C.Accent,
+                    )
                 }
+            }
+            when {
+                !row.installed -> TextButton(
+                    onClick = { runCores(listOf(row.core)) { CorePanel.acquire(it) } },
+                    enabled = busyKey == null,
+                ) { Text(if (active) "Downloading…" else "Download", fontSize = 11.sp) }
+
+                upd != null -> TextButton(
+                    onClick = { runCores(listOf(row.core)) { CorePanel.update(it) } },
+                    enabled = busyKey == null,
+                ) { Text(if (active) "Updating…" else "Update", fontSize = 11.sp) }
             }
         }
         if (active) {
@@ -356,14 +406,22 @@ private fun CoresCard() {
         }
     }
 
-    val missing = rows.count { !it.installed }
+    val missing = rows.filter { !it.installed }.map { it.core }
+    val updatable = rows.filter { r -> updates?.any { it.core == r.core.key && it.available } == true }.map { it.core }
     Spacer(Modifier.height(4.dp))
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        TextButton(
-            onClick = { runDownloads(rows.filter { !it.installed }.map { it.core }) },
-            enabled = busyKey == null && missing > 0,
-        ) {
-            Text(if (busyKey != null) "Downloading…" else "Download all ($missing)", fontSize = 11.sp)
+        if (missing.isNotEmpty()) {
+            TextButton(
+                onClick = { runCores(missing) { CorePanel.acquire(it) } },
+                enabled = busyKey == null,
+            ) { Text(if (busyKey != null) "Working…" else "Download all (${missing.size})", fontSize = 11.sp) }
+        }
+        if (updatable.isNotEmpty()) {
+            Spacer(Modifier.width(6.dp))
+            TextButton(
+                onClick = { runCores(updatable) { CorePanel.update(it) } },
+                enabled = busyKey == null,
+            ) { Text(if (busyKey != null) "Working…" else "Update all (${updatable.size})", fontSize = 11.sp) }
         }
     }
 }
