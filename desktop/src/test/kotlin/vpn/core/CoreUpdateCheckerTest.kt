@@ -59,8 +59,23 @@ class CoreUpdateCheckerTest {
     fun `only https on the allow-listed github hosts is trusted`() {
         assertTrue(CoreUpdateChecker.isTrustedUrl(CoreUpdateChecker.RELEASES_API_URL))
         assertTrue(CoreUpdateChecker.isTrustedUrl("https://github.com/x/y/releases/download/cores-v1/cores-manifest.json"))
+        // Regression: github 302s release assets to its own CDN host, and when
+        // that host moved the manual hop check silently killed every update
+        // check ("Could not reach the core source") — see CoreUpdateChecker.
+        assertTrue(
+            CoreUpdateChecker.isTrustedUrl(
+                "https://release-assets.githubusercontent.com/github-production-release-asset/1/2?sig=x",
+            ),
+            "the asset CDN hop must be trusted or the manifest can never be fetched",
+        )
+        assertTrue(CoreUpdateChecker.isTrustedUrl("https://objects.githubusercontent.com/x/y"))
         assertFalse(CoreUpdateChecker.isTrustedUrl("http://api.github.com/x"), "plain http")
         assertFalse(CoreUpdateChecker.isTrustedUrl("https://evil.example/cores-manifest.json"), "foreign host")
+        // A look-alike that merely ENDS with a trusted host must still be refused.
+        assertFalse(
+            CoreUpdateChecker.isTrustedUrl("https://release-assets.githubusercontent.com.evil.example/x"),
+            "suffix look-alike",
+        )
         assertFalse(CoreUpdateChecker.isTrustedUrl("not a url"))
     }
 

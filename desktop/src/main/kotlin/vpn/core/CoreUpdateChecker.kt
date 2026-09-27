@@ -3,6 +3,7 @@ package vpn.core
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import vpn.BuildInfo
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -38,13 +39,25 @@ internal object CoreUpdateChecker {
     const val CORES_TAG_PREFIX = "cores-"
     const val MANIFEST_ASSET = "cores-manifest.json"
 
-    /** The only hosts a check may contact (GitHub API + release download CDN). */
+    /**
+     * The only hosts a check may contact (GitHub API + release download CDN).
+     *
+     * github.com answers the first hop of an asset download and then 302s to
+     * its asset CDN, whose host MOVED from `objects.githubusercontent.com` to
+     * `release-assets.githubusercontent.com`. Both are listed because the hop
+     * check below is exact-match: when the new host was missing, every update
+     * check silently died on the redirect ("Could not reach the core source").
+     */
     private val ALLOWED_HOSTS = setOf(
         "api.github.com",
         "github.com",
         "objects.githubusercontent.com",
         "github-releases.githubusercontent.com",
+        "release-assets.githubusercontent.com",
     )
+
+    /** The GitHub API rejects requests without one (403), so it is mandatory. */
+    private const val USER_AGENT = "MultiVPN/${BuildInfo.VERSION}"
 
     private const val MAX_BYTES = 1_000_000
     private val json = Json { ignoreUnknownKeys = true }
@@ -82,11 +95,23 @@ internal object CoreUpdateChecker {
     fun fetchRemoteCatalog(): CoreCatalog? {
         if (!isTrustedUrl(RELEASES_API_URL)) return null
         val api = fetchUrl(RELEASES_API_URL)?.takeIf { it.isNotEmpty() && it.size <= MAX_BYTES }
-            ?: return null
-        val manifestUrl = latestManifestUrl(api.toString(Charsets.UTF_8)) ?: return null
+        if (api == null) {
+            AppLog.e("CoreUpdate", "releases API unreachable")
+            return null
+        }
+        val manifestUrl = latestManifestUrl(api.toString(Charsets.UTF_8))
+        if (manifestUrl == null) {
+            AppLog.e("CoreUpdate", "no usable '$MANIFEST_ASSET' asset under a '$CORES_TAG_PREFIX*' release")
+            return null
+        }
         val body = fetchUrl(manifestUrl)?.takeIf { it.isNotEmpty() && it.size <= MAX_BYTES }
-            ?: return null
-        return CoreCatalog.parse(body.toString(Charsets.UTF_8))
+        if (body == null) {
+            AppLog.e("CoreUpdate", "manifest fetch failed: $manifestUrl")
+            return null
+        }
+        val catalog = CoreCatalog.parse(body.toString(Charsets.UTF_8))
+        if (catalog == null) AppLog.e("CoreUpdate", "manifest is not a valid core catalog")
+        return catalog
     }
 
     /**
@@ -126,6 +151,10 @@ internal object CoreUpdateChecker {
      * GET [url], following redirects MANUALLY so every hop is re-checked
      * against [isTrustedUrl] (a blind follow could otherwise be bounced to an
      * attacker host by a 302). Small body, 30 s timeout, hard size cap.
+     *
+     * Every refusal is logged with its reason: this request is the one place
+     * where "the app said it couldn't reach the source" used to be undiagnosable,
+     * because a rejected redirect hop and a 403 looked identical in the UI.
      */
     private fun httpGet(url: String): ByteArray? {
         val client = HttpClient.newBuilder()
@@ -133,28 +162,53 @@ internal object CoreUpdateChecker {
             .build()
         var current = url
         repeat(6) {
-            if (!isTrustedUrl(current)) return null
+            if (!isTrustedUrl(current)) {
+                AppLog.e("CoreUpdate", "refused off-allowlist hop: ${hostOf(current)}")
+                return null
+            }
             val resp = runCatching {
                 client.send(
-                    HttpRequest.newBuilder(URI.create(current)).timeout(Duration.ofSeconds(30)).GET().build(),
+                    HttpRequest.newBuilder(URI.create(current))
+                        .header("User-Agent", USER_AGENT)
+                        .header("Accept", "application/json")
+                        .timeout(Duration.ofSeconds(30))
+                        .GET()
+                        .build(),
                     HttpResponse.BodyHandlers.ofByteArray(),
                 )
-            }.getOrNull() ?: return null
+            }.getOrElse {
+                AppLog.e("CoreUpdate", "request failed: ${it.javaClass.simpleName}: ${it.message}")
+                return null
+            }
             when {
                 resp.statusCode() in 200..299 -> {
                     val body = resp.body()
-                    return if (body.size > MAX_BYTES) null else body
+                    if (body.size > MAX_BYTES) {
+                        AppLog.e("CoreUpdate", "body over ${MAX_BYTES}B from ${hostOf(current)}")
+                        return null
+                    }
+                    return body
                 }
                 resp.statusCode() in 300..399 -> {
-                    val loc = resp.headers().firstValue("location").orElse(null) ?: return null
+                    val loc = resp.headers().firstValue("location").orElse(null)
+                    if (loc == null) {
+                        AppLog.e("CoreUpdate", "${resp.statusCode()} without Location")
+                        return null
+                    }
                     current = runCatching { URI.create(current).resolve(loc).toString() }.getOrNull()
                         ?: return null
                 }
-                else -> return null
+                else -> {
+                    AppLog.e("CoreUpdate", "HTTP ${resp.statusCode()} from ${hostOf(current)}")
+                    return null
+                }
             }
         }
+        AppLog.e("CoreUpdate", "too many redirects for $url")
         return null
     }
+
+    private fun hostOf(url: String): String = runCatching { URI.create(url).host }.getOrDefault(url)
 }
 
 /** Minimal view of the GitHub releases API (unknown fields ignored). */
