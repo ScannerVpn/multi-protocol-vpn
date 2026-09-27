@@ -711,6 +711,12 @@ private fun TrafficCard(state: AppState) {
             if (connected && state.sessionStartedAt > 0L) {
                 SessionTimer(startedAt = state.sessionStartedAt)
             }
+            // The exit address can legitimately change (a multi-outbound core,
+            // a reconnect, a different server), so let the user re-ask it —
+            // but only once there is something on screen to re-ask about.
+            if (connected && state.exitIp != null) {
+                AppTextButton("Re-check", onClick = { state.refreshExitIp() })
+            }
         }
         Spacer(Modifier.height(10.dp))
 
@@ -796,6 +802,21 @@ private fun TrafficCard(state: AppState) {
                 "Local proxy",
                 if (tun) "SOCKS 127.0.0.1:${ProxyPorts.tunProbe}" else proxyEndpointSummary(cfg.protocol),
             )
+        }
+
+        // The address the far side sees. Measured THROUGH this session's egress
+        // (ExitIp refuses to fall back to a direct request in proxy mode), so
+        // it is proof the tunnel carries traffic, not a restatement of the
+        // server we connected to. Unknown simply stays hidden until the probe
+        // answers — a dash under a "connected" heading proves nothing.
+        if (connected) {
+            Spacer(Modifier.height(8.dp))
+            state.exitIp?.let { InfoRow("Exit IP", it, valueColor = C.Success) }
+                ?: Text(
+                    "Checking the address the internet sees…",
+                    fontSize = 10.5.sp,
+                    color = C.TextFaint,
+                )
         }
     }
 }

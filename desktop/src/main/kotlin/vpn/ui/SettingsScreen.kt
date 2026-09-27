@@ -50,10 +50,12 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import vpn.core.AppLog
+import vpn.core.AppUpdate
 import vpn.core.CorePanel
 import vpn.core.CoreProgress
 import vpn.core.SecretBox
@@ -106,6 +108,16 @@ fun SettingsScreen() {
             }
             Spacer(Modifier.height(4.dp))
             ProxyPortRow()
+            Spacer(Modifier.height(4.dp))
+            ToggleRow(
+                "Offer to import links from the clipboard",
+                "At startup and when the window regains focus, ask before adding server " +
+                    "links found on the clipboard. Clipboard text is never saved or logged.",
+                AppState.settings.clipboardImport,
+            ) {
+                AppState.settings = AppState.settings.copy(clipboardImport = it)
+                Storage.saveSettings(AppState.settings)
+            }
             Spacer(Modifier.height(4.dp))
             InfoRow(
                 "Traffic mode",
@@ -258,6 +270,8 @@ fun SettingsScreen() {
                     )
                 }
             }
+            Spacer(Modifier.height(12.dp))
+            AppUpdateCard()
         }
         Spacer(Modifier.height(24.dp))
     }
@@ -440,7 +454,7 @@ private fun CoresCard() {
 
 /** Determinate %/MB bar while streaming, indeterminate during verify/extract. */
 @Composable
-private fun CoreProgressBar(snap: CoreProgress.Snapshot) {
+private fun CoreProgressBar(snap: CoreProgress.Snapshot, doneLabel: String = "Installed") {
     val label: String = when (snap.phase) {
         CoreProgress.Phase.Downloading ->
             if (snap.measurable)
@@ -449,7 +463,7 @@ private fun CoreProgressBar(snap: CoreProgress.Snapshot) {
                 "Downloading… ${formatMb(snap.bytes)}"
         CoreProgress.Phase.Verifying -> "Verifying checksum…"
         CoreProgress.Phase.Extracting -> "Installing files…"
-        CoreProgress.Phase.Done -> "Installed"
+        CoreProgress.Phase.Done -> doneLabel
         CoreProgress.Phase.Error -> snap.message.ifBlank { "Download failed" }
         CoreProgress.Phase.Idle -> ""
     }
@@ -478,6 +492,170 @@ private fun CoreProgressBar(snap: CoreProgress.Snapshot) {
     if (label.isNotBlank()) {
         Spacer(Modifier.height(3.dp))
         Text(label, fontSize = 10.5.sp, color = color)
+    }
+}
+
+/**
+ * Settings → About: the app's own updater.
+ *
+ * Same shape as [CoresCard] and for the same reason — a check is display-only,
+ * the bytes move only after an explicit click, and the bar reads the shared
+ * [CoreProgress] slot (under `AppUpdate.PROGRESS_KEY`) while the installer
+ * streams on an IO thread.
+ *
+ * Installing is the one action in the app that ends the process: the staged
+ * installer is elevated and cannot overwrite files this JVM still holds open,
+ * so the sequence is verify → launch (detached, delayed 1.5 s) → exit. The
+ * confirm dialog says exactly that, because "the app is about to close itself"
+ * is not something to discover mid-download.
+ */
+@Composable
+private fun AppUpdateCard() {
+    var busyKey by remember { mutableStateOf<String?>(null) }
+    var snap by remember { mutableStateOf(CoreProgress.current) }
+    var installing by remember { mutableStateOf<AppUpdate.Info?>(null) }
+    var failed by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val info = AppState.appUpdate
+
+    LaunchedEffect(busyKey) {
+        if (busyKey == null) return@LaunchedEffect
+        while (true) {
+            snap = CoreProgress.current
+            val p = snap.phase
+            if (p == CoreProgress.Phase.Done || p == CoreProgress.Phase.Error) break
+            delay(120)
+        }
+    }
+
+    fun install(target: AppUpdate.Info) {
+        if (busyKey != null) return
+        busyKey = AppUpdate.PROGRESS_KEY
+        scope.launch {
+            val file = withContext(Dispatchers.IO) {
+                runCatching { AppUpdate.download(target) }.getOrNull()
+            }
+            val launched = file != null && withContext(Dispatchers.IO) {
+                runCatching { AppUpdate.launchInstaller(file) }.getOrDefault(false)
+            }
+            if (launched) {
+                // Real exit, through the window's own quit path: shutdown hooks
+                // restore the system proxy and stop the cores first.
+                val exit = AppState.exitApp
+                if (exit != null) {
+                    exit()
+                } else {
+                    failed = "The installer is running — close the app to let it finish."
+                    busyKey = null
+                }
+            } else {
+                failed = if (file == null)
+                    "Could not download a verified installer. Check the app log."
+                else
+                    "Could not start the installer. Run it manually from the data folder."
+                busyKey = null
+            }
+        }
+    }
+
+    ToggleRow(
+        "Check for app updates",
+        "Asks GitHub once at startup whether a newer build exists. Never downloads " +
+            "anything on its own.",
+        AppState.settings.checkAppUpdates,
+    ) {
+        AppState.settings = AppState.settings.copy(checkAppUpdates = it)
+        Storage.saveSettings(AppState.settings)
+    }
+    Spacer(Modifier.height(8.dp))
+
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("This build", fontSize = 12.5.sp, color = C.TextPrimary, fontWeight = FontWeight.Medium)
+            val status = when {
+                AppState.appUpdateChecking -> "Checking GitHub…"
+                installing != null -> "Preparing the installer…"
+                info != null -> "Update available: v${info.currentVersion} → v${info.latestVersion}" +
+                    (if (info.sizeBytes > 0) " · ${formatMb(info.sizeBytes)}" else "")
+                AppState.appUpdateFailed -> "Could not reach the release source."
+                AppState.appUpdateChecked -> "Up to date (v${vpn.BuildInfo.VERSION})."
+                else -> "Not checked yet."
+            }
+            Text(
+                status,
+                fontSize = 10.5.sp,
+                color = when {
+                    info != null -> C.Accent
+                    AppState.appUpdateFailed -> C.Error
+                    else -> C.TextSecondary
+                },
+            )
+        }
+        TextButton(
+            onClick = { AppState.checkForAppUpdate() },
+            enabled = busyKey == null && !AppState.appUpdateChecking,
+        ) {
+            Text(if (AppState.appUpdateChecking) "Checking…" else "Check now", fontSize = 11.sp)
+        }
+        if (info != null && info.available) {
+            TextButton(
+                onClick = { failed = null; installing = info },
+                enabled = busyKey == null,
+            ) { Text("Install", fontSize = 11.sp, color = C.Accent2) }
+        }
+    }
+    if (busyKey != null && snap.core == AppUpdate.PROGRESS_KEY && installing == null) {
+        CoreProgressBar(snap, doneLabel = "Verified — starting the installer")
+    }
+    failed?.let {
+        Spacer(Modifier.height(4.dp))
+        Text(it, fontSize = 10.5.sp, color = C.Error)
+    }
+
+    installing?.let { target ->
+        AlertDialog(
+            onDismissRequest = { if (busyKey == null) installing = null },
+            confirmButton = {},
+            // Buttons live at the end of the text column, like in
+            // [vpn.ui.CloseChoiceDialog]: AlertDialog's own button bar adds
+            // spacing this dialog does not control.
+            text = {
+                Column {
+                    Text(
+                        "Install v${target.latestVersion}?",
+                        color = C.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "The ${formatMb(target.sizeBytes)} installer is downloaded and checked " +
+                            "against the SHA-256 the source computed for it. Then MultiVPN " +
+                            "closes itself and Windows asks for permission to replace the app.",
+                        color = C.TextSecondary, fontSize = 12.sp,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Your configs, subscriptions and settings are kept.",
+                        color = C.TextFaint, fontSize = 11.sp,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    if (busyKey == null) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            AppTextButton("Cancel", { installing = null }, color = C.TextSecondary)
+                            AppTextButton("Download and install", { install(target) })
+                        }
+                    } else {
+                        // Downloading with the dialog open: the bar is the only
+                        // feedback, and dismissing must not abort it.
+                        if (snap.core == AppUpdate.PROGRESS_KEY) {
+                            CoreProgressBar(snap, doneLabel = "Verified — starting the installer")
+                        } else {
+                            Text("Working…", color = C.TextFaint, fontSize = 11.5.sp)
+                        }
+                    }
+                }
+            },
+            containerColor = C.Surface,
+        )
     }
 }
 

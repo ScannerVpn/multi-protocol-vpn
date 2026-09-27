@@ -228,6 +228,19 @@ data class AppSettings(
     var animationLevel: String = "full",
     /** The Aether section's persisted configuration (censorship circumvention). */
     var aether: AetherSettings = AetherSettings(),
+    /**
+     * Look for a newer app build at startup. A check is DISPLAY ONLY — it
+     * fetches a version list over an allow-listed https API and never downloads
+     * or runs anything; installing needs a click (see vpn.core.AppUpdate).
+     */
+    var checkAppUpdates: Boolean = true,
+    /**
+     * Offer to import VPN share links found on the Windows clipboard when the
+     * app starts or the window is re-activated. Copying a link and opening the
+     * app IS the flow, so this is on; it only ever ASKS, and the clipboard text
+     * is never logged or persisted.
+     */
+    var clipboardImport: Boolean = true,
 )
 
 /**

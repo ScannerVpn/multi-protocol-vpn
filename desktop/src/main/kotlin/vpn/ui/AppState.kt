@@ -20,8 +20,11 @@ import kotlinx.coroutines.withTimeoutOrNull
 import vpn.core.AppList
 import vpn.core.AppLog
 import vpn.core.AppSettings
+import vpn.core.AppUpdate
 import vpn.core.Aether
 import vpn.core.Awg
+import vpn.core.ClipboardLinks
+import vpn.core.ExitIp
 import vpn.core.InstalledApp
 import vpn.core.KillSwitchCleanup
 import vpn.core.Links
@@ -123,6 +126,168 @@ object AppState {
         traffic = null
         trafficRate = null
         trafficHistory = emptyList()
+        exitIp = null
+    }
+
+    // ---- what the internet sees, and what could be newer ---------------
+
+    /**
+     * Public address reported back through the live session, or null while
+     * unknown. Belongs to the session, so [resetTraffic] clears it with the
+     * rest — a stale exit IP under a "connected" heading is a lie.
+     */
+    var exitIp by mutableStateOf<String?>(null)
+        private set
+
+    /** Newest app build the release check found; null = none / not checked. */
+    internal var appUpdate by mutableStateOf<AppUpdate.Info?>(null)
+        private set
+
+    /** True once a check has finished (successfully or not) — drives the UI label. */
+    var appUpdateChecked by mutableStateOf(false)
+        private set
+
+    /** True while a release check is in flight. */
+    var appUpdateChecking by mutableStateOf(false)
+        private set
+
+    /** True when the last check could not reach the release source. */
+    var appUpdateFailed by mutableStateOf(false)
+        private set
+
+    /**
+     * The application's real exit path, handed over by `Main` at startup.
+     * Needed by the app updater: the staged installer runs elevated and cannot
+     * replace files this process still holds open, so the update is
+     * "download → verify → launch → exit", never "exit and hope".
+     */
+    var exitApp: (() -> Unit)? = null
+
+    /** Share links found on the clipboard, waiting for the user's yes/no. */
+    var clipboardOffer by mutableStateOf<List<String>?>(null)
+        private set
+
+    /**
+     * Clipboard blobs already asked about this run. In memory only: the text
+     * may hold credentials, so persisting even a hash list of it to disk would
+     * be a fingerprint of what the user copied.
+     */
+    private val clipboardAsked = mutableSetOf<String>()
+
+    /**
+     * How an exit-IP probe must leave this machine. Mirrors the port mapping
+     * the connect path uses when it enables the system proxy: a session that
+     * runs as local proxies has NO tunnel, so only its own listener can answer
+     * truthfully, and `Direct` would report the user's real address.
+     */
+    private fun sessionEgress(): List<ExitIp.Egress> {
+        val cfg = activeConfig
+        if (cfg == null || settings.mode == VpnModes.TUN || !VpnService.isProxyMode(cfg)) {
+            return listOf(ExitIp.Egress.Direct)
+        }
+        return when {
+            VpnService.isAether(cfg) -> listOf(
+                ExitIp.Egress.Http(Aether.httpPort(settings.aether)),
+                ExitIp.Egress.Socks(Aether.SOCKS_PORT),
+            )
+            VpnService.isSingBox(cfg) -> listOf(ExitIp.Egress.Http(SingBox.MIXED_PORT))
+            VpnService.isXray(cfg) -> listOf(
+                ExitIp.Egress.Http(Xray.HTTP_PORT),
+                ExitIp.Egress.Socks(Xray.SOCKS_PORT),
+            )
+            else -> listOf(
+                ExitIp.Egress.Http(WireProxy.HTTP_PORT),
+                ExitIp.Egress.Socks(WireProxy.SOCKS_PORT),
+            )
+        }
+    }
+
+    /** Asks the far side what it sees. Safe to call repeatedly; ignores races with a disconnect. */
+    fun refreshExitIp() {
+        scope.launch {
+            val routes = sessionEgress()
+            val ip = withContext(Dispatchers.IO) { runCatching { ExitIp.fetch(routes) }.getOrNull() }
+            // A disconnect during the fetch cleared it already — do not resurrect it.
+            if (vpnStatus == VpnStatus.CONNECTED) exitIp = ip
+        }
+    }
+
+    /**
+     * Startup/background app-update check. Display only: [AppUpdate.check]
+     * reads a version list and nothing else. A failure leaves
+     * [appUpdateChecked] true with a null result, which the UI shows as
+     * "could not check" rather than "up to date".
+     */
+    fun checkForAppUpdate() {
+        if (appUpdateChecking) return
+        appUpdateChecking = true
+        scope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching { AppUpdate.check() }.getOrDefault(AppUpdate.Check.Unreachable)
+            }
+            appUpdate = (outcome as? AppUpdate.Check.Newer)?.info
+            appUpdateFailed = outcome is AppUpdate.Check.Unreachable
+            appUpdateChecked = true
+            appUpdateChecking = false
+        }
+    }
+
+    /** Drops the remembered result after the user installs an update. */
+    fun clearAppUpdate() {
+        appUpdate = null
+        appUpdateChecked = false
+        appUpdateFailed = false
+    }
+
+    /**
+     * Read the clipboard and offer whatever VPN links it holds. Called at
+     * startup and when the window is re-activated — never on a timer, so the
+     * app does not quietly watch the clipboard all day.
+     */
+    fun scanClipboardNow() {
+        if (!settings.clipboardImport) return
+        scope.launch {
+            val text = withContext(Dispatchers.IO) {
+                runCatching {
+                    java.awt.Toolkit.getDefaultToolkit().systemClipboard
+                        .getContents(null)
+                        ?.getTransferData(java.awt.datatransfer.DataFlavor.stringFlavor)
+                        ?.toString()
+                }.getOrNull()
+            }
+            scanClipboard(text)
+        }
+    }
+
+    /**
+     * Pure decision behind [scanClipboardNow], kept separate so it is testable
+     * without an AWT clipboard: one prompt per distinct blob, and only when
+     * something actually parses as a link.
+     */
+    fun scanClipboard(text: String?) {
+        if (!settings.clipboardImport) return
+        val body = text?.takeIf { it.isNotBlank() } ?: return
+        val sig = ClipboardLinks.signature(body)
+        if (sig.isEmpty() || sig in clipboardAsked) return
+        // Mark it asked BEFORE the extract: a blob we declined must not come
+        // back on the next window activation even if nothing parsed from it.
+        clipboardAsked.add(sig)
+        val links = ClipboardLinks.extract(body)
+        if (links.isNotEmpty()) clipboardOffer = links
+    }
+
+    /** Imports the offered links; returns how many became configs. */
+    fun acceptClipboardOffer(): Int {
+        val links = clipboardOffer ?: return 0
+        clipboardOffer = null
+        val added = importLinks(links.joinToString("\n"))
+        // Count only. The link text is the credential; AppLog is plaintext.
+        AppLog.i("Clipboard", "imported $added of ${links.size} link(s) from the clipboard")
+        return added
+    }
+
+    fun dismissClipboardOffer() {
+        clipboardOffer = null
     }
 
     /** configId → latency ms (null while measuring, absent = never measured). */
@@ -482,6 +647,7 @@ object AppState {
                     // session clock showed the PREVIOUS session's elapsed time.
                     if (sessionStartedAt == 0L) sessionStartedAt = System.currentTimeMillis()
                     startPolling()
+                    refreshExitIp()
                 } else {
                     sessionStartedAt = 0L
                     resetTraffic()
@@ -492,6 +658,13 @@ object AppState {
             // unless an adopted tunnel is genuinely up; the user decides when
             // to press connect (reported 2 Sep 2026: the app connected the
             // moment it opened, which must never happen).
+            // App update: drop the installer a previous update left behind,
+            // then ask (display only) whether a newer build exists.
+            withContext(Dispatchers.IO) { runCatching { AppUpdate.cleanStaleInstallers() } }
+            if (settings.checkAppUpdates) checkForAppUpdate()
+            // A link copied before launching the app is the commonest first
+            // action there is, so look once — the user still has to confirm.
+            scanClipboardNow()
             // ONE daemon loop: auto-reconnect watchdog + periodic subscription
             // refresh (both no-op when their preconditions are not met).
             startBackgroundJobs()
@@ -1588,6 +1761,7 @@ object AppState {
                     // `connectJob === this` check makes the later one a no-op.
                     if (connectJob === this) connectJob = null
                     startPolling()
+                    refreshExitIp()
                 } else {
                     AppLog.e("VPN", "Connect failed: ${res.message}")
                     // A timed-out attempt may have left half-started cores.

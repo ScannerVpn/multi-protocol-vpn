@@ -57,13 +57,18 @@ internal object CoreUpdateChecker {
     )
 
     /** The GitHub API rejects requests without one (403), so it is mandatory. */
-    private const val USER_AGENT = "MultiVPN/${BuildInfo.VERSION}"
+    internal const val USER_AGENT = "MultiVPN/${BuildInfo.VERSION}"
 
     private const val MAX_BYTES = 1_000_000
     private val json = Json { ignoreUnknownKeys = true }
 
     /** Test seam: fetch [url] to bytes, or null on any failure. */
     internal var fetchUrl: (url: String) -> ByteArray? = ::httpGet
+
+    /** Parse a GitHub releases payload, or null when it is not one. */
+    internal fun decodeReleases(releasesJson: String): List<GhRelease>? = runCatching {
+        json.decodeFromString<List<GhRelease>>(releasesJson.trimStart('\uFEFF'))
+    }.getOrNull()
 
     /** True only for an https URL on an allow-listed GitHub host. */
     fun isTrustedUrl(url: String): Boolean {
@@ -77,9 +82,7 @@ internal object CoreUpdateChecker {
      * null if none qualifies or the URL is not on the allow-list.
      */
     fun latestManifestUrl(releasesJson: String): String? {
-        val releases = runCatching {
-            json.decodeFromString<List<GhRelease>>(releasesJson.trimStart('\uFEFF'))
-        }.getOrNull() ?: return null
+        val releases = decodeReleases(releasesJson) ?: return null
         val cores = releases.firstOrNull {
             !it.draft && !it.prerelease && it.tag_name.startsWith(CORES_TAG_PREFIX)
         } ?: return null
@@ -224,6 +227,16 @@ internal data class GhRelease(
 internal data class GhAsset(
     val name: String = "",
     val browser_download_url: String = "",
+    /**
+     * SHA-256 GitHub computed for the uploaded bytes, e.g. `sha256:6ccd…`.
+     * Only `[AppUpdate]` uses it: for a core archive the pin comes from our own
+     * `cores-manifest.json` instead, but an app installer has no manifest to
+     * check against, so the source-of-truth hash is the one the CDN itself
+     * reports. Older API responses may omit it — [AppUpdate.sha256Of] turns
+     * that into "refuse to install", never "install anyway".
+     */
+    val digest: String? = null,
+    val size: Long = 0,
 )
 
 /** One core's update verdict. Display-only; carries no executable decision. */

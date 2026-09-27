@@ -36,9 +36,11 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -143,6 +145,11 @@ fun main() {
             AppState.shutdown()
             exitApplication()
         }
+        // The app updater runs INSIDE a screen, but this is the only place
+        // that knows how to end the app properly (tray, cores, proxy, then the
+        // Compose window). Hand it over instead of letting a screen improvise
+        // with System.exit, which would skip the shutdown hooks' ordering.
+        LaunchedEffect(Unit) { AppState.exitApp = quit }
         // Close behaviour (3.6.16): the X button asks what to do — hide to the
         // tray (tunnel keeps running) or quit for real — unless the user ticked
         // "remember my choice", which persists to AppSettings.closeAction.
@@ -246,6 +253,20 @@ fun main() {
                     }
                 }
             }
+            // Clipboard import: an offer fires at startup (AppState.load) and
+            // each time the window comes back to the foreground — the moment a
+            // user who just copied a link from a browser or a bot returns to us.
+            // Event-driven on purpose: a clipboard POLLED all day is a privacy
+            // problem, and AppState remembers each blob it already asked about.
+            LaunchedEffect(Unit) {
+                runCatching {
+                    window.addWindowListener(object : java.awt.event.WindowAdapter() {
+                        override fun windowActivated(e: java.awt.event.WindowEvent?) {
+                            AppState.scanClipboardNow()
+                        }
+                    })
+                }
+            }
         MultiVpnTheme(
                 light = AppState.settings.theme == "light",
                 animations = AppState.settings.animationsEnabled,
@@ -302,6 +323,41 @@ private val NAV_ITEMS = listOf(
 fun App() {
     LaunchedEffect(Unit) { AppState.load() }
     var tab by remember { mutableStateOf(0) }
+    // Clipboard import: the count imported by the last accepted offer, kept
+    // only to show the receipt and then jump to the Configs tab.
+    var clipboardAdded by remember { mutableStateOf(0) }
+
+    AppState.clipboardOffer?.let { links ->
+        vpn.ui.ClipboardOfferDialog(
+            links = links,
+            onImport = { clipboardAdded = AppState.acceptClipboardOffer() },
+            onDismiss = { AppState.dismissClipboardOffer() },
+        )
+    }
+    if (clipboardAdded > 0) {
+        AlertDialog(
+            onDismissRequest = { clipboardAdded = 0 },
+            title = { Text("Added to your configs", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            text = {
+                Text(
+                    "$clipboardAdded ${if (clipboardAdded == 1) "config" else "configs"} " +
+                        "imported from the clipboard.",
+                    fontSize = 12.5.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    clipboardAdded = 0
+                    tab = NAV_ITEMS.indexOfFirst { it.label == "Configs" }.coerceAtLeast(0)
+                }) { Text("Open Configs", color = C.Accent) }
+            },
+            dismissButton = {
+                TextButton(onClick = { clipboardAdded = 0 }) { Text("OK", color = C.TextSecondary) }
+            },
+            containerColor = C.Surface,
+            titleContentColor = C.TextPrimary,
+        )
+    }
 
     // ONE place measures the window; everything downstream reads LocalLayout.
     // BoxWithConstraints gives the real content width, which is what matters —
