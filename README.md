@@ -23,6 +23,24 @@ Built with **Compose Multiplatform (Kotlin)**, packaged as a self-contained app
 > Existing WireGuard/AmneziaWG, OpenVPN, VLESS, Trojan and Hysteria2 configs are
 > unaffected. Nothing on the client side needs re-importing.
 
+## Download
+
+Windows 10/11 x64 — grab either file from the
+[latest release](https://github.com/ScannerVpn/multi-protocol-vpn/releases/latest);
+they run the same app and differ only in how the VPN engines arrive.
+
+| File | Size | The VPN engines |
+|------|------|-----------------|
+| `MultiVPN-<ver>.exe` — **Full** | ~210 MB | bundled inside the installer; works with no internet the first time |
+| `MultiVPN-<ver>-core-fetch.exe` — **Core-Fetch** | ~140 MB | downloaded on demand, the first time a protocol needs one |
+
+In both builds **Settings → Cores** lists every engine with its pinned version
+and installed state, downloads a missing one with a live progress bar, and has
+**Check for updates**: the app reads the pinned core release over HTTPS (host
+allow-list, redirects verified hop by hop), shows what is newer, and installs an
+update only after you click it. Nothing is ever executed before its SHA-256
+matches the pin — one of those binaries, `openvpn.exe`, runs as SYSTEM.
+
 ## Features
 - Add a VPS over SSH — the app installs and configures the chosen protocol on it
   automatically (live streaming setup log), or detects an existing install
@@ -79,10 +97,10 @@ cd multi-protocol-vpn
 
 ### 2. Fetch the core binaries
 
-The four VPN cores are third-party binaries (~130 MB) and are **not committed**.
-Fetch them with the included script — it downloads each one from its official
-upstream release, extracts exactly the files the app expects, and prints a
-summary table:
+The five VPN cores are third-party binaries (~200 MB unpacked) and are **not
+committed**. Fetch them with the included script — it downloads each one from
+its official upstream release, extracts exactly the files the app expects, and
+prints a summary table:
 
 ```powershell
 cd desktop
@@ -94,8 +112,6 @@ Expected tail of the output:
 ```
 === Summary ===
   OK      xray         xray.exe                         34 MB
-  OK      xray         geoip.dat                      18.9 MB
-  OK      xray         geosite.dat                      10 MB
   OK      singbox      HiddifyCli.exe                  1.6 MB
   OK      singbox      hiddify-core.dll               53.9 MB
   OK      singbox      libcronet.dll                   8.2 MB
@@ -106,6 +122,9 @@ Expected tail of the output:
   OK      openvpn      libpkcs11-helper-1.dll          0.1 MB
   OK      openvpn      vcruntime140.dll                0.1 MB
   OK      openvpn      wintun.dll                      0.4 MB
+  OK      aether       aether.exe                     21.7 MB
+  OK      aether       pt/lyrebird.exe                16.1 MB
+  OK      aether       pt/psiphon-tunnel-core.exe     21.6 MB
   OK      wireproxy    wireproxy.exe                   9.9 MB
 
 [+] All cores present. Build with:  .\gradlew.bat createDistributable
@@ -134,11 +153,21 @@ for the wireproxy commit pin.
 ```powershell
 $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.19.10-hotspot"
 
-.\gradlew.bat test                  # 278 tests, all offline
-.\gradlew.bat createDistributable   # portable app folder
-.\gradlew.bat packageExe            # single-file installer (~155 MB, needs WiX 3.x)
-.\gradlew.bat koverHtmlReport       # coverage -> build/reports/kover/html
+.\gradlew.bat test                       # 397 tests, all offline
+.\gradlew.bat createDistributable        # portable app folder
+.\gradlew.bat packageExe                 # Full installer,  ~210 MB (needs WiX 3.x)
+.\gradlew.bat packageExe -PslimCores=true # Core-Fetch installer, ~140 MB
+.\gradlew.bat koverHtmlReport            # coverage -> build/reports/kover/html
 ```
+
+`-PslimCores=true` is the **Core-Fetch** variant: the four big cores
+(xray / sing-box / aether / wireproxy, ~170 MB together) are left out of the jar
+and a `cores-manifest.json` takes their place, so the app downloads each one the
+first time a protocol needs it. Without the flag every fetched core is bundled
+and the app needs no internet to start a tunnel. `openvpn` — because it is the
+one binary executed as SYSTEM — ships in **both** variants, and so does the
+manifest. Both builds keep the same Settings → Cores update flow and the same
+SHA-256 pins.
 
 Output:
 
@@ -147,9 +176,18 @@ desktop\build\compose\binaries\main\app\MultiVPN\MultiVPN.exe   portable
 desktop\build\compose\binaries\main\exe\MultiVPN-<version>.exe  installer
 ```
 
+Both variants write the installer to the **same** path, so copy it aside before
+building the other one — CI does, and renames the Core-Fetch file to
+`MultiVPN-<version>-core-fetch.exe`.
+
+A Core-Fetch build is the only thing you can package from a partial step 2 (it
+needs `openvpn` and nothing else), but CI always fetches the full set because it
+packages both installers in one run.
+
 `createDistributable` needs nothing but a JDK. `packageMsi` / `packageExe`
 additionally need [WiX 3.x](https://wixtoolset.org/) — the GitHub
-`windows-latest` image ships it, so CI builds all three.
+`windows-latest` image ships it, so CI builds both EXE variants and stages them
+as `MultiVPN-<version>.exe` + `MultiVPN-<version>-core-fetch.exe`.
 
 Toolchain: Gradle 8.10.2 (wrapper), Kotlin 2.1.0, Compose Multiplatform 1.7.3,
 sshj 0.40.0, JNA 5.19.1, coroutines 1.10.2, Kover 0.9.1.
@@ -160,12 +198,11 @@ every UI string reads. Do not hardcode it anywhere.
 
 ---
 
-## Bundled cores
+## The cores
 
-All client binaries end up inside the exe — the finished app downloads nothing
-and installs nothing. Each core has exactly one job:
+Each core has exactly one job:
 
-- **`xray.exe`** + `geoip.dat`/`geosite.dat` — vless / trojan / shadowsocks
+- **`xray.exe`** — vless / trojan / shadowsocks
 - **`HiddifyCli.exe`** + `hiddify-core.dll` + `libcronet.dll` + `wintun.dll` —
   hysteria2, and the TUN engine that wraps any local SOCKS proxy
 - **`wireproxy.exe`** — WireGuard and AmneziaWG in userspace (real
@@ -180,6 +217,19 @@ and installs nothing. Each core has exactly one job:
   Aether 2.1 censorship-circumvention core (MASQUE / WG / Gool / MiM / Zero
   Trust / Tor / Psiphon), fetched from the pinned CluvexStudio release and
   SHA256-verified like every other core.
+
+How they reach the user depends on the build:
+
+- **Full** — every file above is inside the installer. Nothing is downloaded,
+  the app works offline from the first launch.
+- **Core-Fetch** (`-PslimCores=true`) — only `openvpn` ships. The other four are
+  fetched on demand from our own `cores-v1` GitHub release into the app's data
+  directory, and each file's SHA-256 is checked against `cores-manifest.json`
+  **before** anything is executed; a mismatch aborts and the protocol simply
+  reports a failed download.
+
+Both builds can update a core later from Settings → Cores, which reads the same
+pinned release for newer versions and never installs without a click.
 
 Two constraints worth knowing before you change versions:
 
@@ -208,7 +258,10 @@ Two constraints worth knowing before you change versions:
   SYSTEM.
 - SSH host keys are pinned on first use (`known_hosts` in the data dir); a later
   mismatch refuses the connection instead of leaking the root password.
-- Every downloaded core is SHA256-verified against `core-hashes.json`.
+- Every core is SHA256-verified: at build time against `core-hashes.json`, at
+  runtime against the pinned `cores-manifest.json`. The update checker may only
+  talk to an exact list of GitHub hosts and re-checks every redirect hop, so a
+  catalog or asset served from anywhere else is refused outright.
 
 ### The AmneziaWG 3.x patch
 
@@ -256,15 +309,20 @@ Select-String -Path wireproxy.exe -Pattern HeaderProtectionKey -Encoding Byte
 desktop/                     Compose Multiplatform app
   fetch-cores.ps1            downloads/builds every core binary (hash-pinned)
   core-hashes.json           SHA256 of every downloaded artifact
+  package-cores.ps1          builds the pinned `cores-*` archives the app fetches
   wireproxy-source.pin       the wireproxy-awg commit that gets built
   wireproxy-awg-awg31.patch  AWG 3.x support for PRE-#35 wireproxy commits only
   src/main/kotlin/vpn/
     core/                    protocol engines, SSH, storage, process handling
       CoreManifest.kt        THE list of files each core needs
+      CoreAcquire.kt         bundled → cached → sha256-pinned download
+      CoreUpdateChecker.kt   "is there a newer pinned core?" (host allow-list)
       TrafficProbe.kt        the only place that answers "does traffic flow?"
     ui/                      screens + AppState (single observable store)
-  src/test/kotlin/           278 offline tests
-  src/main/resources/bin/    core binaries (gitignored, fetched in step 2)
+  src/test/kotlin/           397 offline tests
+  src/main/resources/
+    bin/                     core binaries (gitignored, fetched in step 2)
+    cores-manifest.json      the pinned core catalog baked into the jar
 server/                      setup-{ikev2,wireguard,openvpn,xray}.sh
                              canonical setup scripts; copies under
                              desktop/src/main/resources/ are bundled into the
@@ -284,11 +342,11 @@ The staged OpenVPN payload lives in `%ProgramData%\MultiVPN\openvpn-secure`
 ## Tests
 
 ```powershell
-.\gradlew.bat test              # 278 tests, all offline
+.\gradlew.bat test              # 397 tests, all offline
 .\gradlew.bat koverHtmlReport   # coverage -> build\reports\kover\html\index.html
 ```
 
-All 278 tests run offline. Three suites are live probes against a real VPS and
+All 397 tests run offline. Three suites are live probes against a real VPS and
 skip themselves unless opted in via an env var: `LIVE_AWG_TEST`,
 `GRAB_SCAN_TEST`, `PROBE_SERVER`.
 
@@ -308,6 +366,8 @@ Notable guards:
 | `VpnScriptsTest` | every generated PowerShell: self-elevation, `§`→`$` substitution, quote/`$` escaping, the SYSTEM staging ACL, the IPsec policy pin |
 | `StorageTest` | atomic writes, corrupt-file quarantine, and never persisting a secret that failed to decrypt |
 | `CoreManifestTest` | the core file lists in Kotlin and `fetch-cores.ps1` drifting apart (a missing file = a protocol that silently cannot connect) |
+| `CoreAcquireTest` | an unverified or path-trescaping core being written to disk (`..`/absolute zip entries, hash mismatch, partial extract) |
+| `CoreUpdateCheckerTest` | the update check trusting an off-allow-list host or a redirect hop — including GitHub's asset-CDN redirect, which silently killed every check when its hostname changed |
 | `SourceEncodingTest` | a UTF-8 BOM, Latin-1 mojibake, or ASCII-transcoded punctuation (`???`) in the sources |
 | `KillSwitchCleanupScriptTest` | the generated cleanup PowerShell being syntactically invalid |
 | `HiddenRunCancelTest` | process waits not actually being cancellable |
