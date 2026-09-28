@@ -55,3 +55,12 @@ The patch is kept in the tree for anyone who has to build from an older commit.
 
 CI runs `fetch-cores.ps1 -RequireHashes`, which turns a pin mismatch into a
 hard failure instead of a warning.
+
+The scheduled watcher (`desktop/watch-cores.ps1` +
+`.github/workflows/cores-watch.yml`) **proposes, never commits, this pin**: when
+wireproxy's newest stable release tag points at a commit past the pin, the
+watcher lists the commits in between (GitHub compare API) so a human can read
+them. The CI build checks out that exact tag commit — never a moving branch
+HEAD — and the new commit is written only to the working tree for the draft
+cores release; `wireproxy-source.pin` in git is moved solely by the steps 1–3
+above, or afterwards by the published-release-only sync PR that a human merges.

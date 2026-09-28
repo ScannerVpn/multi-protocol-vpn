@@ -231,6 +231,30 @@ How they reach the user depends on the build:
 Both builds can update a core later from Settings → Cores, which reads the same
 pinned release for newer versions and never installs without a click.
 
+#### Keeping cores fresh: the CI watcher stops at a draft
+
+`.github/workflows/cores-watch.yml` runs weekly (and on demand) and asks each
+core's **official upstream repo** for its newest **stable** release. When one is
+newer it fetches, hash-verifies (against the digest GitHub records in the
+release's own metadata), packages and **stages a `cores-vN` release as a DRAFT**
+— then stops. Nothing reaches a single user until a human publishes it, because
+`CoreUpdateChecker` only ever reads the newest **non-draft, non-prerelease**
+`cores-*` release. Publishing is the whole point, so it is deliberately manual —
+two commands:
+
+```powershell
+gh release view cores-vN          # 1. read the notes + the old -> new versions
+gh release edit cores-vN --draft=false   # 2. publish (or: gh release delete cores-vN --yes)
+```
+
+A draft that looks wrong is discarded, not shipped: a compromised upstream can
+produce a *draft*, but it cannot produce a *rollout*. After a human publishes,
+the same workflow opens a `chore(cores): sync pins to cores-vN` PR so the repo's
+committed `core-hashes.json` and `cores-manifest.json` catch up to the published
+tag — and that PR is opened **only for a published release, never for a draft**.
+See [`desktop/core-hashes.md`](desktop/core-hashes.md) for why `-SaveHashes`
+stays banned in CI even though the watcher computes hashes.
+
 Two constraints worth knowing before you change versions:
 
 - **OpenVPN must stay on the 2.5.x series.** It links OpenSSL 1.1, whose DLL

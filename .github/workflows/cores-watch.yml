@@ -1,0 +1,428 @@
+name: cores-watch
+
+# Watches the OFFICIAL upstream sources of the four downloadable cores
+# (xray / singbox / wireproxy / aether). When a newer STABLE release exists,
+# this workflow does everything — resolve, download, verify, repackage — and
+# stages the result as a DRAFT `cores-vN` GitHub release.
+#
+# WHY A DRAFT AND A HUMAN CLICK (do NOT "optimize" this away):
+# sha256 pinning proves transport integrity, never authorship. The app's
+# CoreUpdateChecker filters `!draft && !prerelease`, so a draft is invisible
+# to every installed app until a person publishes it. If this workflow ever
+# published directly, whoever compromised an upstream repo — or this CI
+# token — would have a clean, verified path onto every user's machine, and
+# openvpn.exe is later executed as SYSTEM (see desktop/core-hashes.md).
+#
+# The expected hashes come from GitHub release METADATA (assets[].digest,
+# computed by GitHub for the uploaded bytes) BEFORE the download, so
+# `fetch-cores.ps1 -RequireHashes` verifies against a value that did not come
+# from the payload. `-SaveHashes` (recompute-and-compare-against-nothing)
+# stays banned here.
+#
+# Stable-only is the other user decision: Xray's rolling builds are all
+# prereleases, so xray may legitimately show no update for months. That is
+# the accepted cost, not a bug to work around.
+#
+# A run that finds nothing newer is OBVIOUSLY BORING: one summary line,
+# green, nothing touched. Schedule + manual trigger only — this must never
+# run on push or block a normal build (windows-build.yml stays that gate).
+#
+# `cores-v1` is permanent: the catalog compiled into every shipped build
+# points at its archives. Nothing in this file may delete, rename or
+# overwrite it or its assets — the next-tag computation starts above it.
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'   # Mondays ~06:17 UTC, off the round minute
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Run the full pipeline even when nothing is newer (still only ever creates a DRAFT)'
+        type: boolean
+        default: false
+
+# Least privilege: DRAFT releases + their assets, loud-failure issues and
+# repo-sync PRs need contents:write. No packages, no secrets, no admin.
+permissions:
+  contents: write
+
+concurrency:
+  group: cores-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    name: Resolve, verify, package, stage DRAFT cores release
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      # Steps read these as plain env vars, so every run block below is also
+      # executable on a laptop against a stub `gh` (that is how the DRAFT
+      # step is proven without touching a real release).
+      WATCH_REPO: ${{ github.repository }}
+      FORCE: ${{ github.event.inputs.force }}
+      GH_TOKEN: ${{ github.token }}
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      # Actions pinned to commit SHAs (same idiom as windows-build.yml): a
+      # retagged action would otherwise run inside a supply-chain watcher.
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Go (for the wireproxy source build)
+        uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
+        with:
+          go-version: '1.23'
+
+      # The whole decision lives in desktop/watch-cores.ps1; this step is a
+      # thin wrapper. Run as a CHILD process so exit 3 ("something newer") is
+      # read as data instead of killing the shell; the last stdout line is
+      # the machine-readable JSON contract.
+      - name: Resolve upstream stable releases (dry)
+        run: |
+          set -euo pipefail
+          cd desktop
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./watch-cores.ps1 -DryRun \
+            > "$RUNNER_TEMP/watch-dry.out" 2> "$RUNNER_TEMP/watch-dry.err" && code=0 || code=$?
+          cat "$RUNNER_TEMP/watch-dry.out" "$RUNNER_TEMP/watch-dry.err" || true
+          if [ "$code" -ne 0 ] && [ "$code" -ne 3 ]; then
+            echo "::error::watch-cores.ps1 failed (exit $code) — a broken watcher must be loud"
+            exit 1
+          fi
+          grep -E '^\{' "$RUNNER_TEMP/watch-dry.out" | tail -1 > "$RUNNER_TEMP/decision.json"
+          test -s "$RUNNER_TEMP/decision.json"
+          proceed=no; [ "$code" -eq 3 ] && proceed=yes
+          [ "$proceed" = no ] && [ "$FORCE" = true ] && proceed=yes
+          {
+            echo "WATCH_EXIT=$code"
+            echo "PROCEED=$proceed"
+          } >> "$GITHUB_ENV"
+
+      # A no-update run must be boring, not red: print the one-line summary
+      # and skip everything else (all later steps are gated on PROCEED).
+      - name: Nothing newer — end the run (boring by design)
+        if: env.PROCEED != 'yes'
+        run: |
+          echo "all four cores are at their newest stable upstream release" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Exit 3 (or force): write the resolved GitHub-metadata digests into
+      # desktop/core-hashes.json AS THE EXPECTED VALUES before anything is
+      # downloaded. watch-cores.ps1 only ever touches keys for the changed
+      # cores — the openvpn and wintun pins are carried over untouched — and
+      # never rewrites wireproxy-source.pin (the repo-sync PR carries that).
+      # Re-resolving here races with the dry pass; if upstream moved in
+      # between, fetch-cores' pin check fails the run closed, which is fine.
+      - name: Apply metadata digests to core-hashes.json
+        if: env.PROCEED == 'yes'
+        run: |
+          set -euo pipefail
+          cd desktop
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./watch-cores.ps1 \
+            > "$RUNNER_TEMP/watch-apply.out" 2> "$RUNNER_TEMP/watch-apply.err" && code=0 || code=$?
+          cat "$RUNNER_TEMP/watch-apply.out" "$RUNNER_TEMP/watch-apply.err" || true
+          if [ "$code" -ne 0 ] && [ "$code" -ne 3 ]; then
+            echo "::error::watch-cores.ps1 (apply) failed (exit $code)"; exit 1
+          fi
+          git -C .. diff --stat -- desktop/core-hashes.json || true
+
+      # wireproxy has no binary release: its "release" is a SOURCE tag. Build
+      # it from the pinned commit exactly like windows-build.yml — clone,
+      # checkout, patch-or-verify-native, GOOS=windows build, symbol checks —
+      # so the exe is reproducible, which the plan makes a STOP condition.
+      # When the watcher resolved a NEWER stable tag, use that commit for
+      # THIS build only (working tree, never committed): fetch-cores clones
+      # HEAD, which is unreproducible, and its pin guard would (rightly) fail
+      # anyway. Shipping an unreproducible wireproxy.exe is worse than no
+      # update, so the build still hard-fails on any symbol check miss.
+      - name: Build wireproxy.exe from the reviewed source pin
+        if: env.PROCEED == 'yes'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          NEW_COMMIT="$(jq -r '.wireproxyCommit // empty' decision.json)"
+          if [ -n "$NEW_COMMIT" ]; then
+            echo "$NEW_COMMIT" > "$GITHUB_WORKSPACE/desktop/wireproxy-source.pin"
+            echo "watcher resolved wireproxy stable tag at commit $NEW_COMMIT (working tree only; the repo-sync PR commits it after Publish)"
+          fi
+          PIN="$(tr -d ' \r\n' < "$GITHUB_WORKSPACE/desktop/wireproxy-source.pin")"
+          echo "pinned wireproxy-awg commit: $PIN"
+          git clone https://github.com/artem-russkikh/wireproxy-awg awgp
+          cd awgp
+          git checkout --quiet "$PIN"
+          if grep -q "HeaderProtectionKey" awg_config.go; then
+            echo "source supports AWG 3.x natively - no patch needed"
+          else
+            echo "applying the AWG 3.x patch"
+            git apply --whitespace=nowarn < "$GITHUB_WORKSPACE/desktop/wireproxy-awg-awg31.patch"
+          fi
+          go mod tidy
+          mkdir -p "$GITHUB_WORKSPACE/desktop/src/main/resources/bin/wireproxy"
+          GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" \
+            -o "$GITHUB_WORKSPACE/desktop/src/main/resources/bin/wireproxy/wireproxy.exe" \
+            ./cmd/wireproxy
+          EXE="$GITHUB_WORKSPACE/desktop/src/main/resources/bin/wireproxy/wireproxy.exe"
+          for sym in HeaderProtectionKey RandomTrailers DisableCookies; do
+            grep -q "$sym" "$EXE" \
+              || { echo "::error::wireproxy.exe lacks $sym - AWG 3.x support did not make it into the binary"; exit 1; }
+          done
+          echo "$PIN" > "$GITHUB_WORKSPACE/desktop/src/main/resources/bin/wireproxy/source-commit.txt"
+          echo "AWG 3.x symbols verified"
+
+      # The pin guard stays LIVE here: the expected hashes were just written
+      # from release metadata (step above), so this is real verification
+      # against values that did not come from the payload. -SaveHashes is
+      # never used in CI (desktop/core-hashes.md: that is the inert guard).
+      # wireproxy was built from the reviewed pin above, so it is skipped by
+      # the fetcher instead of being rebuilt from a moving HEAD.
+      - name: Fetch and verify cores against the metadata pins
+        if: env.PROCEED == 'yes'
+        run: |
+          set -euo pipefail
+          cd desktop
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./fetch-cores.ps1 -Force -RequireHashes -SkipWireproxy
+
+      # Deterministic archives + fresh sha256s for exactly CoreManifest's
+      # file lists (package-cores.ps1 rewrites them into the manifest).
+      - name: Package core archives
+        if: env.PROCEED == 'yes'
+        run: |
+          set -euo pipefail
+          cd desktop
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./package-cores.ps1
+
+      # Next tag = highest existing cores-v* (INCLUDING drafts, so a discarded
+      # draft's number is never reused) + 1. `cores-v1` is permanent and can
+      # never be produced by this step unless it is gone — in which case we
+      # stop rather than re-create it under a different payload.
+      - name: Compute the next cores tag and update the manifest
+        if: env.PROCEED == 'yes'
+        run: |
+          set -euo pipefail
+          cp desktop/src/main/resources/cores-manifest.json "$RUNNER_TEMP/manifest-old.json"
+          MAX=$(gh api "repos/$WATCH_REPO/releases?per_page=100" \
+            --jq '[.[].tag_name | select(startswith("cores-v")) | ltrimstr("cores-v") | tonumber? // 0] | max // 0')
+          if [ "$MAX" -lt 1 ]; then
+            echo "::error::no cores-v1 found — cores-v1 is permanent and this repo depends on it; refusing to reuse its name"
+            exit 1
+          fi
+          NEXT=$((MAX + 1))
+          NEXT_TAG="cores-v$NEXT"
+          echo "NEXT_TAG=$NEXT_TAG" >> "$GITHUB_ENV"
+          # baseUrl must point at the release this run is staging; per-core
+          # version labels follow the resolved upstream tags (the app shows
+          # and orders these strings; CoreUpdateChecker offers the update to
+          # users only once a human publishes the draft).
+          M=desktop/src/main/resources/cores-manifest.json
+          jq --arg base "https://github.com/$WATCH_REPO/releases/download/$NEXT_TAG" '.baseUrl = $base' "$M" > "$M.tmp" && mv "$M.tmp" "$M"
+          for core in xray singbox wireproxy aether; do
+            TAG=$(jq -r --arg c "$core" '.targets[$c].tag // empty' "$RUNNER_TEMP/decision.json")
+            [ -z "$TAG" ] && continue
+            jq --arg c "$core" --arg v "$TAG" '.cores[$c].version = $v' "$M" > "$M.tmp" && mv "$M.tmp" "$M"
+          done
+          jq . "$M"
+
+      # THE HUMAN GATE LIVES HERE: `--draft`, always. Nothing reaches a user
+      # until a person runs `gh release edit cores-vN --draft=false`.
+      - name: Create the DRAFT release (never published from CI)
+        if: env.PROCEED == 'yes'
+        run: |
+          set -euo pipefail
+          case "$NEXT_TAG" in
+            cores-v1) echo "::error::refusing to touch cores-v1 (permanent)"; exit 1 ;;
+            cores-v*) ;;
+            *) echo "::error::bad tag $NEXT_TAG"; exit 1 ;;
+          esac
+          mkdir -p dist
+          cp desktop/build/cores/xray.zip desktop/build/cores/singbox.zip \
+             desktop/build/cores/wireproxy.zip desktop/build/cores/aether.zip dist/
+          cp desktop/src/main/resources/cores-manifest.json dist/
+          # The decision is uploaded as an asset so the later repo-sync PR can
+          # rebuild core-hashes.json / wireproxy-source.pin from durable
+          # metadata instead of re-querying upstream (which may have moved).
+          cp "$RUNNER_TEMP/decision.json" dist/cores-watch-decision.json
+          gh release create "$NEXT_TAG" --draft \
+            --title "MultiVPN core archives ($NEXT_TAG)" \
+            --repo "$WATCH_REPO" \
+            dist/xray.zip dist/singbox.zip dist/wireproxy.zip dist/aether.zip \
+            dist/cores-manifest.json dist/cores-watch-decision.json
+
+      # The app refuses an asset without a digest, and a draft whose archive
+      # cannot be pinned is worse than no draft.
+      - name: Assert every uploaded asset carries a digest
+        if: env.PROCEED == 'yes'
+        run: |
+          set -euo pipefail
+          MISSING="unknown"
+          for i in 1 2 3 4 5; do
+            MISSING=$(gh release view "$NEXT_TAG" --repo "$WATCH_REPO" --json assets \
+              --jq '[.assets[] | select(.digest == null) | .name] | join(" ")')
+            [ -z "$MISSING" ] && break
+            sleep 10
+          done
+          if [ -n "$MISSING" ]; then
+            echo "::error::assets without a GitHub digest: $MISSING — the app refuses such an archive; discard this draft"
+            exit 1
+          fi
+          gh release view "$NEXT_TAG" --repo "$WATCH_REPO" \
+            --json isDraft,url,assets \
+            --jq '(.assets | map(select(.digest == null)) | length) as $nodig
+                  | (if .isDraft then "" else "WARNING: release is NOT a draft!\n" end)
+                    + "\(if $nodig == 0 then "every asset carries a digest" else "ERROR: \($nodig) asset(s) lack a digest\n" end)\(.url)\n"
+                    + (.assets[] | "  \(.name)  \(.size) bytes  \(.digest)")'
+
+      # The body is the review document: old→new per core, upstream tags and
+      # commit, the artifact URLs, and the exact publish / discard commands.
+      - name: Write the release notes (publish / discard commands)
+        if: env.PROCEED == 'yes'
+        run: |
+          set -euo pipefail
+          {
+            echo "## MultiVPN core archives ($NEXT_TAG) — DRAFT"
+            echo
+            echo "**Nothing reaches users until this release is published.**"
+            echo "The app only reads the newest NON-DRAFT \`cores-*\` release"
+            echo "(CoreUpdateChecker filters \`!draft && !prerelease\`), so this"
+            echo "staging is invisible to every installed client."
+            echo
+            echo "### What changed upstream (resolved $(date -u +%Y-%m-%d))"
+            echo
+            jq -r '
+              .targets | to_entries[] |
+              if .key == "wireproxy" then
+                "- wireproxy: source tag \(.value.tag) @ \(.value.commit) (built from source; review the commits listed in the run log)"
+              else
+                "- \(.key): \(.value.tag) — asset \(.value.asset), \(.value.size) bytes, upstream digest \(.value.digest)"
+              end
+            ' "$RUNNER_TEMP/decision.json"
+            echo
+            jq -r '"### Versions going out: \(.cores | to_entries | map("\(.key)=\(.value.version)") | join(" · "))"' desktop/src/main/resources/cores-manifest.json
+            echo
+            echo "### Review before publishing"
+            echo
+            echo "1. Diff the upstream release notes for each core above."
+            echo "2. Check a downloaded archive against the sha256 in \`cores-manifest.json\`."
+            echo "3. Remember: sha256 pins prove transport integrity, NOT authorship."
+            echo
+            echo "### Publish (makes it visible to users)"
+            echo '```'
+            echo "gh release edit $NEXT_TAG --draft=false --repo $WATCH_REPO"
+            echo '```'
+            echo "### Discard (decline this proposal)"
+            echo '```'
+            echo "gh release delete $NEXT_TAG --yes --repo $WATCH_REPO"
+            echo '```'
+            echo
+            echo "After publishing, the next scheduled run opens a"
+            echo "\`chore(cores): sync pins to $NEXT_TAG\` PR for the repo-side pins."
+          } > notes.md
+          gh release edit "$NEXT_TAG" --draft --repo "$WATCH_REPO" --notes-file notes.md
+          echo "draft staged: $NEXT_TAG (publish is a human decision)" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Silence is indistinguishable from "nothing new upstream", so a broken
+      # watcher must be LOUD: one open issue at a time, same title.
+      - name: File a loud-failure issue (deduplicated)
+        if: failure()
+        run: |
+          set -euo pipefail
+          TITLE="cores-watch: scheduled core-watcher run failed"
+          OPEN=$(gh issue list --repo "$WATCH_REPO" --state open \
+            --search "in:title \"$TITLE\"" --json number --jq 'length')
+          if [ "$OPEN" = "0" ]; then
+            gh issue create --repo "$WATCH_REPO" --title "$TITLE" \
+              --body "A cores-watch run failed: ${GITHUB_SERVER_URL}/${WATCH_REPO}/actions/runs/${GITHUB_RUN_ID} — until it is green again, no upstream core update is being noticed at all."
+          else
+            echo "an open issue already tracks this"
+          fi
+
+  # ------------------------------------------------------------------------
+  # Repo sync: after a HUMAN published a draft, the committed pins
+  # (core-hashes.json, wireproxy-source.pin, bundled cores-manifest.json) are
+  # stale and the next app build would fail -RequireHashes. This job opens
+  # (or refreshes) the PR that carries them.
+  #
+  # HARD RULE, enforced by select(.draft==false) below: this PR is NEVER
+  # opened for a draft. If a draft is discarded, the repo must keep the pins
+  # that actually exist on GitHub — otherwise a future build ships a catalog
+  # pointing at a release that does not exist and Core-Fetch users get a
+  # download failure on first connect.
+  # ------------------------------------------------------------------------
+  sync-repo-pins:
+    name: Propose repo-pin sync for a PUBLISHED cores release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      WATCH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Open or update the pins PR (published releases only)
+        run: |
+          set -euo pipefail
+          CURRENT=$(sed -n 's#.*download/\(cores-v[0-9][0-9]*\).*#\1#p' desktop/src/main/resources/cores-manifest.json | head -1)
+          CURRENT_N=${CURRENT#cores-v}; CURRENT_N=${CURRENT_N:-0}
+          # !draft && !prerelease — the published-only rule. A draft NEVER
+          # reaches this comparison.
+          NEWEST_N=$(gh api "repos/$WATCH_REPO/releases?per_page=100" \
+            --jq '[ .[] | select((.draft == false) and (.prerelease == false)) | .tag_name | select(startswith("cores-v")) | ltrimstr("cores-v") | tonumber? // 0 ] | max // 0')
+          if [ "$NEWEST_N" -le "$CURRENT_N" ]; then
+            echo "repo pins already track the newest PUBLISHED cores release (cores-v$CURRENT_N); nothing to sync" \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          TAG="cores-v$NEWEST_N"
+          BRANCH="cores-sync/$TAG"
+          mkdir -p assets && cd assets
+          gh release download "$TAG" --repo "$WATCH_REPO" --pattern cores-manifest.json
+          # The decision asset exists for every release staged by this
+          # pipeline; a hand-made older one may lack it — then there simply
+          # are no upstream digests to re-pin here, only the manifest.
+          if ! gh release download "$TAG" --repo "$WATCH_REPO" --pattern cores-watch-decision.json 2>/dev/null; then
+            echo '{}' > cores-watch-decision.json
+          fi
+          cd ..
+          cp assets/cores-manifest.json desktop/src/main/resources/cores-manifest.json
+          python3 - <<'PY'
+          import json
+          dec = json.load(open('assets/cores-watch-decision.json'))
+          with open('desktop/core-hashes.json') as f:
+              pins = json.load(f)
+          for core, t in dec.get('targets', {}).items():
+              if 'digest' in t:
+                  # hashKey is fetch-cores.ps1's pin key (the upstream asset
+                  # name can differ in casing — xray).
+                  pins[t.get('hashKey') or t.get('asset')] = t['digest'].split(':', 1)[1]
+          with open('desktop/core-hashes.json', 'w') as f:
+              json.dump(pins, f, indent=2)
+              f.write('\n')
+          commit = dec.get('wireproxyCommit')
+          if commit:
+              open('desktop/wireproxy-source.pin', 'w').write(commit + '\n')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add desktop/src/main/resources/cores-manifest.json desktop/core-hashes.json desktop/wireproxy-source.pin
+          if git diff --cached --quiet; then
+            echo "no pin differences to propose for $TAG"; exit 0
+          fi
+          git commit -m "chore(cores): sync pins to $TAG"
+          git push --force-with-lease origin "$BRANCH"
+          EXISTING=$(gh pr list --repo "$WATCH_REPO" --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            echo "updated existing PR #$EXISTING" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            cat > pr-body.md <<EOF
+          Release: https://github.com/$WATCH_REPO/releases/tag/$TAG (PUBLISHED — this PR is never opened for a draft).
+
+          Brings \`desktop/core-hashes.json\`, \`desktop/wireproxy-source.pin\` and the bundled \`cores-manifest.json\` up to date with the cores a human published, so the next app build passes \`fetch-cores.ps1 -RequireHashes\`. The digests are the upstream GitHub-metadata values staged with the release (\`cores-watch-decision.json\` asset), not recomputed from the payload.
+          EOF
+            gh pr create --repo "$WATCH_REPO" --head "$BRANCH" --title "chore(cores): sync pins to $TAG" \
+              --body-file pr-body.md | tee -a "$GITHUB_STEP_SUMMARY"
+          fi

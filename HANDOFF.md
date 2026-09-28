@@ -243,6 +243,31 @@ GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o wireproxy.exe ./cmd/wirep
 تأیید اینکه پچ خورده: باینری باید رشته‌های `HeaderProtectionKey`، `RandomTrailers`،
 `DisableCookies` را داشته باشد.
 
+### تازه‌نگه‌داشتن هسته‌ها در CI (watcher) — و کلیک انتشار توسط انسان
+
+`.github/workflows/cores-watch.yml` هفته‌ای یک‌بار (و با dispatch دستی) از **ریپوی
+رسمی هر هسته** newest **stable** ریلیز را می‌پرسد (prerelease های رولینگ xray
+نادیده گرفته می‌شوند؛ openvpn عمداً_watch نمی‌شود — همان قید 2.5.x بالا). اگر
+چیزی تازه‌تر بود: دانلود + verify با sha256‌ای که **خود GitHub در متادیتای همان
+release گذاشته** (`assets[].digest` — منبعی مستقل از download، نه `-SaveHashes`
+که در CI همچنان ممنوع است؛ دلیلش در `desktop/core-hashes.md`)، بسته‌بندی با
+`package-cores.ps1`، و در آخر یک ریلیز `cores-vN` **فقط به‌صورت DRAFT** می‌سازد.
+
+**هیچ کاربری چیزی دریافت نمی‌کند تا انسان منتشر نکند** — چون `CoreUpdateChecker`
+فقط newest **non-draft و non-prerelease** ریلیز `cores-*` را می‌خواند؛ انتشار
+همان چیزی است که دیده‌شدن ایجاد می‌کند، پس عمداً دستی مانده. جریان دو-فرمانی:
+
+```powershell
+gh release view cores-vN                   # ۱) نوت‌ها و old -> new را بخوان
+gh release edit cores-vN --draft=false     # ۲) انتشار (یا: gh release delete cores-vN --yes)
+```
+
+draft مشکوک = discard، نه rollout. بعد از انتشار، همین workflow یک PR با عنوان
+`chore(cores): sync pins to cores-vN` باز می‌کند تا `core-hashes.json` و
+`cores-manifest.json` ریپو به ریلیز **منتشرشده** برسند — و این PR **فقط برای
+ریلیز published باز می‌شود، هرگز برای draft** (تست‌های `WatchCoresParityTest` و
+`desktop/watch-cores-selftest.ps1` همین قراردادها را قفل کرده‌اند).
+
 ### تست‌های دستی سریع
 ```bash
 bash -n server/setup-*.sh                 # سینتکس همه اسکریپت‌ها

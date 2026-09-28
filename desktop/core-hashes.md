@@ -44,3 +44,31 @@ An upstream release **should** fail the pin — that is the point. To upgrade:
 Never regenerate the manifest as a side effect of an unrelated change, and never
 run `-SaveHashes` in CI — that would recompute the hashes every run and compare
 them against nothing, which is how this guard was inert before.
+
+## Watched by CI
+
+Four of the five artifacts above are the *downloadable* cores (xray, hiddify-core,
+Aether, wireproxy; OpenVPN is deliberately not watched — it stays pinned to the
+2.5.x series for the OpenSSL DLL contract above). `desktop/watch-cores.ps1`, run
+weekly by `.github/workflows/cores-watch.yml`, asks each **official upstream repo**
+for its newest **stable** release (prereleases such as Xray's rolling builds are
+ignored) and compares against `cores-manifest.json`. When something is newer it
+stages a **draft** `cores-vN` GitHub release — and only a draft. A human reads the
+notes and runs `gh release edit cores-vN --draft=false` before any user can see
+it; `CoreUpdateChecker` filters out drafts, so the automation alone can never
+reach a machine.
+
+The hashes the draft is verified against are **metadata-derived**: GitHub records
+`assets[].digest` (`sha256:...`) on every release asset, including the binaries
+as upstream published them, so the watcher reads the expected digest from the
+release *metadata* — a second source independent of the download — and merges it
+into `core-hashes.json` under the existing key (note `hashKey` in
+`watch-cores.ps1`: upstream's asset is `Xray-windows-64.zip`, our pin key is the
+lowercase `xray-windows-64.zip`). `fetch-cores.ps1` is then called with
+`-Force -RequireHashes`, which is exactly the same verification a human does
+before running `-SaveHashes` locally — just derived, not typed.
+
+That is not the same as trusting the transport: `openvpn.exe` and every other
+core still runs under these pins, and `-SaveHashes` remains banned in CI. A
+digest computed by the same pipeline that downloads the bytes pins nothing. The
+draft gate is what carries the trust, and the gate is human.
