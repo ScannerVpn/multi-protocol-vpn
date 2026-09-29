@@ -69,5 +69,6 @@ desktop/banners/drafts/*.png
 /plans/
 /tools/split-previews.js
 unstoppable-code.json
+*.zip
 .qoder/
 .workbuddy-ai/
