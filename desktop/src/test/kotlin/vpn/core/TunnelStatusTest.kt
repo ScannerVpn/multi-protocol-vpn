@@ -149,6 +149,7 @@ Unknown adapter MultiVPN:
     @Test
     fun `tun range address counts only on our own adapter`() {
         assertTrue(VpnStatusProbe.vpnAddressOnAdapter("172.19.0.2", "MultiVPN"))
+        assertTrue(VpnStatusProbe.vpnAddressOnAdapter("172.19.0.2", "net5 MultiVPN"))
         assertFalse(VpnStatusProbe.vpnAddressOnAdapter("172.19.144.1", "vEthernet (WSL)"))
         assertFalse(VpnStatusProbe.vpnAddressOnAdapter("172.19.144.1", null))
         assertFalse(VpnStatusProbe.vpnAddressOnAdapter("172.19.144.1", "Wi-Fi"))

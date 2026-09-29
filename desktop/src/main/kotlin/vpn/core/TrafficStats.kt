@@ -112,9 +112,10 @@ object TrafficStats {
         val iface = NetworkInterface.getNetworkInterfaces().asSequence()
             .filter { runCatching { it.isUp && !it.isLoopback }.getOrDefault(false) }
             .firstOrNull { ni ->
+                val identifier = "${ni.name} ${ni.displayName}"
                 ni.inetAddresses.asSequence().any {
                     it is Inet4Address &&
-                        VpnStatusProbe.vpnAddressOnAdapter(it.hostAddress, ni.name)
+                        VpnStatusProbe.vpnAddressOnAdapter(it.hostAddress, identifier)
                 }
             } ?: return@runCatching null
 
@@ -127,7 +128,7 @@ object TrafficStats {
             rx = row.InOctets,
             tx = row.OutOctets,
             source = Source.ADAPTER,
-            via = alias(row).ifEmpty { iface.name },
+            via = alias(row).ifEmpty { iface.displayName }.ifEmpty { iface.name },
         )
     }.getOrNull()
 

@@ -38,9 +38,13 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Power
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SwapVert
@@ -55,6 +59,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -150,31 +156,52 @@ fun HomeScreen() {
             }
         }
 
-        // Hero: ONE column — connection card (with its compact
-        // server/protocol/ping line under the ring) and the traffic card
-        // directly below. The old side-by-side hero + three stat cards
-        // wasted half the window on duplicated information.
-        Surface(
-            color = Color.Transparent,
-            shape = RoundedCornerShape(24.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            ConnectionCard(
+        if (!layout.compact) {
+            // Cyber 2-Column Desktop Grid
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(layout.cardGap),
+            ) {
+                // Left Column: Hero Action & Target Node
+                Column(
+                    modifier = Modifier.width(if (layout.mode == LayoutMode.EXPANDED) 340.dp else 290.dp),
+                    verticalArrangement = Arrangement.spacedBy(layout.cardGap),
+                ) {
+                    CyberHeroCard(
+                        status = state.vpnStatus,
+                        config = state.activeConfig,
+                        startedAt = state.sessionStartedAt,
+                        exitIp = state.exitIp,
+                        onToggle = onToggle,
+                        onPickConfig = { showPicker = true },
+                    )
+                }
+
+                // Right Column: Live Throughput Spectrum & Metrics
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(layout.cardGap),
+                ) {
+                    CyberTelemetryCard(state = state)
+                    CyberMetricsRow(state = state)
+                }
+            }
+        } else {
+            // Compact Mode (stacked for narrow windows)
+            CyberHeroCard(
                 status = state.vpnStatus,
                 config = state.activeConfig,
+                startedAt = state.sessionStartedAt,
+                exitIp = state.exitIp,
                 onToggle = onToggle,
                 onPickConfig = { showPicker = true },
                 modifier = Modifier.fillMaxWidth(),
             )
+            Spacer(Modifier.height(layout.cardGap))
+            CyberTelemetryCard(state = state)
+            Spacer(Modifier.height(layout.cardGap))
+            CyberMetricsRow(state = state)
         }
-        Spacer(Modifier.height(layout.cardGap))
-        TrafficCard(state)
-
-        // Health: only facts that appear NOWHERE else on the dashboard and
-        // answer "is the tunnel really healthy?" — split engine in use, DNS
-        // pin state. The UI single-fact contract (PLAN §4-6) forbids showing
-        // server/protocol/mode again here.
-        HealthCard(state)
 
         // NOTE what is deliberately NOT here any more:
         //  - the CONFIGS strip: it was the THIRD config picker on one screen
@@ -207,95 +234,6 @@ fun HomeScreen() {
     }
 }
 
-/**
- * The one compact line that replaced the three big stat cards: server IP,
- * protocol, ping. Sits under the ring inside the connection card. The old
- * StatCards repeated the same facts in three tall cards — this is the same
- * information in a third of the space, and tappable chips open the config
- * picker so the row is still a control, not just a caption.
- */
-@Composable
-private fun SessionFactsRow(config: VpnConfig?, modifier: Modifier = Modifier) {
-    val latency = config?.let { AppState.latency[it.id] }
-    val failed = config != null && config.id in AppState.latencyFailed
-    val pinging = config != null && config.id in AppState.pinging
-
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
-        modifier = modifier,
-    ) {
-        FactChip(icon = Icons.Filled.Public, text = config?.serverIp ?: "—")
-        Dot()
-        FactChip(
-            icon = config?.let { protocolIcon(it.protocol) } ?: Icons.Filled.Tune,
-            text = config?.let { Links.label(it.protocol, it.awgVersion) } ?: "—",
-        )
-        Dot()
-        PingChip(latency = latency, failed = failed, pinging = pinging)
-    }
-}
-
-/** A rounded, borderless label used inside [SessionFactsRow]. */
-@Composable
-private fun FactChip(icon: ImageVector, text: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = C.Accent2, modifier = Modifier.size(13.dp))
-        Spacer(Modifier.width(5.dp))
-        Text(
-            text,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = C.TextSecondary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-@Composable
-private fun Dot() {
-    Box(
-        Modifier
-            .padding(horizontal = 8.dp)
-            .size(3.dp)
-            .clip(CircleShape)
-            .background(C.TextFaint),
-    )
-}
-
-/** Ping value with its colour code, or a dash while it has never been measured. */
-@Composable
-private fun PingChip(latency: Int?, failed: Boolean, pinging: Boolean) {
-    val (text, color) = when {
-        pinging -> "…" to C.TextFaint
-        failed -> "fail" to C.Error
-        latency == null -> "—" to C.TextFaint
-        // ONE definition of the bands, shared with LatencyPill — see
-        // vpn.core.LatencyGrade (3.6.13 audit P3-4, retuned in 3.6.16).
-        else -> "${latency}ms" to when (vpn.core.LatencyGrade.of(latency)) {
-            vpn.core.LatencyGrade.Grade.GOOD -> C.Success
-            vpn.core.LatencyGrade.Grade.FAIR -> C.Warning
-            vpn.core.LatencyGrade.Grade.POOR -> C.Error
-        }
-    }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-            Icons.Filled.Speed,
-            null,
-            tint = color,
-            modifier = Modifier.size(13.dp),
-        )
-        Spacer(Modifier.width(5.dp))
-        Text(
-            text,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = color,
-        )
-    }
-}
-
 @Composable
 private fun DashboardHeader(
     onOpenPicker: () -> Unit,
@@ -304,197 +242,491 @@ private fun DashboardHeader(
 ) {
     val layout = LocalLayout.current
     val cfg = AppState.activeConfig
+    val mode = AppState.settings.mode
+    val splitApps = AppState.settings.splitApps
 
-    // Happ-style chrome: the screen's identity IS the orb below — a big
-    // "Dashboard" heading and a status sentence pushed it down and repeated
-    // what the status word under the ring already says. Only the three
-    // functional chips remain, on their own row.
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        HeaderChip(
-            icon = Icons.Filled.Public,
-            text = cfg?.name ?: "Choose config",
-            highlight = cfg != null,
-            onClick = onOpenPicker,
-            modifier = Modifier.weight(1f),
-        )
-        HeaderChip(icon = Icons.Filled.Tune, text = "Mode", onClick = onOpenMode)
-        HeaderChip(
-            icon = Icons.Filled.Apps,
-            text = if (layout.compact) "${AppState.settings.splitApps.size}"
-            else "Apps (${AppState.settings.splitApps.size})",
-            highlight = AppState.settings.splitMode != SplitModes.OFF,
-            onClick = onOpenApps,
-        )
+    val modeLabel = when (mode) {
+        VpnModes.TUN -> "TUN CORE"
+        VpnModes.SYSTEM_PROXY -> "SYS PROXY"
+        else -> "PROXY"
     }
-}
 
-@Composable
-private fun HeaderChip(
-    icon: ImageVector,
-    text: String,
-    highlight: Boolean = false,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val layout = LocalLayout.current
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(10.dp),
-        color = if (highlight) C.Accent.copy(alpha = if (C.lightMode) 0.10f else 0.16f) else C.SurfaceLow,
-        border = BorderStroke(1.dp, if (highlight) C.Accent.copy(alpha = 0.55f) else C.Border),
-        modifier = modifier,
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(
-                horizontal = if (layout.compact) 10.dp else 13.dp,
-                vertical = 9.dp,
-            ),
+        // Active Node Quick Select Chip
+        Surface(
+            onClick = onOpenPicker,
+            shape = RoundedCornerShape(12.dp),
+            color = if (cfg != null) C.Accent.copy(alpha = 0.12f) else C.SurfaceLow,
+            border = BorderStroke(1.dp, if (cfg != null) C.Accent.copy(alpha = 0.45f) else C.Border),
+            modifier = Modifier.weight(1f),
         ) {
-            Icon(icon, null, tint = if (highlight) C.Accent else C.TextSecondary, modifier = Modifier.size(15.dp))
-            Spacer(Modifier.width(if (layout.compact) 5.dp else 7.dp))
-            Text(
-                text,
-                fontSize = if (layout.compact) 11.sp else 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = if (highlight) C.TextPrimary else C.TextSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = if (layout.compact) 150.dp else 190.dp),
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (cfg != null) C.Accent.copy(alpha = 0.2f) else C.SurfaceHigh),
+                ) {
+                    Icon(
+                        cfg?.let { protocolIcon(it.protocol) } ?: Icons.Filled.Public,
+                        null,
+                        tint = if (cfg != null) C.Accent else C.TextSecondary,
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        cfg?.name ?: "Select Node",
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = C.TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        cfg?.let { "${Links.label(it.protocol, it.awgVersion).uppercase()} · ${it.serverIp}" }
+                            ?: "No config selected",
+                        fontSize = 10.sp,
+                        color = C.TextFaint,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.width(6.dp))
+                Icon(
+                    Icons.Filled.KeyboardArrowDown,
+                    null,
+                    tint = C.TextSecondary,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+
+        // Routing Mode Chip
+        Surface(
+            onClick = onOpenMode,
+            shape = RoundedCornerShape(12.dp),
+            color = C.SurfaceLow,
+            border = BorderStroke(1.dp, C.Border),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 11.dp),
+            ) {
+                Icon(Icons.Filled.Tune, null, tint = C.Accent2, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "MODE: $modeLabel",
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = C.TextPrimary,
+                )
+            }
+        }
+
+        // Split Apps Chip
+        val splitActive = AppState.settings.splitMode != SplitModes.OFF
+        Surface(
+            onClick = onOpenApps,
+            shape = RoundedCornerShape(12.dp),
+            color = if (splitActive) C.Accent2.copy(alpha = 0.12f) else C.SurfaceLow,
+            border = BorderStroke(1.dp, if (splitActive) C.Accent2.copy(alpha = 0.45f) else C.Border),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 11.dp),
+            ) {
+                Icon(
+                    Icons.Filled.Apps,
+                    null,
+                    tint = if (splitActive) C.Accent2 else C.TextSecondary,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    if (layout.compact) "${splitApps.size}" else "APPS (${splitApps.size})",
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (splitActive) C.TextPrimary else C.TextSecondary,
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun ConnectionCard(
+private fun CyberHeroCard(
     status: VpnStatus,
     config: VpnConfig?,
+    startedAt: Long,
+    exitIp: String?,
     onToggle: () -> Unit,
     onPickConfig: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val layout = LocalLayout.current
-    // Happ layout: the orb floats directly on the background (no card box),
-    // status word and clock under it, then the selected-config card — the
-    // whole hero reads as one centred control, the way Happ's home does.
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(vertical = layout.cardPadding),
+    val clipboardManager = LocalClipboardManager.current
+    val connected = status == VpnStatus.CONNECTED
+
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = C.SurfaceLow.copy(alpha = 0.85f),
+        border = BorderStroke(1.dp, if (connected) C.Accent.copy(alpha = 0.35f) else C.Border),
+        modifier = modifier.fillMaxWidth(),
     ) {
-        ConnectionRing(status = status, onToggle = onToggle)
-        Spacer(Modifier.height(if (layout.compact) 12.dp else 16.dp))
-        val (word, wordColor) = when (status) {
-            VpnStatus.CONNECTED -> "SECURED" to C.Success
-            VpnStatus.CONNECTING -> "CONNECTING…" to C.Warning
-            VpnStatus.DISCONNECTING -> "CLOSING…" to C.Warning
-            VpnStatus.ERROR -> "CONNECTION FAILED" to C.Error
-            VpnStatus.DISCONNECTED -> "NOT CONNECTED" to C.TextSecondary
-        }
-        Text(word, color = wordColor, fontSize = 15.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
-        Spacer(Modifier.height(5.dp))
-        if (status == VpnStatus.CONNECTED && AppState.sessionStartedAt > 0L) {
-            SessionTimer(startedAt = AppState.sessionStartedAt)
-        } else {
+        Column(
+            modifier = Modifier.padding(if (layout.compact) 14.dp else 18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            // Top telemetry status line
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val (statusDotColor, statusText) = when (status) {
+                    VpnStatus.CONNECTED -> C.Success to "SECURED // SHIELD ACTIVE"
+                    VpnStatus.CONNECTING -> C.Warning to "LINKING // HANDSHAKE"
+                    VpnStatus.DISCONNECTING -> C.Warning to "TEARDOWN // CLOSING"
+                    VpnStatus.ERROR -> C.Error to "FAULT // DISCONNECTED"
+                    VpnStatus.DISCONNECTED -> C.TextFaint to "STANDBY // READY"
+                }
+                Box(
+                    Modifier
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(statusDotColor)
+                )
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    statusText,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 1.2.sp,
+                    color = statusDotColor,
+                )
+                Spacer(Modifier.weight(1f))
+                if (connected && startedAt > 0L) {
+                    SessionTimer(startedAt = startedAt)
+                } else {
+                    Text(
+                        if (connected) "ENCRYPTED" else "OFFLINE",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Monospace,
+                        color = C.TextFaint,
+                        letterSpacing = 1.sp,
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(if (layout.compact) 12.dp else 16.dp))
+
+            // Cyber Connect Power Node
+            CyberConnectNode(status = status, onToggle = onToggle)
+
+            Spacer(Modifier.height(10.dp))
+
+            // Action subtext hint
             Text(
                 when (status) {
-                    VpnStatus.CONNECTING -> "tap to cancel"
-                    VpnStatus.DISCONNECTING -> "tearing down the tunnel"
-                    VpnStatus.ERROR -> "see the error card for details"
-                    else -> "tap the button to connect"
+                    VpnStatus.CONNECTED -> "TAP TO DISCONNECT"
+                    VpnStatus.CONNECTING -> "TAP TO CANCEL"
+                    VpnStatus.DISCONNECTING -> "CLOSING TUNNEL…"
+                    VpnStatus.ERROR -> "TAP TO RETRY"
+                    VpnStatus.DISCONNECTED -> "TAP TO ENGAGE"
                 },
                 fontSize = 11.sp,
-                color = C.TextFaint,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = 2.sp,
+                color = when (status) {
+                    VpnStatus.CONNECTED -> C.TextSecondary
+                    VpnStatus.CONNECTING, VpnStatus.DISCONNECTING -> C.Warning
+                    VpnStatus.ERROR -> C.Error
+                    VpnStatus.DISCONNECTED -> C.Accent
+                },
             )
+
+            Spacer(Modifier.height(if (layout.compact) 12.dp else 14.dp))
+
+            // Target Node Selector Strip
+            Surface(
+                onClick = onPickConfig,
+                shape = RoundedCornerShape(12.dp),
+                color = C.Surface.copy(alpha = 0.7f),
+                border = BorderStroke(1.dp, C.Border),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                if (config != null) Brush.linearGradient(listOf(C.Accent.copy(alpha = 0.25f), C.Accent2.copy(alpha = 0.25f)))
+                                else Brush.linearGradient(listOf(C.SurfaceHigh, C.SurfaceHigh))
+                            ),
+                    ) {
+                        Icon(
+                            config?.let { protocolIcon(it.protocol) } ?: Icons.Filled.Public,
+                            null,
+                            tint = if (config != null) C.Accent else C.TextFaint,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            config?.name ?: "No Config Selected",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = C.TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            config?.let { "${it.serverIp} · ${Links.label(it.protocol, it.awgVersion)}" }
+                                ?: "Tap to choose server",
+                            fontSize = 11.sp,
+                            color = C.TextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    config?.let {
+                        LatencyPill(
+                            ms = AppState.latency[it.id],
+                            failed = it.id in AppState.latencyFailed,
+                            pinging = it.id in AppState.pinging,
+                        )
+                    }
+                    Spacer(Modifier.width(4.dp))
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        null,
+                        tint = C.TextFaint,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            // Exit Node Telemetry Strip
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = if (connected) C.Accent.copy(alpha = 0.08f) else C.Surface.copy(alpha = 0.4f),
+                border = BorderStroke(1.dp, if (connected) C.Accent.copy(alpha = 0.25f) else C.Border),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        if (connected) Icons.Filled.Shield else Icons.Filled.Public,
+                        null,
+                        tint = if (connected) C.Success else C.TextFaint,
+                        modifier = Modifier.size(13.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        if (connected) "EXIT IP:" else "EGRESS:",
+                        fontSize = 10.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = C.TextSecondary,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        if (connected) (exitIp ?: "Measuring public IP…") else "DIRECT ROUTE",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (connected && exitIp != null) C.Success else C.TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (connected) {
+                        if (exitIp != null) {
+                            Icon(
+                                Icons.Filled.ContentCopy,
+                                "Copy exit IP",
+                                tint = C.TextSecondary,
+                                modifier = Modifier
+                                    .size(14.dp)
+                                    .clickable {
+                                        clipboardManager.setText(AnnotatedString(exitIp))
+                                    },
+                            )
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        Icon(
+                            Icons.Filled.CloudSync,
+                            "Refresh exit IP",
+                            tint = C.TextSecondary,
+                            modifier = Modifier
+                                .size(14.dp)
+                                .clickable {
+                                    AppState.refreshExitIp()
+                                },
+                        )
+                    }
+                }
+            }
         }
-        Spacer(Modifier.height(if (layout.compact) 10.dp else 12.dp))
-        // The one line that replaced the three stat cards: same facts, a
-        // third of the vertical space, and it reads as ONE fact — "where
-        // am I connected, how fast" — instead of three separate headlines.
-        SessionFactsRow(config = config, modifier = Modifier.fillMaxWidth())
-        Spacer(Modifier.height(if (layout.compact) 10.dp else 12.dp))
-        LocationRow(config = config, onPick = onPickConfig, modifier = Modifier.fillMaxWidth())
     }
 }
 
-/** Big power ring: idle hairline, breathing halo when secured, arc while busy. */
 @Composable
-private fun ConnectionRing(status: VpnStatus, onToggle: () -> Unit) {
+private fun CyberConnectNode(
+    status: VpnStatus,
+    onToggle: () -> Unit,
+) {
     val connected = status == VpnStatus.CONNECTED
     val busy = status == VpnStatus.CONNECTING || status == VpnStatus.DISCONNECTING
-    val transition = rememberInfiniteTransition(label = "ring")
+    val transition = rememberInfiniteTransition(label = "cyberNode")
+
     val pulse by transition.animateFloat(
         initialValue = 0.5f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1600, easing = LinearEasing), RepeatMode.Reverse),
-        label = "pulse",
+        animationSpec = infiniteRepeatable(tween(1800, easing = LinearEasing), RepeatMode.Reverse),
+        label = "cyberPulse",
     )
     val sweep by transition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(1400, easing = LinearEasing)),
-        label = "sweep",
+        animationSpec = infiniteRepeatable(tween(if (busy) 1400 else 6000, easing = LinearEasing)),
+        label = "cyberSweep",
+    )
+    val counterSweep by transition.animateFloat(
+        initialValue = 360f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(tween(if (busy) 2000 else 8000, easing = LinearEasing)),
+        label = "cyberCounterSweep",
     )
 
-    // The ring is the single biggest consumer of vertical space; on a phone-width
-    // window a 186dp orb plus its card padding pushed everything else below the
-    // fold. It shrinks with the layout mode instead.
-    val ringSize = LocalLayout.current.ringSize
-    val knobSize = ringSize * 0.72f
+    val ringSize = if (LocalLayout.current.compact) 140.dp else 156.dp
+    val knobSize = ringSize * 0.70f
+
     Box(contentAlignment = Alignment.Center, modifier = Modifier.size(ringSize)) {
-        when {
-            busy -> {
-                Box(Modifier.fillMaxSize().border(3.dp, C.Border, CircleShape))
-                Canvas(Modifier.fillMaxSize().rotate(sweep)) {
+        // Outer segmented orbital rings & halo
+        Canvas(Modifier.fillMaxSize()) {
+            val center = Offset(size.width / 2f, size.height / 2f)
+            val outerRadius = size.width / 2f - 4.dp.toPx()
+
+            // Subtle base orbit
+            drawCircle(
+                color = C.Border.copy(alpha = 0.4f),
+                radius = outerRadius,
+                style = Stroke(width = 1.dp.toPx()),
+            )
+
+            // Neon halo when connected
+            if (connected) {
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            C.Accent.copy(alpha = 0.15f * pulse),
+                            Color.Transparent,
+                        ),
+                        center = center,
+                        radius = outerRadius + 12.dp.toPx(),
+                    ),
+                    radius = outerRadius + 12.dp.toPx(),
+                )
+            }
+        }
+
+        // Rotating outer radar tracks
+        Canvas(Modifier.fillMaxSize().rotate(sweep)) {
+            val strokeW = if (connected || busy) 2.5.dp.toPx() else 1.dp.toPx()
+            val color = when {
+                connected -> C.Accent
+                busy -> C.Warning
+                else -> C.BorderStrong
+            }
+            // 3 arc segments
+            for (i in 0..2) {
+                drawArc(
+                    color = color.copy(alpha = if (connected) (0.4f + 0.6f * pulse) else 0.5f),
+                    startAngle = i * 120f + 15f,
+                    sweepAngle = 70f,
+                    useCenter = false,
+                    style = Stroke(width = strokeW, cap = StrokeCap.Round),
+                )
+            }
+        }
+
+        // Counter-rotating inner tracker ring
+        Canvas(Modifier.size(ringSize * 0.85f).rotate(counterSweep)) {
+            if (connected || busy) {
+                val color = if (connected) C.Accent2 else C.Warning
+                for (i in 0..3) {
                     drawArc(
-                        brush = Brush.sweepGradient(listOf(C.Accent, C.Accent2, C.Accent3, C.Accent)),
-                        startAngle = -90f,
-                        sweepAngle = 110f,
+                        color = color.copy(alpha = 0.35f),
+                        startAngle = i * 90f + 10f,
+                        sweepAngle = 35f,
                         useCenter = false,
-                        style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round),
+                        style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round),
                     )
                 }
             }
-            connected -> {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .clip(CircleShape)
-                        .background(
-                            Brush.radialGradient(
-                                listOf(
-                                    C.Accent.copy(alpha = 0.05f + 0.12f * pulse),
-                                    Color.Transparent,
-                                ),
-                            ),
-                        ),
-                )
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .border(2.5.dp, C.Accent.copy(alpha = 0.25f + 0.5f * pulse), CircleShape),
-                )
-            }
-            else -> Box(Modifier.fillMaxSize().border(1.dp, C.BorderStrong, CircleShape))
         }
 
+        // Center Cyber Power Knob
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
                 .size(knobSize)
                 .clip(CircleShape)
                 .background(
-                    if (connected || busy) {
-                        Brush.linearGradient(listOf(C.Accent, C.Accent2))
-                    } else {
-                        Brush.linearGradient(listOf(C.SurfaceHigh, C.Surface))
-                    },
+                    when {
+                        connected -> Brush.radialGradient(
+                            listOf(
+                                Color(0xFF003852),
+                                Color(0xFF071426),
+                                Color(0xFF050B14),
+                            )
+                        )
+                        busy -> Brush.radialGradient(
+                            listOf(
+                                C.Warning.copy(alpha = 0.3f),
+                                Color(0xFF141A28),
+                                Color(0xFF070B14),
+                            )
+                        )
+                        else -> Brush.radialGradient(
+                            listOf(
+                                Color(0xFF141C2C),
+                                Color(0xFF0A0F1A),
+                                Color(0xFF050811),
+                            )
+                        )
+                    }
                 )
                 .border(
-                    width = if (connected || busy) 0.dp else 1.dp,
-                    color = if (connected || busy) Color.Transparent else C.Border,
+                    width = if (connected) 2.dp else 1.dp,
+                    color = when {
+                        connected -> C.Accent.copy(alpha = 0.6f + 0.4f * pulse)
+                        busy -> C.Warning.copy(alpha = 0.8f)
+                        else -> C.BorderStrong
+                    },
                     shape = CircleShape,
                 )
                 .clickable { onToggle() },
@@ -502,8 +734,12 @@ private fun ConnectionRing(status: VpnStatus, onToggle: () -> Unit) {
             Icon(
                 if (status == VpnStatus.CONNECTING) Icons.Filled.Close else Icons.Filled.Power,
                 null,
-                tint = if (connected || busy) C.OnAccent else C.Accent,
-                modifier = Modifier.size(42.dp),
+                tint = when {
+                    connected -> C.Accent
+                    busy -> C.Warning
+                    else -> C.TextSecondary
+                },
+                modifier = Modifier.size(46.dp),
             )
         }
     }
@@ -528,88 +764,6 @@ private fun SessionTimer(startedAt: Long) {
         color = C.TextPrimary,
     )
 }
-
-@Composable
-private fun LocationRow(config: VpnConfig?, onPick: () -> Unit, modifier: Modifier = Modifier) {
-    Surface(
-        onClick = onPick,
-        shape = RoundedCornerShape(14.dp),
-        color = C.SurfaceLow,
-        border = BorderStroke(1.dp, C.Border),
-        shadowElevation = 2.dp,
-        modifier = modifier.fillMaxWidth(),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 13.dp, vertical = 12.dp),
-        ) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(
-                        if (config != null) {
-                            Brush.linearGradient(listOf(C.AccentDim, C.Accent))
-                        } else {
-                            Brush.linearGradient(listOf(C.SurfaceHigh, C.SurfaceHigh))
-                        },
-                    ),
-            ) {
-                Icon(
-                    config?.let { protocolIcon(it.protocol) } ?: Icons.Filled.Public,
-                    null,
-                    tint = if (config != null) C.OnAccent else C.TextFaint,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    config?.name ?: "No config selected",
-                    fontSize = 13.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = C.TextPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    config?.let { "${it.serverIp} · ${Links.label(it.protocol, it.awgVersion)}" }
-                        ?: "tap to choose a config",
-                    fontSize = 11.sp,
-                    color = C.TextSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            config?.let { LatencyPill(AppState.latency[it.id], it.id in AppState.latencyFailed, it.id in AppState.pinging) }
-        }
-    }
-}
-
-// REMOVED: StatCard / StatsBlock.
-//
-// The three big cards (Server / Protocol / Latency) repeated facts the
-// connection card already carries — they now live as one compact
-// [SessionFactsRow] under the ring. The fill-fraction progress bars looked
-// quantitative but were hand-picked constants, so nothing was lost.
-
-// REMOVED: ConfigStrip / ConfigTile.
-//
-// The strip was the THIRD config picker on one screen — the header pill and the
-// chip inside the connection card already show the active config — and it drew
-// no selected state, capped itself at 16 entries and clipped the last tile with
-// no scroll affordance, so the rest were undiscoverable. Choosing a config now
-// happens in exactly two places: the header pill (which opens
-// ConfigPickerDialog) and the Configs tab.
-
-// REMOVED: DashboardFooter.
-//
-// Its MODE/SPLIT/PROXY line was the third rendering of two facts already on
-// screen (header chips, traffic card's Local proxy row) and the user asked
-// for it to go. The version string lives in Settings → About.
-
-// REMOVED: DashboardFooter and its FooterText helper — see note above.
 
 @Composable
 private fun ErrorCard(
@@ -649,320 +803,323 @@ private fun ErrorCard(
     }
 }
 
-// REMOVED: DetailsCard ("Connection details").
-//
-// Four of its five rows restated something already on screen: Status is the
-// big OFFLINE/ONLINE label in the connection card, Server and Protocol are
-// two of the three stat cards directly above it, and Mode is the header's
-// Mode + Apps buttons. Its one unique row — where the local proxy listens —
-// moved into TrafficCard, which is what took its place.
-
-/**
- * Live traffic card — replaces the old "Connection details", whose Server /
- * Protocol / Mode rows all restated something already on screen.
- *
- * It shows what nothing else on the dashboard could: how much has actually
- * moved, and how fast.
- *
- * HONESTY RULE (same as the latency pill): the numbers are only split into
- * download/upload when the measurement really is per-direction — i.e. a tunnel
- * adapter exists and Windows counted its bytes. In plain proxy mode there is no
- * adapter and the core process's IO counters cannot be attributed to a
- * direction, so ONE combined figure is shown and labelled as such rather than
- * inventing a plausible-looking split. See [vpn.core.TrafficStats].
- */
-private fun proxyEndpointSummary(protocol: String): String {
-    if (protocol != "aether") return Preflight.endpointSummary(protocol)
-    val aether = AppState.settings.aether
-    val httpEnabled = AppState.settings.mode != VpnModes.PROXY_ONLY || aether.httpProxy
-    return if (httpEnabled) {
-        Preflight.endpointSummary(
-            "aether",
-            base = Aether.SOCKS_PORT,
-            httpPort = Aether.httpPort(aether),
-        )
-    } else {
-        "SOCKS ${Aether.BIND}"
-    }
-}
-
 @Composable
-private fun TrafficCard(state: AppState) {
+private fun CyberTelemetryCard(
+    state: AppState,
+    modifier: Modifier = Modifier,
+) {
     val sample = state.traffic
     val rate = state.trafficRate
     val connected = state.vpnStatus == VpnStatus.CONNECTED
+    val perDirection = sample?.perDirection ?: true
 
-    GlassCard {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Icon(
-                Icons.Filled.SwapVert,
-                null,
-                tint = if (connected) C.Accent2 else C.TextFaint,
-                modifier = Modifier.size(15.dp),
-            )
-            Spacer(Modifier.width(7.dp))
-            Text(
-                "Traffic",
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 13.5.sp,
-                color = C.TextPrimary,
-            )
-            Spacer(Modifier.weight(1f))
-            if (connected && state.sessionStartedAt > 0L) {
-                SessionTimer(startedAt = state.sessionStartedAt)
-            }
-            // The exit address can legitimately change (a multi-outbound core,
-            // a reconnect, a different server), so let the user re-ask it —
-            // but only once there is something on screen to re-ask about.
-            if (connected && state.exitIp != null) {
-                AppTextButton("Re-check", onClick = { state.refreshExitIp() })
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-
-        when {
-            // Exact per-direction bytes from the tunnel adapter.
-            sample != null && sample.perDirection -> {
-                Row(Modifier.fillMaxWidth()) {
-                    TrafficMetric(
-                        icon = Icons.Filled.ArrowDownward,
-                        label = "Download",
-                        total = TrafficStats.formatBytes(sample.rx),
-                        rate = rate?.let { TrafficStats.formatRate(it.rxPerSec) },
-                        tint = C.Success,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TrafficMetric(
-                        icon = Icons.Filled.ArrowUpward,
-                        label = "Upload",
-                        total = TrafficStats.formatBytes(sample.tx),
-                        rate = rate?.let { TrafficStats.formatRate(it.txPerSec) },
-                        tint = C.Accent2,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-                TrafficGraph(
-                    history = state.trafficHistory,
-                    perDirection = true,
-                    modifier = Modifier.fillMaxWidth().height(112.dp),
-                )
-                Spacer(Modifier.height(8.dp))
-                InfoRow("Adapter", sample.via)
-            }
-
-            // Proxy mode: combined only, and said so.
-            sample != null -> {
-                TrafficMetric(
-                    icon = Icons.Filled.SwapVert,
-                    label = "Transferred (up + down)",
-                    total = TrafficStats.formatBytes(sample.rx),
-                    rate = rate?.let { TrafficStats.formatRate(it.rxPerSec) },
-                    tint = C.Accent,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(8.dp))
-                TrafficGraph(
-                    history = state.trafficHistory,
-                    perDirection = false,
-                    modifier = Modifier.fillMaxWidth().height(112.dp),
-                )
-                Spacer(Modifier.height(6.dp))
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = C.SurfaceLow.copy(alpha = 0.85f),
+        border = BorderStroke(1.dp, C.Border),
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+        ) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Speed, null, tint = C.Accent, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(7.dp))
                 Text(
-                    "Proxy mode has no tunnel adapter, so Windows cannot split this " +
-                        "by direction — switch to TUN mode for separate up/down counters.",
+                    "SPECTRUM MONITOR",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 1.sp,
+                    color = C.TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.width(8.dp))
+                // Live LED
+                Box(
+                    Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(if (connected) C.Success else C.TextFaint)
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    "LIVE",
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = C.TextSecondary,
+                    softWrap = false,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.weight(1f))
+                // Egress engine tag
+                val engineText = when {
+                    !connected -> "IDLE"
+                    sample?.source == TrafficStats.Source.ADAPTER -> "TUN ADAPTER (${sample.via})"
+                    AppState.settings.mode == VpnModes.TUN -> "sing-box (tun)"
+                    state.activeConfig?.protocol == "hysteria2" -> "sing-box"
+                    else -> "PROXY: 127.0.0.1"
+                }
+                Text(
+                    engineText,
                     fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
                     color = C.TextFaint,
-                    lineHeight = 13.sp,
+                    softWrap = false,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
 
-            connected -> Text(
-                "Measuring…",
-                fontSize = 11.5.sp,
-                color = C.TextSecondary,
-            )
+            Spacer(Modifier.height(16.dp))
 
-            else -> Text(
-                "Connect to see live download and upload.",
-                fontSize = 11.5.sp,
-                color = C.TextFaint,
-            )
-        }
+            // Throughput Speed & Volume Indicators
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                // Metric 1: Download Speed (if perDirection) or Live Throughput (if combined)
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = C.Surface.copy(alpha = 0.5f),
+                    border = BorderStroke(1.dp, C.Border),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Column(Modifier.padding(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                if (perDirection) Icons.Filled.ArrowDownward else Icons.Filled.Speed,
+                                null,
+                                tint = C.Success,
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                if (perDirection) "DOWNLOAD SPEED" else "LIVE THROUGHPUT",
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                letterSpacing = 1.sp,
+                                color = C.TextSecondary,
+                            )
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            rate?.let { TrafficStats.formatRate(it.rxPerSec) } ?: "0 B/s",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = C.Success,
+                            maxLines = 1,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            if (perDirection) "TOTAL: " + (sample?.let { TrafficStats.formatBytes(it.rx) } ?: "0 B")
+                            else "COMBINED RATE (UP + DOWN)",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = C.TextFaint,
+                            maxLines = 1,
+                        )
+                    }
+                }
 
-        // The one row worth keeping from the old details card: where the local
-        // proxy is actually listening. Users need it to point a browser at it.
-        // In TUN mode the sing-box mixed inbound listens on the probe port
-        // (the SOCKS base port belongs to xray-over-TUN there), so show that
-        // instead — an endpoint that does not exist would be a lie.
-        state.activeConfig?.takeIf { VpnService.isProxyMode(it) }?.let { cfg ->
-            Spacer(Modifier.height(8.dp))
-            val tun = AppState.settings.mode == VpnModes.TUN
-            InfoRow(
-                "Local proxy",
-                if (tun) "SOCKS 127.0.0.1:${ProxyPorts.tunProbe}" else proxyEndpointSummary(cfg.protocol),
-            )
-        }
+                // Metric 2: Upload Speed (if perDirection) or Total Transferred (if combined)
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = C.Surface.copy(alpha = 0.5f),
+                    border = BorderStroke(1.dp, C.Border),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Column(Modifier.padding(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                if (perDirection) Icons.Filled.ArrowUpward else Icons.Filled.SwapVert,
+                                null,
+                                tint = C.Accent,
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                if (perDirection) "UPLOAD SPEED" else "TOTAL TRANSFERRED",
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                letterSpacing = 1.sp,
+                                color = C.TextSecondary,
+                            )
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            if (perDirection) {
+                                rate?.let { TrafficStats.formatRate(it.txPerSec) } ?: "0 B/s"
+                            } else {
+                                sample?.let { TrafficStats.formatBytes(it.rx) } ?: "0 B"
+                            },
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = C.Accent,
+                            maxLines = 1,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            if (perDirection) "TOTAL: " + (sample?.let { TrafficStats.formatBytes(it.tx) } ?: "0 B")
+                            else "CORE PROCESS I/O",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = C.TextFaint,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
 
-        // The address the far side sees. Measured THROUGH this session's egress
-        // (ExitIp refuses to fall back to a direct request in proxy mode), so
-        // it is proof the tunnel carries traffic, not a restatement of the
-        // server we connected to. Unknown simply stays hidden until the probe
-        // answers — a dash under a "connected" heading proves nothing.
-        if (connected) {
-            Spacer(Modifier.height(8.dp))
-            state.exitIp?.let { InfoRow("Exit IP", it, valueColor = C.Success) }
-                ?: Text(
-                    "Checking the address the internet sees…",
-                    fontSize = 10.5.sp,
-                    color = C.TextFaint,
-                )
-        }
-    }
-}
+            Spacer(Modifier.height(14.dp))
 
-/**
- * Health card — the tunnel's internal state that no other dashboard element
- * shows: which engine actually carries the traffic (proxy ports vs sing-box
- * TUN) and whether DNS is pinned through the tunnel. Pure facts from the
- * same inputs the connect path uses; nothing here repeats the header chips
- * or the session facts row (single-fact contract).
- */
-@Composable
-private fun HealthCard(state: AppState) {
-    val cfg = state.activeConfig ?: return
-    val connected = state.vpnStatus == VpnStatus.CONNECTED
-    val mode = AppState.settings.mode
-    val splitMode = AppState.settings.splitMode
-
-    // The honest DNS answer: the pin is ACTIVE only when the same gate the
-    // config builders use says so (SingBox.dnsPinActive) AND the traffic
-    // path is sing-box TUN (hysteria2 native or the TUN engine over SOCKS).
-    // In xray-proxy mode the OS resolver goes through the local HTTP/SOCKS
-    // proxy only for apps that honour the system proxy — say that plainly.
-    val dnsText = when {
-        cfg.protocol == "hysteria2" ->
-            if (vpn.core.SingBox.dnsPinActive(AppState.settings.dnsLeakProtection, splitMode))
-                "pinned via tunnel (1.1.1.1 · 8.8.8.8)"
-            else
-                "system default (leak protection off)"
-        mode == VpnModes.TUN ->
-            if (AppState.settings.dnsLeakProtection && splitMode != SplitModes.INCLUDE)
-                "pinned via tunnel (1.1.1.1 · 8.8.8.8)"
-            else
-                "system default (leak protection off)"
-        mode == VpnModes.SYSTEM_PROXY ->
-            "via local proxy for proxy-aware apps"
-        else -> "no pinning in Proxy-only mode"
-    }
-
-    GlassCard {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Icon(
-                Icons.Filled.Shield,
-                null,
-                tint = if (connected) C.Success else C.TextFaint,
-                modifier = Modifier.size(15.dp),
-            )
-            Spacer(Modifier.width(7.dp))
-            Text("Health", fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp, color = C.TextPrimary)
-            Spacer(Modifier.weight(1f))
-            Text(
-                if (connected) "tunnel up" else "idle",
-                fontSize = 10.5.sp,
-                color = if (connected) C.Success else C.TextFaint,
-            )
-        }
-        Spacer(Modifier.height(8.dp))
-        InfoRow(
-            "Traffic path",
-            when {
-                mode == VpnModes.TUN -> "sing-box TUN engine (full system)"
-                cfg.protocol == "hysteria2" -> "sing-box mixed proxy"
-                else -> proxyEndpointSummary(cfg.protocol)
-            },
-        )
-        InfoRow("DNS", dnsText)
-        // splitMode is a non-null String (AppSettings), so no null check here —
-        // the old `&& splitMode != null` was dead code the compiler flagged.
-        if (splitMode != SplitModes.OFF) {
-            InfoRow(
-                "Split",
-                if (splitMode == SplitModes.INCLUDE)
-                    "only ${AppState.settings.splitApps.size} selected app(s) tunnel"
-                else
-                    "${AppState.settings.splitApps.size} app(s) bypass the tunnel",
+            // Cyber Waveform Spectrum Canvas
+            CyberWaveformChart(
+                history = state.trafficHistory,
+                perDirection = perDirection,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(130.dp),
             )
         }
     }
 }
 
 @Composable
-private fun TrafficGraph(
+private fun CyberWaveformChart(
     history: List<TrafficStats.Rate>,
     perDirection: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val transition = rememberInfiniteTransition(label = "trafficGraph")
-    val pulse by transition.animateFloat(
-        0.86f,
-        1.08f,
-        infiniteRepeatable(tween(1200, easing = LinearEasing), RepeatMode.Reverse),
-        label = "trafficPulse",
-    )
-    val values = history.takeLast(32)
+    val values = history.takeLast(40)
     val rx = values.map { it.rxPerSec.toFloat().coerceAtLeast(0f) }
     val tx = values.map { it.txPerSec.toFloat().coerceAtLeast(0f) }
     val all = if (perDirection) rx + tx else rx
     val maxValue = (all.maxOrNull() ?: 1f).coerceAtLeast(1f)
+
     Surface(
-        color = C.SurfaceLow.copy(alpha = 0.82f),
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFF04070D),
         border = BorderStroke(1.dp, C.Border),
         modifier = modifier,
     ) {
-        Box(Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp)) {
-            Column(Modifier.fillMaxSize()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("LIVE THROUGHPUT", fontSize = 8.5.sp, letterSpacing = 1.2.sp, color = C.TextFaint)
-                    Spacer(Modifier.weight(1f))
-                    Box(Modifier.size(6.dp).clip(CircleShape).background(C.Accent).alpha((pulse * 0.8f).coerceIn(0f, 1f)))
-                    Spacer(Modifier.width(5.dp))
-                    Text("1s", fontSize = 9.sp, color = C.TextSecondary, fontFamily = FontFamily.Monospace)
+        Column(
+            modifier = Modifier.fillMaxSize().padding(10.dp),
+        ) {
+            Canvas(Modifier.fillMaxSize().weight(1f)) {
+                val left = 2.dp.toPx()
+                val right = size.width - 2.dp.toPx()
+                val top = 4.dp.toPx()
+                val bottom = size.height - 4.dp.toPx()
+                val width = (right - left).coerceAtLeast(1f)
+                val height = (bottom - top).coerceAtLeast(1f)
+
+                // Background horizontal cyber grid lines
+                for (i in 1..3) {
+                    val y = top + height * (i / 4f)
+                    drawLine(
+                        color = Color(0xFF132035).copy(alpha = 0.6f),
+                        start = Offset(left, y),
+                        end = Offset(right, y),
+                        strokeWidth = 1.dp.toPx(),
+                    )
                 }
-                Spacer(Modifier.height(5.dp))
-                Canvas(Modifier.fillMaxSize().weight(1f)) {
-                    val left = 2.dp.toPx()
-                    val right = size.width - 2.dp.toPx()
-                    val top = 3.dp.toPx()
-                    val bottom = size.height - 2.dp.toPx()
-                    val width = (right - left).coerceAtLeast(1f)
-                    val height = (bottom - top).coerceAtLeast(1f)
-                    for (i in 1..3) {
-                        val y = top + height * i / 4f
-                        drawLine(C.Border.copy(alpha = 0.55f), Offset(left, y), Offset(right, y), 1.dp.toPx())
-                    }
-                    fun pathFor(series: List<Float>): Path? {
-                        if (series.isEmpty()) return null
-                        val path = Path()
-                        series.forEachIndexed { index, value ->
-                            val x = if (series.size == 1) left else left + width * index / (series.size - 1)
-                            val y = bottom - (value / maxValue).coerceIn(0f, 1f) * height
-                            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+
+                // Helper to create filled area and stroke paths
+                fun createWavePaths(series: List<Float>): Pair<Path, Path>? {
+                    if (series.isEmpty()) return null
+                    val strokePath = Path()
+                    val fillPath = Path()
+                    fillPath.moveTo(left, bottom)
+
+                    series.forEachIndexed { index, value ->
+                        val x = if (series.size == 1) left else left + width * index / (series.size - 1)
+                        val y = bottom - (value / maxValue).coerceIn(0f, 1f) * height
+                        if (index == 0) {
+                            strokePath.moveTo(x, y)
+                            fillPath.lineTo(x, y)
+                        } else {
+                            strokePath.lineTo(x, y)
+                            fillPath.lineTo(x, y)
                         }
-                        return path
                     }
-                    pathFor(rx)?.let { drawPath(it, C.Success, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)) }
-                    if (perDirection) {
-                        pathFor(tx)?.let { drawPath(it, C.Accent2, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)) }
+                    val lastX = if (series.size == 1) left else left + width
+                    fillPath.lineTo(lastX, bottom)
+                    fillPath.close()
+
+                    return strokePath to fillPath
+                }
+
+                // Download (Emerald)
+                createWavePaths(rx)?.let { (strokePath, fillPath) ->
+                    drawPath(
+                        path = fillPath,
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                C.Success.copy(alpha = 0.30f),
+                                Color.Transparent,
+                            ),
+                            startY = top,
+                            endY = bottom,
+                        ),
+                    )
+                    drawPath(
+                        path = strokePath,
+                        color = C.Success,
+                        style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round),
+                    )
+                }
+
+                // Upload (Cyan)
+                if (perDirection) {
+                    createWavePaths(tx)?.let { (strokePath, fillPath) ->
+                        drawPath(
+                            path = fillPath,
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    C.Accent.copy(alpha = 0.20f),
+                                    Color.Transparent,
+                                ),
+                                startY = top,
+                                endY = bottom,
+                            ),
+                        )
+                        drawPath(
+                            path = strokePath,
+                            color = C.Accent,
+                            style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round),
+                        )
                     }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    LegendDot(C.Success, if (perDirection) "Download" else "Traffic")
-                    if (perDirection) LegendDot(C.Accent2, "Upload")
-                    Spacer(Modifier.weight(1f))
-                    Text(TrafficStats.formatRate((all.maxOrNull() ?: 0f).toLong()), fontSize = 9.sp, color = C.TextSecondary, fontFamily = FontFamily.Monospace)
+            }
+
+            Spacer(Modifier.height(6.dp))
+
+            // Footer: Legend & Peak Rate
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    LegendDot(C.Success, if (perDirection) "Download" else "Traffic (Up+Down)")
+                    if (perDirection) LegendDot(C.Accent, "Upload")
                 }
+                Text(
+                    "PEAK: " + TrafficStats.formatRate((all.maxOrNull() ?: 0f).toLong()),
+                    fontSize = 9.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = C.TextSecondary,
+                )
             }
         }
     }
@@ -977,48 +1134,200 @@ private fun LegendDot(color: Color, text: String) {
     }
 }
 
-/** One direction's readout: big total, small rate underneath. */
 @Composable
-private fun TrafficMetric(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    total: String,
-    rate: String?,
-    tint: androidx.compose.ui.graphics.Color,
+private fun CyberMetricsRow(
+    state: AppState,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, tint = tint, modifier = Modifier.size(13.dp))
-            Spacer(Modifier.width(5.dp))
-            Text(
-                label.uppercase(),
-                fontSize = 9.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 1.1.sp,
-                color = C.TextFaint,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+    val layout = LocalLayout.current
+    val cfg = state.activeConfig
+    val connected = state.vpnStatus == VpnStatus.CONNECTED
+    val mode = AppState.settings.mode
+    val splitMode = AppState.settings.splitMode
+    val dnsProtection = AppState.settings.dnsLeakProtection
+
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = C.SurfaceLow.copy(alpha = 0.85f),
+        border = BorderStroke(1.dp, C.Border),
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(15.dp)) {
+            // Header of Security Panel
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Shield, null, tint = C.Accent, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "SECURITY & ENCRYPTION CORE",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 1.2.sp,
+                        color = C.TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                // Status badge in header where there is plenty of room
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = if (connected) C.Success.copy(alpha = 0.15f) else C.SurfaceHigh,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    ) {
+                        Box(
+                            Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(if (connected) C.Success else C.TextFaint)
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            if (connected) "ENCRYPTED" else "STANDBY",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = if (connected) C.Success else C.TextSecondary,
+                            softWrap = false,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(13.dp))
+
+            // 3 Telemetry Columns with vertical dividers
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Metric 1: Protocol
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "PROTOCOL",
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 1.sp,
+                        color = C.TextFaint,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        cfg?.let { Links.label(it.protocol, it.awgVersion).uppercase() } ?: "STANDBY",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = C.TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        if (connected) "Active tunnel" else "Ready to link",
+                        fontSize = 10.5.sp,
+                        color = if (connected) C.Success else C.TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+
+                // Vertical Divider
+                Box(
+                    Modifier
+                        .padding(horizontal = 10.dp)
+                        .width(1.dp)
+                        .height(34.dp)
+                        .background(C.Border)
+                )
+
+                // Metric 2: DNS Shield
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "DNS SHIELD",
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 1.sp,
+                        color = C.TextFaint,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        if (dnsProtection) "PINNED 1.1.1.1" else "SYSTEM DNS",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (dnsProtection) C.Success else C.TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        if (dnsProtection) "Anti-leak active" else "Default resolver",
+                        fontSize = 10.5.sp,
+                        color = C.TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+
+                // Vertical Divider
+                Box(
+                    Modifier
+                        .padding(horizontal = 10.dp)
+                        .width(1.dp)
+                        .height(34.dp)
+                        .background(C.Border)
+                )
+
+                // Metric 3: Routing Engine
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "ROUTING MODE",
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 1.sp,
+                        color = C.TextFaint,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        when (mode) {
+                            VpnModes.TUN -> "TUN CORE"
+                            VpnModes.SYSTEM_PROXY -> "SYS PROXY"
+                            else -> "PROXY ONLY"
+                        },
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = C.TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        if (splitMode != SplitModes.OFF) "${AppState.settings.splitApps.size} apps split" else "All network captured",
+                        fontSize = 10.5.sp,
+                        color = C.TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            total,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace,
-            color = C.TextPrimary,
-            maxLines = 1,
-        )
-        // Reserve the line even when there is no rate yet, so the card does not
-        // jump by one text height on the second sample.
-        Text(
-            rate ?: " ",
-            fontSize = 10.5.sp,
-            fontFamily = FontFamily.Monospace,
-            color = tint,
-            maxLines = 1,
-        )
     }
 }
 

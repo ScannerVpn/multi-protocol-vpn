@@ -210,7 +210,7 @@ fun main() {
             val windowBg = if (themeLight) {
                 java.awt.Color(0xF7, 0xF8, 0xFC)
             } else {
-                java.awt.Color(0x0B, 0x10, 0x20)
+                java.awt.Color(0x06, 0x09, 0x11)
             }
             window.background = windowBg
             runCatching { window.contentPane.background = windowBg }

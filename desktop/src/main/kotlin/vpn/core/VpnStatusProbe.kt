@@ -71,7 +71,9 @@ internal object VpnStatusProbe {
                 .flatMap { ni ->
                     ni.inetAddresses.asSequence().map { addr -> ni to addr }
                 }
-                .any { (ni, addr) -> addr is Inet4Address && vpnAddressOnAdapter(addr.hostAddress, ni.name) }
+                .any { (ni, addr) ->
+                    addr is Inet4Address && vpnAddressOnAdapter(addr.hostAddress, "${ni.name} ${ni.displayName}")
+                }
         } catch (_: Exception) {
             false
         }

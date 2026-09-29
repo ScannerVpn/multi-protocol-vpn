@@ -64,3 +64,10 @@ desktop/banners/drafts/*.png
 /release-assets/
 /ui-preview.html
 /ui-themes-proposal.html
+/ui-designs-*.html
+/ui-designs-previews/
+/plans/
+/tools/split-previews.js
+unstoppable-code.json
+.qoder/
+.workbuddy-ai/
